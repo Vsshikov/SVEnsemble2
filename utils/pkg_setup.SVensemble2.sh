@@ -16,7 +16,7 @@ module load $modules
 
 # conda activate gridss
 
-Rscript $projdir/utils/env_setup.SVensemble2.R
+Rscript $projdir/utils/pkg_setup.SVensemble2.R
 
 wget -P $projdir/pkg https://github.com/PapenfussLab/gridss/releases/download/v2.13.2/gridss-2.13.2.tar.gz
 gunzip $projdir/pkg/gridss-2.13.2.tar.gz

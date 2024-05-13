@@ -4,3 +4,9 @@
 *.bas
 downloads/
 pkg/gridss-2.13.2.tar
+*.fasta
+*.fa
+*.gz
+*.vcf
+*.out
+*.bed
