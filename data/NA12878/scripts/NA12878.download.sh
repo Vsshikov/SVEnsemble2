@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=download.SVensemble2 
+#SBATCH --job-name=download.NA12878
 #SBATCH --time=16:00:00
 #SBATCH --ntasks=1
 #SBATCH --mem=8G
