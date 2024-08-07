@@ -4,6 +4,10 @@
 *.bas
 downloads/
 pkg/gridss-2.13.2.tar
+*/saved/
+*/output/
+*-checkpoint.ipynb
+*.ipynb_checkpoints
 *.fasta
 *.fa
 *.gz

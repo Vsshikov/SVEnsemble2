@@ -1,7 +1,11 @@
 import time
 import re
 import gzip
+import copy
+import builtins
 import pandas as pd
+
+# BASIC READING FUNCTIONS
 
 class VCFMetaEntry(dict):
     """
@@ -26,7 +30,7 @@ def get_read_params(file_path, force_format='infer'):
     """
     
     if force_format == 'vcf':
-        return __builtins__, 'r'
+        return builtins, 'r'
 
     is_gzip = re.search(r'\.(gz|gzip)$', file_path)
 
@@ -34,7 +38,7 @@ def get_read_params(file_path, force_format='infer'):
         vcf_file_handler_mod = gzip
         readmode = 'rt'
     else:
-        vcf_file_handler_mod = __builtins__
+        vcf_file_handler_mod = builtins
         readmode = 'r'
 
     return vcf_file_handler_mod, readmode
@@ -170,7 +174,8 @@ def parse_vcf(
     filter_delim=';',
     info_delim=';', info_eq='=',
     format_present='infer', format_delim=':',
-    line_limit=0, report_freq=100000
+    line_limit=0, report_freq=100000,
+    output_meta=False
 ):
     """
     
@@ -188,8 +193,7 @@ def parse_vcf(
         'ID': [],
         'REF': [],
         'ALT': [],
-        'QUAL': [],
-        'INFO': []
+        'QUAL': []
     }
 
     vcf_file_handler_mod, readmode = get_read_params(vcf_path, force_format=format_present)
@@ -272,6 +276,20 @@ def parse_vcf(
         print(f'Warning: items {", ".join(keys_for_deletion)} present in header but not present in data.')
     for key_for_deletion in keys_for_deletion:
         del vcf_data[key_for_deletion]
+        # Small fix so an entire section does not get deleted if INFO/FORMAT/FILTER
+        # is mentioned in the metadata
+        if key_for_deletion in ['INFO', 'FORMAT', 'FILTER']:
+            continue
+        try:
+            del meta_dict[re.match(r'(INFO)|(FORMAT)|(FILTER)', key_for_deletion).group()][key_for_deletion]
+        except KeyError:
+            print(f'Unexpected meta ID: {key_for_deletion}')
+        # try:
+        #     del meta_dict['INFO'][key_for_deletion]
+        #     del meta_dict['FORMAT'][key_for_deletion]
+        #     del meta_dict['FILTER'][key_for_deletion]
+        # except KeyError:
+        #     continue
 
     vcf_data = pd.DataFrame(vcf_data)
 
@@ -280,5 +298,102 @@ def parse_vcf(
     
     current_time = time.time()
     print(f'Finished processing. Processed {i - header_nlines} entries out of {len(vcf_data)}. Elapsed time: {current_time - start_time} seconds.')
-    
+
+    if output_meta:
+        return vcf_data, meta_dict
+        
     return vcf_data
+
+
+# POST-PROCESSING FUNCTIONS
+
+def combine_meta_dict(meta_dict):
+    """
+    """
+    return {**meta_dict['FILTER'], **meta_dict['INFO'], **meta_dict['FORMAT']}
+
+def split_meta_dict(meta_dict_combined):
+    """
+    """
+    meta_dict = {
+        'FILTER': {},
+        'INFO': {},
+        'FORMAT': {}
+    }
+    for meta_key, meta_item in meta_dict_combined.items():
+        meta_dict[re.match(r'(INFO)|(FORMAT)|(FILTER)', meta_key).group()][meta_key] = meta_item
+    
+    return meta_dict
+
+def get_split_meta_entry(meta_id, meta_info, values, output_type='Flag'):
+    """
+    """
+    new_ids = [f'{meta_id}_{value}' for value in values]
+
+    return {new_id: (1, output_type, f'SPLIT FROM {meta_id}, OLD DESC: {meta_info[2]}') for new_id in new_ids}
+    
+
+def get_processed_algorithm_df_and_meta(vcf_df, meta_dict, delim=',', alg_col_name='INFO_ALGORITHMS'):
+    """
+    
+    """
+    # algs = vcf_df[alg_col].str.split(delim).astype(set)
+    alg_col = vcf_df[alg_col_name]
+    alg_set = set()
+    
+    for uniq_alg_comb in alg_col.unique():
+        alg_set = alg_set | set(uniq_alg_comb.split(delim))
+        
+    alg_dict = {f'{alg_col_name}_{key}': [0] * len(alg_col) for key in alg_set}
+    
+    for i, alg_item in enumerate(alg_col):
+        for alg in alg_item.split(delim):
+            alg_dict[f'{alg_col_name}_{alg}'][i] = 1
+
+    meta_dict_copy = copy.deepcopy(meta_dict)
+    old_alg_entry = meta_dict_copy['INFO'].pop(alg_col_name)
+    new_alg_entry = get_split_meta_entry(alg_col_name, old_alg_entry, alg_set)
+    # print(old_alg_entry, new_alg_entry)
+
+    # print(pd.concat([vcf_df[vcf_df.columns.drop([alg_col_name])], pd.DataFrame(alg_dict)], axis=1))
+    meta_dict_copy['INFO'].update(new_alg_entry)
+    
+    return pd.concat([vcf_df[vcf_df.columns.drop([alg_col_name])], pd.DataFrame(alg_dict)], axis=1), meta_dict_copy
+        
+
+def convert_col_types(vcf_df, meta_dict, types_from='meta'):
+    """
+    
+    """
+    if types_from == 'meta':
+        type_convert_dict = {
+            'String': str,
+            'Integer': int,
+            'Float': float,
+            'Flag': int
+        }
+        for meta_id, meta_info in (meta_dict['INFO'] | meta_dict['FORMAT']).items():
+            vcf_df[meta_id] = vcf_df[meta_id].astype(type_convert_dict[meta_info[1]])
+
+
+def delete_mult_val_cols(vcf_df, meta_dict, exceptions=['INFO_ALGORITHMS'], vocal=False):
+    """
+    
+    """
+    if exceptions is None:
+        exceptions = []
+    
+    keys_for_deletion = []
+    for meta_group in meta_dict.values():
+        for meta_id, meta_info in meta_group.items():
+            # print(meta_id, meta_info)
+            if meta_info[0] not in ['1', 1] + exceptions:
+                keys_for_deletion.append(meta_id)
+
+    if vocal:
+        print(f'Dropping entries {to_drop} since they contain multiple values')
+
+    for key_for_deletion in keys_for_deletion:
+        del meta_dict[re.match(r'(INFO)|(FORMAT)|(FILTER)', key_for_deletion).group()][key_for_deletion]
+    
+    vcf_df.drop(keys_for_deletion, axis=1, inplace=True)
