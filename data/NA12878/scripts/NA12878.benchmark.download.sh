@@ -6,7 +6,7 @@
 
 # Downloads Illumina Platinum pedigree PCR-free high coverage datasets
 # from IGSR: The International Genome Sample Resource (https://www.internationalgenome.org/data-portal/sample/NA12878)
-download_dir="/home/users/allstaff/shikov.v/vast/SVensemble2/data/NA12878/downloads"
+download_dir="/home/users/allstaff/shikov.v/vast/SVEnsemble2/data/NA12878/downloads"
 
 # ftp://ftp.sra.ebi.ac.uk/vol1/fastq/ERR194/ERR194147/ERR194147_2.fastq.gz ftp://ftp.sra.ebi.ac.uk/vol1/fastq/ERR194/ERR194147/ERR194147_1.fastq.gz
 

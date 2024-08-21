@@ -4,7 +4,7 @@
 
 conda activate gridss
 
-input_fa="/home/users/allstaff/shikov.v/projects/SVensemble2/data/hg38/downloads/hg38.fa"
+input_fa="/home/users/allstaff/shikov.v/projects/SVEnsemble2/data/hg38/downloads/hg38.fa"
 output_fa=$(echo $input_fa | sed -e "s/.fa/.no_decoys.fa/g")
 
 input_fai=$(echo $input_fa | sed -e "s/.fa/.fa.fai/g")

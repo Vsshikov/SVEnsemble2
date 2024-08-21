@@ -7,7 +7,7 @@
 
 module load bwa
 
-ref_genome="/home/users/allstaff/shikov.v/projects/SVensemble2/data/hg38/downloads/hg38.no_decoys.fa"
+ref_genome="/home/users/allstaff/shikov.v/projects/SVEnsemble2/data/hg38/downloads/hg38.no_decoys.fa"
 
 
 bwa index $ref_genome
