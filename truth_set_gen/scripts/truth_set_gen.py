@@ -75,23 +75,31 @@ gnomad_vcf_df = pd.concat(gnomad_vcf_df, ignore_index=True)
 gnomad_vcf_df = gnomad_vcf_df.sort_values(by=['POS'])
 gridss_vcf_df = gridss_vcf_df.sort_values(by=['POS'])
 
+truth_suffix = '_truth_set'
+gnomad_vcf_df = gnomad_vcf_df.add_suffix(truth_suffix)
+
 gridss_vcf_df = pd.concat(
     [
         gridss_vcf_df.loc[~gridss_vcf_df['MATCH_FOUND']],
         pd.merge_asof(
             gridss_vcf_df.loc[gridss_vcf_df['MATCH_FOUND']],
             gnomad_vcf_df,
-            on='POS', by='CHROM', direction='nearest'
+            left_on='POS', right_on=f'POS{truth_suffix}',
+            left_by='CHROM', right_by=f'CHROM{truth_suffix}',
+            direction='nearest'
         )
     ]
 )
 
+cols_to_drop = [f'CHROM{truth_suffix}', f'POS{truth_suffix}', f'REF{truth_suffix}']
+gridss_vcf_df = gridss_vcf_df[gridss_vcf_df.columns.drop(cols_to_drop)]
+
 gridss_vcf_df = pd.concat(
     [
-        gridss_vcf_df[['CHROM', 'ID_x', 'REF_x']],
+        gridss_vcf_df[['CHROM', 'ID', 'REF']],
         gridss_vcf_df.select_dtypes(include=np.number),
         gridss_vcf_df[['MATCH_FOUND']],
-        gridss_vcf_df.filter(regex='INFO_ALGORITHMS')
+        gridss_vcf_df.filter(regex=f'INFO_ALGORITHMS{truth_suffix}')
     ],
     axis=1
 )

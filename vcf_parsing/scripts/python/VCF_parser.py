@@ -175,7 +175,7 @@ def parse_vcf(
     info_delim=';', info_eq='=',
     format_present='infer', format_delim=':',
     line_limit=0, report_freq=100000,
-    output_meta=False
+    output_meta=False, only_filter_pass=False
 ):
     """
     
