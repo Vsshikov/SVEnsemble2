@@ -2,8 +2,10 @@
 *.cram
 *.cram.crai
 *.bas
-downloads/
+*downloads/
+~*/scripts/
 pkg/gridss-2.13.2.tar
+*/data/
 */saved/
 */output/
 *-checkpoint.ipynb
@@ -39,3 +41,6 @@ pkg/gridss-2.13.2.tar
 *.vcf.idx
 *.pyc
 */__pycache__/*
+vast
+wget-log
+*/SVEnsemble.stornext/*

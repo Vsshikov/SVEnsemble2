@@ -1,0 +1,636 @@
+#Split in new
+chr1	13037103	13037163	0	0	0	1	0	M	deletion
+#Partially deleted in new
+chr1	13345314	13345367	0	0	0	1	0	A	deletion
+#Partially deleted in new
+chr1	13442149	13442263	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr1	13468368	13468564	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr1	13689276	13689330	0	0	1	0	0	A	deletion
+#Partially deleted in new
+chr1	17062574	17196980	1	1	0	0	0	A	deletion
+#Partially deleted in new
+chr1	29878066	30028096	1	0	0	0	0	A	deletion
+#Partially deleted in new
+chr1	31967644	31967899	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr1	38077347	38077422	0	0	0	1	0	A	deletion
+#Deleted in new
+chr1	127892347	127896224	0	0	1	0	0	A	deletion
+#Deleted in new
+chr1	128559923	128614288	0	0	1	1	0	A	deletion
+#Split in new
+chr1	144367970	144368135	0	1	0	0	0	A	deletion
+#Split in new
+chr1	144380849	144381145	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr1	144577311	144577411	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr1	144610108	144610124	0	0	0	1	0	A	insertion
+#Split in new
+chr1	144860549	144860896	1	0	0	0	0	A	insertion
+#Split in new
+chr1	144860615	144860843	1	1	0	0	0	P	deletion
+#Split in new
+chr1	145958970	145959041	0	0	0	1	0	A	deletion
+#Partially deleted in new
+chr1	146961477	146961552	0	0	0	1	0	A	deletion
+#Partially deleted in new
+chr1	147392555	147392727	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr1	147737782	147737790	0	0	1	0	0	H	insertion
+#Partially deleted in new
+chr1	147854033	147854133	1	1	0	0	0	A	insertion
+#Split in new
+chr1	147865814	148596716	0	1	0	0	0	A	deletion
+#Split in new
+chr1	147865814	148758760	0	1	0	0	0	A	deletion
+#Split in new
+chr1	147866063	148759011	0	1	0	0	0	A	deletion
+#Split in new
+chr1	147976297	148243325	1	0	0	0	1	A	deletion
+#Split in new
+chr1	148222942	148243293	0	0	1	1	0	A	deletion
+#Split in new
+chr1	148223069	148223175	1	0	0	0	0	A	insertion
+#Split in new
+chr1	148603238	148785621	1	1	0	0	0	A	deletion
+#Split in new
+chr1	148747575	148748304	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr1	150037847	150037903	0	0	1	1	0	A	deletion
+#Partially deleted in new
+chr1	163684620	163684928	1	0	0	0	1	H	insertion
+#Split in new
+chr1	223725948	223797858	1	0	0	0	1	A	deletion
+#Partially deleted in new
+chr10	1281383	1282410	0	1	0	0	0	A	deletion
+#Split in new
+chr10	48917715	48918063	0	1	0	0	0	A	deletion
+#Split in new
+chr10	51235933	51236236	0	1	1	0	0	A	deletion
+#Split in new
+chr10	51393232	51723701	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr11	69089801	69139802	1	1	0	0	1	A	deletion
+#Partially deleted in new
+chr11	87687718	87687822	1	1	0	0	0	A	insertion
+#Deleted in new
+chr12	146903	147222	1	0	0	0	0	A	deletion
+#Deleted in new
+chr12	7189876	7239876	1	1	0	0	1	A	deletion
+#Partially deleted in new
+chr12	11341897	11342214	1	1	1	1	0	M	deletion
+#Partially deleted in new
+chr12	109373470	109423472	1	1	0	0	1	A	deletion
+#Deleted in new
+chr12	122530623	122580623	1	1	0	0	1	A	deletion
+#Split in new
+chr12	132812448	132812653	1	0	0	0	0	A	insertion
+#Split in new
+chr12	132812957	132813050	1	0	0	0	0	A	insertion
+#Split in new
+chr12	132813293	132813388	1	0	0	0	0	A	insertion
+#Split in new
+chr12	132814539	132814639	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr12	132815919	132816019	1	0	0	0	0	A	insertion
+#Split in new
+chr12	132820817	132821002	1	0	0	0	0	A	deletion
+#Partially deleted in new
+chr12	132836481	132836660	0	1	0	0	0	A	deletion
+#Deleted in new
+chr13	86914863	86914963	0	1	0	0	0	A	insertion
+#Deleted in new
+chr13	86914972	86915235	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr13	114325992	114425993	1	1	0	0	1	A	deletion
+#Partially deleted in new
+chr14	19552747	19552847	1	0	0	0	0	A	insertion
+#Split in new
+chr14	19599253	19599884	0	1	0	1	0	A	deletion
+#Split in new
+chr14	19599750	19600380	0	0	1	1	0	M	deletion
+#Partially deleted in new
+chr14	20020755	20020872	1	1	0	0	0	A	insertion
+#Partially deleted in new
+chr14	22578734	22578835	1	1	0	0	0	P	insertion
+#Split in new
+chr14	23105170	23109270	1	1	1	1	0	P	deletion
+#Partially deleted in new
+chr14	49489741	49489900	0	1	1	1	0	M	insertion
+#Partially deleted in new
+chr14	49489766	49489870	1	0	0	0	0	A	deletion
+#Split in new
+chr14	106330469	106691667	1	1	0	0	0	A	deletion
+#Partially deleted in new
+chr14	106418356	106418463	0	0	1	0	0	A	deletion
+#Split in new
+chr14	106465579	106465706	1	0	0	1	0	A	deletion
+#Partially deleted in new
+chr14	106465933	106466010	1	1	0	0	0	A	insertion
+#Partially deleted in new
+chr14	106466339	106466439	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr14	106466449	106466667	0	1	0	0	0	A	deletion
+#Split in new
+chr14	106466566	106466792	1	0	0	0	0	A	deletion
+#Split in new
+chr14	106466871	106466989	1	0	0	0	0	A	insertion
+#Split in new
+chr15	23572894	23573117	0	1	0	0	0	A	deletion
+#Deleted in new
+chr15	29159443	29209443	1	1	0	0	1	A	deletion
+#Split in new
+chr15	82646259	82646359	1	0	0	0	0	A	insertion
+#Split in new
+chr15	83170396	83170835	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr16	8636915	8686929	1	0	0	0	1	A	deletion
+#Deleted in new
+chr16	43922909	43925905	0	0	1	1	0	A	deletion
+#Deleted in new
+chr16	43925945	43927066	0	0	0	1	0	A	deletion
+#Deleted in new
+chr16	43926644	43937237	0	0	1	0	0	A	deletion
+#Deleted in new
+chr16	43932042	43937400	0	0	1	0	0	A	deletion
+#Deleted in new
+chr16	43935117	43950385	0	0	1	1	0	A	deletion
+#Deleted in new
+chr16	43942359	43961859	0	0	1	1	0	A	deletion
+#Deleted in new
+chr16	43943737	43950349	0	0	1	0	0	A	deletion
+#Deleted in new
+chr16	43954189	43958439	0	0	0	1	0	A	deletion
+#Deleted in new
+chr16	43963083	43967069	0	0	0	1	0	A	deletion
+#Deleted in new
+chr16	43963775	43967199	0	0	0	1	0	A	deletion
+#Partially deleted in new
+chr16	46396997	46397016	0	0	0	1	0	A	insertion
+#Deleted in new
+chr16	46397941	46397946	0	0	0	1	0	A	insertion
+#Deleted in new
+chr16	46406112	46406130	0	0	0	1	0	A	insertion
+#Deleted in new
+chr16	46406150	46406151	0	0	0	1	0	A	insertion
+#Split in new
+chr17	1021766	1021863	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr17	1046483	1046584	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr17	21903584	21903599	0	0	0	1	0	A	insertion
+#Split in new
+chr17	34422895	34423097	1	1	0	0	1	A	deletion
+#Split in new
+chr17	34501443	34815072	0	1	0	0	0	A	deletion
+#Split in new
+chr17	34589488	34815072	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr17	35427918	35428019	1	1	0	0	0	H	insertion
+#Split in new
+chr17	36543735	36543835	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr17	81059670	81059876	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr17	81060003	81060103	0	1	0	0	0	M	insertion
+#Partially deleted in new
+chr17	81060322	81060398	0	1	0	0	0	M	insertion
+#Deleted in new
+chr18	75721820	75771827	1	1	0	0	1	A	deletion
+#Split in new
+chr18	77831472	77831572	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr19	8765978	8766076	0	1	0	0	0	A	insertion
+#Split in new
+chr19	8772984	8773278	1	0	0	1	0	H	deletion
+#Partially deleted in new
+chr19	8850264	8850484	1	1	0	1	0	H	deletion
+#Partially deleted in new
+chr19	11535619	11535837	0	1	0	0	0	A	deletion
+#Split in new
+chr19	20523415	20717973	1	1	0	0	0	A	deletion
+#Partially deleted in new
+chr19	42400879	42400959	0	0	0	1	0	A	deletion
+#Split in new
+chr19	54613114	54613285	1	1	0	0	0	H	insertion
+#Partially deleted in new
+chr19	54860897	54860995	0	1	0	0	0	A	insertion
+#Split in new
+chr19	55056454	55056701	1	0	0	0	1	A	deletion
+#Split in new
+chr19	55204254	55204410	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr2	809319	809350	1	0	0	0	0	A	deletion
+#Partially deleted in new
+chr2	809329	809355	0	0	1	1	0	A	insertion
+#Partially deleted in new
+chr2	816152	816346	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr2	816155	816678	1	0	0	0	0	A	deletion
+#Partially deleted in new
+chr2	816209	816277	0	0	1	0	0	A	deletion
+#Split in new
+chr2	843077	843301	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr2	845594	845716	0	1	0	0	0	A	insertion
+#Split in new
+chr2	845903	846100	0	1	0	0	0	A	deletion
+#Split in new
+chr2	1218183	1218489	0	1	0	0	0	A	deletion
+#Split in new
+chr2	1218884	1219718	1	0	0	0	0	A	deletion
+#Split in new
+chr2	1223694	1224044	1	0	0	0	0	A	deletion
+#Split in new
+chr2	1226707	1226893	0	1	0	0	0	A	deletion
+#Deleted in new
+chr2	3529312	3579312	1	0	0	0	1	A	deletion
+#Partially deleted in new
+chr2	16279724	16329725	1	1	0	0	1	A	deletion
+#Deleted in new
+chr2	21153113	21178113	1	1	0	0	1	A	deletion
+#Deleted in new
+chr2	31725169	31727381	0	1	1	1	1	H	deletion
+#Partially deleted in new
+chr2	36181251	36181534	0	1	0	0	0	A	insertion
+#Split in new
+chr2	36216158	36218226	0	0	1	1	0	H	deletion
+#Split in new
+chr2	36217380	36217705	1	1	1	1	0	H	deletion
+#Split in new
+chr2	87723794	87723974	0	1	0	0	0	A	deletion
+#Split in new
+chr2	87725205	87727151	0	1	0	0	0	A	deletion
+#Split in new
+chr2	87728945	87729039	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr2	89563742	89564100	0	1	0	0	0	A	deletion
+#Split in new
+chr2	90488347	90488447	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr2	91669690	91669791	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr2	91671148	91671244	1	0	0	0	0	A	insertion
+#Split in new
+chr2	91680574	91686034	1	1	1	0	0	A	deletion
+#Split in new
+chr2	91696434	91696534	1	1	0	0	0	A	insertion
+#Split in new
+chr2	91696621	91696703	1	0	0	0	0	A	insertion
+#Split in new
+chr2	91696718	91697391	0	1	0	0	0	A	deletion
+#Split in new
+chr2	91697066	91697744	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr2	91697817	91697900	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr2	91698282	91698382	1	0	0	0	0	A	insertion
+#Split in new
+chr2	91706715	91706821	0	1	0	0	0	A	insertion
+#Split in new
+chr2	91735928	91736251	0	0	1	1	0	A	deletion
+#Split in new
+chr2	91751060	91759768	1	1	1	0	0	A	deletion
+#Split in new
+chr2	97986670	98052222	0	0	1	0	0	A	deletion
+#Partially deleted in new
+chr2	110109336	110251337	1	1	0	0	1	A	deletion
+#Partially deleted in new
+chr2	149690581	149790582	1	1	0	0	1	A	deletion
+#Split in new
+chr2	242745018	242745407	1	0	0	0	0	A	deletion
+#Split in new
+chr2	242745181	242745348	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr2	242746040	242746150	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr2	242746679	242746862	1	0	0	0	0	A	insertion
+#Split in new
+chr2	242747178	242747265	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr2	242748397	242748499	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr2	242748826	242748911	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr2	242748831	242749079	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr2	242748980	242749059	1	0	0	0	0	A	insertion
+#Split in new
+chr2	242760638	242760851	0	1	0	0	0	P	deletion
+#Split in new
+chr2	242761222	242761479	1	1	0	0	0	A	deletion
+#Split in new
+chr2	242761691	242762010	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr20	36984483	36984592	1	1	0	0	0	A	insertion
+#Partially deleted in new
+chr20	45854234	45854340	1	0	0	0	0	A	insertion
+#Deleted in new
+chr21	3156565	3159547	0	0	1	0	0	A	deletion
+#Deleted in new
+chr21	42955559	43005563	1	1	0	0	1	A	deletion
+#Partially deleted in new
+chr21	43226815	43226965	0	1	0	0	0	A	deletion
+#Deleted in new
+chr21	43226843	43227323	1	0	0	0	1	A	deletion
+#Deleted in new
+chr21	43227073	43227304	0	1	0	0	0	H	deletion
+#Partially deleted in new
+chr21	43249282	43249382	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr21	43250795	43250895	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr22	16867588	16867792	1	0	0	0	1	H	deletion
+#Split in new
+chr22	18047361	18047723	1	0	1	1	1	H	deletion
+#Split in new
+chr22	18057762	18060471	1	1	1	1	1	A	deletion
+#Deleted in new
+chr22	18060055	18060155	0	1	0	0	0	A	insertion
+#Split in new
+chr22	22920955	22921008	0	0	0	1	0	A	deletion
+#Partially deleted in new
+chr22	48050327	48050431	1	1	0	0	1	H	insertion
+#Partially deleted in new
+chr22	49551955	49551972	0	0	1	0	0	A	insertion
+#Partially deleted in new
+chr22	49552029	49552196	1	0	0	0	0	H	insertion
+#Deleted in new
+chr22	50364777	50414777	1	1	0	0	1	A	deletion
+#Partially deleted in new
+chr3	48527609	48527709	1	1	0	0	0	H	insertion
+#Partially deleted in new
+chr3	144825413	144825512	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195195566	195195670	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195199012	195199106	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195199510	195199779	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr3	195199883	195200195	0	1	0	0	0	A	deletion
+#Deleted in new
+chr3	195200206	195200306	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195201014	195201112	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195201250	195201352	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195202276	195202479	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr3	195203688	195203750	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195203954	195204049	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195204232	195204336	0	1	0	0	0	A	insertion
+#Deleted in new
+chr3	195204398	195204495	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195204954	195205052	0	1	0	0	0	A	insertion
+#Split in new
+chr3	195206231	195206415	0	1	0	0	0	A	insertion
+#Split in new
+chr3	195206575	195206656	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195207738	195207838	1	0	0	0	0	A	insertion
+#Split in new
+chr3	195208013	195208966	1	0	0	0	0	A	deletion
+#Partially deleted in new
+chr3	195208172	195208268	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195208929	195209014	1	0	0	0	0	A	insertion
+#Deleted in new
+chr3	195209270	195209355	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195209422	195209687	1	0	0	0	0	A	insertion
+#Deleted in new
+chr3	195209876	195210002	1	0	0	0	0	A	insertion
+#Split in new
+chr3	195210194	195210388	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195210650	195210750	1	0	0	0	0	A	insertion
+#Split in new
+chr3	195210930	195211029	1	0	0	0	0	A	insertion
+#Split in new
+chr3	195211967	195212049	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195212882	195212977	0	1	0	0	0	A	insertion
+#Split in new
+chr3	195216502	195217577	0	1	0	0	0	A	insertion
+#Split in new
+chr3	195217953	195218053	0	1	0	0	0	A	insertion
+#Split in new
+chr3	195219118	195219220	0	1	0	0	0	A	insertion
+#Split in new
+chr3	195220382	195221325	1	0	0	0	0	A	insertion
+#Split in new
+chr3	195221751	195221894	1	1	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195223528	195223639	0	1	0	0	0	M	insertion
+#Split in new
+chr3	195223848	195223923	0	1	0	0	0	M	insertion
+#Deleted in new
+chr3	195224858	195224961	0	1	0	0	0	A	insertion
+#Split in new
+chr3	195228633	195228729	0	1	0	0	0	A	insertion
+#Split in new
+chr3	195229289	195229390	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr3	195231419	195231769	1	0	0	0	0	A	insertion
+#Deleted in new
+chr4	8799203	8818203	1	1	0	0	1	A	deletion
+#Partially deleted in new
+chr4	9158154	9365534	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr4	31820910	31837417	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr4	32834193	32840639	1	1	1	1	1	A	deletion
+#Deleted in new
+chr4	32834640	32834864	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr4	40296408	40297122	1	1	0	1	0	A	deletion
+#Partially deleted in new
+chr4	59808952	59809006	0	0	0	1	0	A	deletion
+#Partially deleted in new
+chr4	75426101	75426757	1	0	0	0	0	A	insertion
+#Deleted in new
+chr5	155138727	155188727	1	1	0	0	1	A	deletion
+#Split in new
+chr6	26734285	26756248	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr6	57392106	57392176	0	0	1	0	0	M	insertion
+#Partially deleted in new
+chr6	57392147	57392181	1	0	0	0	0	A	deletion
+#Partially deleted in new
+chr6	64398069	64398181	1	1	0	0	1	A	insertion
+#Partially deleted in new
+chr6	170530324	170530655	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr7	483709	483809	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr7	496509	496806	0	0	0	1	0	A	deletion
+#Partially deleted in new
+chr7	61826417	61826917	1	1	0	0	0	A	deletion
+#Split in new
+chr7	64718254	64718354	1	1	0	0	0	A	insertion
+#Split in new
+chr7	64723190	64723290	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr7	64724200	64724302	1	1	0	0	0	A	insertion
+#Split in new
+chr7	72269604	72275224	1	1	1	0	0	A	deletion
+#Split in new
+chr7	72270264	72275844	1	1	1	0	0	A	deletion
+#Split in new
+chr7	72788858	72789163	1	1	1	1	0	H	deletion
+#Partially deleted in new
+chr7	100550640	100550806	1	0	0	0	0	A	deletion
+#Partially deleted in new
+chr7	100554817	100606043	1	1	0	0	0	A	deletion
+#Split in new
+chr7	100556029	100607251	1	1	0	0	0	A	deletion
+#Split in new
+chr7	130275967	130276063	1	0	0	0	0	A	insertion
+#Split in new
+chr7	142034092	142098882	0	0	0	1	0	A	deletion
+#Partially deleted in new
+chr7	142587920	142588024	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr7	142588148	142588241	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr7	155143292	155143482	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr8	1232279	1232378	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr8	2020353	2020453	1	1	0	0	0	A	insertion
+#Split in new
+chr8	2033690	2033798	0	1	0	0	0	A	insertion
+#Split in new
+chr8	2068427	2068592	0	1	0	0	0	A	deletion
+#Split in new
+chr8	2192019	2192368	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chr8	2195376	2195454	0	1	0	0	0	H	insertion
+#Partially deleted in new
+chr8	2332323	2332413	0	1	0	0	0	A	insertion
+#Split in new
+chr8	2480442	2480770	1	0	1	1	1	H	deletion
+#Partially deleted in new
+chr8	86572466	86786046	1	1	0	0	0	A	deletion
+#Partially deleted in new
+chr8	86572466	86813514	1	1	0	0	0	A	deletion
+#Partially deleted in new
+chr8	86576451	86759470	1	1	0	0	0	A	deletion
+#Partially deleted in new
+chr8	86576451	86805306	1	1	0	0	0	A	deletion
+#Split in new
+chr8	140949172	140949382	1	1	0	0	0	A	deletion
+#Split in new
+chr8	140971407	140971461	0	0	0	1	0	H	deletion
+#Partially deleted in new
+chr8	140975865	140975947	0	1	1	1	0	A	deletion
+#Split in new
+chr8	142745486	142816516	0	1	0	0	1	A	deletion
+#Split in new
+chr8	142748203	142748293	1	1	0	0	0	A	insertion
+#Split in new
+chr8	144286685	144287364	1	0	0	0	0	A	deletion
+#Deleted in new
+chr8	144292878	144293089	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr8	144299988	144300304	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr8	145537309	145537486	1	1	0	0	0	A	insertion
+#Split in new
+chr8	145605619	145605849	1	0	0	0	0	A	insertion
+#Split in new
+chr9	39433601	39505300	0	0	1	1	0	A	deletion
+#Partially deleted in new
+chr9	40027502	40027602	1	0	0	0	0	A	insertion
+#Split in new
+chr9	40096359	40096457	1	0	0	0	0	P	insertion
+#Split in new
+chr9	40218843	40219678	0	1	0	0	0	A	deletion
+#Split in new
+chr9	41053635	41053942	1	1	1	1	0	A	deletion
+#Partially deleted in new
+chr9	41308048	41308149	1	1	0	0	0	A	insertion
+#Split in new
+chr9	41578580	41650321	0	0	1	0	0	A	deletion
+#Split in new
+chr9	43695263	43695565	1	0	0	0	0	A	deletion
+#Split in new
+chr9	46379714	46379814	0	1	0	0	0	A	insertion
+#Split in new
+chr9	67664760	67664859	1	0	0	0	0	A	insertion
+#Split in new
+chr9	67670932	67671103	0	1	0	0	0	A	deletion
+#Partially deleted in new
+chr9	67719136	67719236	1	0	0	0	0	A	insertion
+#Split in new
+chr9	68698537	69043505	0	1	0	0	0	A	deletion
+#Split in new
+chr9	68704881	69054749	0	1	0	0	0	A	deletion
+#Split in new
+chr9	70319472	70319578	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chr9	136154319	136154447	1	0	1	1	1	M	deletion
+#Partially deleted in new
+chr9	136175666	136175768	1	1	0	0	0	A	insertion
+#Partially deleted in new
+chrX	1106741	1107282	1	1	0	1	0	P	deletion
+#Split in new
+chrX	1316242	1316796	1	1	0	1	0	A	deletion
+#Split in new
+chrX	1316459	1316558	1	0	0	0	0	A	insertion
+#Deleted in new
+chrX	7623882	7673882	1	1	1	1	1	A	deletion
+#Partially deleted in new
+chrX	10738594	10788674	1	1	1	1	1	A	deletion
+#Split in new
+chrX	45587567	45587875	1	1	1	1	0	P	deletion
+#Partially deleted in new
+chrX	46810649	46810749	0	1	0	0	0	A	insertion
+#Split in new
+chrX	47998601	47998688	0	0	0	1	0	A	deletion
+#Partially deleted in new
+chrX	48971513	48971623	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chrX	51373375	51373533	1	1	0	0	0	A	deletion
+#Partially deleted in new
+chrX	52609792	52609911	1	1	0	0	0	A	insertion
+#Split in new
+chrX	62372125	62446121	0	0	1	0	0	A	deletion
+#Split in new
+chrX	62372991	62445385	0	0	1	0	0	A	deletion
+#Split in new
+chrX	113996337	113996590	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chrX	114638092	114638154	0	0	0	1	0	A	deletion
+#Partially deleted in new
+chrX	119246311	119246411	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chrX	120013230	120118206	1	0	0	0	0	A	deletion
+#Partially deleted in new
+chrX	124741672	124742235	1	1	0	0	0	A	deletion
+#Partially deleted in new
+chrX	134249488	134249696	1	1	0	0	0	H	insertion
+#Partially deleted in new
+chrX	134927806	134927909	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chrX	143505119	143505239	0	1	0	0	0	A	insertion
+#Partially deleted in new
+chrX	143507324	143557329	1	1	0	0	0	A	deletion
+#Partially deleted in new
+chrX	143557375	143557475	1	0	0	0	0	A	insertion
+#Partially deleted in new
+chrX	148655177	148655306	1	0	0	1	0	A	deletion
+#Deleted in new
+chrX	148906424	148956424	1	1	0	0	1	A	deletion
+#Partially deleted in new
+chrX	149551140	149551478	1	1	1	1	0	A	deletion
+#Split in new
+chrX	152335109	152346784	0	0	1	0	0	A	deletion
