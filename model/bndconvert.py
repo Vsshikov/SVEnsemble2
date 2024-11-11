@@ -39,14 +39,16 @@ def get_cols_for_retaining(vcf_df, exceptions='default'):
     Used to decide which columns to retain before merging.
     Columns for retaining:
     - any column that is the same for both breakends in each breakpoint (defined by find_brkend_diff_cols())
-    - columns from exceptions argument. If 'defauls', then includes ['ALT', 'CHROM', 'POS', 'ID', 'REF']
+    - columns from exceptions argument. If 'defauls', then includes ['ALT', 'CHROM', 'POS', 'ID', 'REF',  'FILTER_PASS']
     """
     
     if exceptions == 'default':
-        exceptions = ['ALT', 'CHROM', 'POS', 'ID', 'REF']
+        exceptions = ['ALT', 'CHROM', 'POS', 'ID', 'REF', 'FILTER_PASS']
         exception_regex = '|'.join(exceptions)
+    else:
+        exception_regex = ''
 
-    exc_cols = vcf_df.columns.str.fullmatch('|'.join(['ALT', 'CHROM', 'POS', 'ID', 'REF']))
+    exc_cols = vcf_df.columns.str.fullmatch(exception_regex)
 
     brkend_diff_cols = find_brkend_diff_cols(vcf_df)
 
@@ -72,6 +74,11 @@ def get_group_dfs(vcf_df):
         # print([higher_qual_idx, lower_qual_idx])
         bnd1 = group_df.iloc[0]
         bnd2 = group_df.iloc[1]
+
+        # try:
+        #     bnd1['FILTER_PASS'], bnd2['FILTER_PASS']
+        # except KeyError:
+        #     continue
         
         group_list1.append(bnd1)
         group_list2.append(bnd2)
@@ -87,24 +94,31 @@ def merge_group_lists(group_dfs, inplace=False):
     if not inplace:
         df1_copy, df2_copy = (group_dfs[0].copy(), group_dfs[1].copy())
 
-    # print(df1_copy)
-    
+    # print(df1_copy, df2_copy)
+
     df1_copy = df1_copy.rename(columns={'ALT': 'LALT'})
-    df2_copy = df2_copy.rename(columns={'ALT': 'RALT', 'POS': 'INFO_END', 'CHROM': 'CHR2'})
+    df2_copy = df2_copy.rename(columns={'ALT': 'RALT', 'POS': 'INFO_END', 'CHROM': 'CHR2', 'FILTER_PASS': 'FILTER_PASS_RIGHT'})
+
+    # filter_cols2 = [col for col in df2_copy.columns if col.startswith('FILTER_') and not col.startswith('FILTER_PASS')]
+    # print(np.logical_and.reduce(df2_copy[filter_cols2] == 1, axis=0))
+    # df2_copy.iloc[:, 'FILTER_PASS_RIGHT'] = np.logical_and.reduce(df2_copy[filter_cols2] == 1, axis=0)
     
     df1_copy['REF'] = 'N'
     df1_copy['POS'] = df1_copy['POS'] + 1
     df1_copy['ID'] = df1_copy['INFO_EVENT']
 
-    df2_copy['INFO_END'] = df2_copy['INFO_END'] - 1
+    df2_copy.loc[:, 'INFO_END'] = df2_copy['INFO_END'] - 1
 
     # print(group_dfs[1])
     # cols_to_drop = (
     #     [],
     #     ['REF', 'ID', 'POS']
     # )
+    combined = pd.concat([df1_copy, df2_copy[['INFO_END', 'RALT', 'CHR2', 'FILTER_PASS_RIGHT']]], axis=1)
+    combined.loc[:, 'FILTER_PASS'] = combined.FILTER_PASS & combined.FILTER_PASS_RIGHT
+    combined = combined.drop(columns=['FILTER_PASS_RIGHT'])
     
-    return pd.concat([df1_copy, df2_copy[['INFO_END', 'RALT', 'CHR2']]], axis=1)
+    return combined
 
 def bnd_to_event(vcf_df, vocal=False):
     """

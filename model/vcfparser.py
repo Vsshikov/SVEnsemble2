@@ -4,6 +4,7 @@ import gzip
 import copy
 import builtins
 import pandas as pd
+import numpy as np
 
 # BASIC READING FUNCTIONS
 
@@ -187,6 +188,8 @@ def process_genotype_entry(vcf_dict, meta_dict, gt_list, format_delim=':'):
     for format_field in meta_dict['FORMAT']:
         if format_field in format_fields:
             vcf_dict[format_field].append(format_dict[format_field])
+        else:
+            vcf_dict[format_field].append(0)
 
 
 def parse_vcf(
@@ -287,19 +290,20 @@ def parse_vcf(
 
                 # FORMAT and genotype columns
                 # Currently only a single genotype column is supported
-                if line_list == []:
+                if skip_format:
                     continue
 
-                if not skip_format:
-                    process_genotype_entry(
-                        vcf_data, meta_dict,
-                        line_list,
-                        format_delim=format_delim
-                    )
+                process_genotype_entry(
+                    vcf_data, meta_dict,
+                    line_list,
+                    format_delim=format_delim
+                )
                 
     
     keys_for_deletion = []
+    # max_len = max([len(item) for item in vcf_data.items()])
     for vcf_data_key, vcf_data_item in vcf_data.items():
+        # print(f'{vcf_data_key}: {len(vcf_data_item)}')
         if len(vcf_data_item) == 0:
             keys_for_deletion.append(vcf_data_key)
     if len(keys_for_deletion) > 0:
@@ -321,7 +325,17 @@ def parse_vcf(
         # except KeyError:
         #     continue
 
+
+    # Remove empty fields
     vcf_data = pd.DataFrame(vcf_data)
+
+    try:
+        vcf_data['FILTER_PASS']
+    except KeyError:
+        filter_cols = [col for col in vcf_data.columns if col.startswith('FILTER_') and not col.startswith('FILTER_PASS')]
+        # print(np.logical_and.reduce(df2_copy[filter_cols2] == 1, axis=0))
+        vcf_data.loc[:, 'FILTER_PASS'] = np.logical_and.reduce(vcf_data[filter_cols] == 0, axis=1)
+        meta_dict['FILTER'].update({'FILTER_PASS': [None, 'flag', 'Passing all filters']})
 
     vcf_data.POS = pd.to_numeric(vcf_data.POS)
     vcf_data.QUAL = pd.to_numeric(vcf_data.QUAL, errors='coerce')
