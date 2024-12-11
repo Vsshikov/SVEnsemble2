@@ -3,6 +3,7 @@
 */__pycache__/*
 *.ipynb_checkpoints
 *-checkpoint.ipynb
+*.checkpoint.py
 .jupyter/*
 .local/*
 .cache/*
@@ -57,6 +58,7 @@
 *.stats
 
 # Other
+*.png
 *.bas
 *.so
 *.pdf
@@ -81,7 +83,7 @@ downloads/*
 */data/
 */saved/
 */output/
-*/SVEnsemble.stornext/*
+SVEnsemble.stornext/*
 ~*/scripts/
 */tmp/
 */temp/

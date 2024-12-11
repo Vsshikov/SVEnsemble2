@@ -1,7 +1,6 @@
 import time
 import re
 import gzip
-import copy
 import builtins
 import pandas as pd
 import numpy as np
@@ -151,9 +150,12 @@ def process_info_entry(vcf_dict, meta_dict, info_str, info_delim=';', info_eq='=
         info_dict = {}
         n_matched = 0
         for info_item_raw in info_str.split(info_delim):
+            if n_matched >= len(limit_to):
+                break
             info_item = info_item_raw.split(info_eq)
             if info_item[0] not in limit_to:
                 continue
+            n_matched += 1
             if len(info_item) == 1:
                 info_dict.update({f'INFO_{info_item[0]}': 1})
             elif len(info_item) == 2:
@@ -248,7 +250,10 @@ def parse_vcf(
                 if line.startswith('##'):
                     # print(line)
                     meta_entry = read_header_line(line)
-                    process_meta_entry(vcf_data, meta_dict, meta_entry, info_limit_to=info_limit_to)
+                    if meta_entry is None:
+                        continue
+                    if not skip_info or meta_entry.field != 'INFO':
+                        process_meta_entry(vcf_data, meta_dict, meta_entry, info_limit_to=info_limit_to)
                 else:
                     continue
             else:
@@ -287,6 +292,8 @@ def parse_vcf(
                         info_delim=info_delim, info_eq=info_eq,
                         limit_to=info_limit_to
                     )
+                else:
+                    line_list.pop(0)  # Skip the INFO field
 
                 # FORMAT and genotype columns
                 # Currently only a single genotype column is supported
@@ -348,105 +355,3 @@ def parse_vcf(
         
     return vcf_data
 
-
-# POST-PROCESSING FUNCTIONS
-
-def combine_meta_dict(meta_dict):
-    """
-    Accepts a nested meta_dict to unwrap it and return a meta dict where all the fields are mixed
-    """
-    return {**meta_dict['FILTER'], **meta_dict['INFO'], **meta_dict['FORMAT']}
-
-def split_meta_dict(meta_dict_combined):
-    """
-    Accepts an unwrapped meta_dict to return it to nested form
-    """
-    meta_dict = {
-        'FILTER': {},
-        'INFO': {},
-        'FORMAT': {}
-    }
-    for meta_key, meta_item in meta_dict_combined.items():
-        meta_dict[re.match(r'(INFO)|(FORMAT)|(FILTER)', meta_key).group()][meta_key] = meta_item
-    
-    return meta_dict
-
-def get_split_meta_entry(meta_id, meta_info, values, output_type='Flag'):
-    """
-    If a meta entry has multiple values, fetches them all and turns them into separate meta entries 
-    with name: {meta_id}_{value}
-
-    Returns a dictionary with new ids as keys and tuples of (1, specified output type name, description)
-    """
-    new_ids = [f'{meta_id}_{value}' for value in values]
-
-    return {new_id: (1, output_type, f'SPLIT FROM {meta_id}, OLD DESC: {meta_info[2]}') for new_id in new_ids}
-    
-
-def get_processed_algorithm_df_and_meta(vcf_df, meta_dict, delim=',', alg_col_name='INFO_ALGORITHMS'):
-    """
-    
-    """
-    # algs = vcf_df[alg_col].str.split(delim).astype(set)
-    alg_col = vcf_df[alg_col_name]
-    alg_set = set()
-    
-    for uniq_alg_comb in alg_col.unique():
-        alg_set = alg_set | set(uniq_alg_comb.split(delim))
-        
-    alg_dict = {f'{alg_col_name}_{key}': [0] * len(alg_col) for key in alg_set}
-    
-    for i, alg_item in enumerate(alg_col):
-        for alg in alg_item.split(delim):
-            alg_dict[f'{alg_col_name}_{alg}'][i] = 1
-
-    meta_dict_copy = copy.deepcopy(meta_dict)
-    old_alg_entry = meta_dict_copy['INFO'].pop(alg_col_name)
-    new_alg_entry = get_split_meta_entry(alg_col_name, old_alg_entry, alg_set)
-    # print(old_alg_entry, new_alg_entry)
-
-    # print(pd.concat([vcf_df[vcf_df.columns.drop([alg_col_name])], pd.DataFrame(alg_dict)], axis=1))
-    meta_dict_copy['INFO'].update(new_alg_entry)
-    
-    return pd.concat([vcf_df[vcf_df.columns.drop([alg_col_name])], pd.DataFrame(alg_dict)], axis=1), meta_dict_copy
-        
-
-def convert_col_types(vcf_df, meta_dict, types_from='meta'):
-    """
-    Reads the types for INFO and FORMAT fields from the meta_dict and uses them to convert fields in vcf_df into the specified types
-    """
-    if types_from == 'meta':
-        type_convert_dict = {
-            'String': str,
-            'Integer': int,
-            'Float': float,
-            'Flag': int
-        }
-        for meta_id, meta_info in (meta_dict['INFO'] | meta_dict['FORMAT']).items():
-            vcf_df[meta_id] = vcf_df[meta_id].astype(type_convert_dict[meta_info[1]])
-
-
-def delete_mult_val_cols(vcf_df, meta_dict, exceptions='default', vocal=False):
-    """
-    
-    """
-    if exceptions == 'default':
-        exceptions = ['INFO_ALGORITHMS']
-    if exceptions is None:
-        exceptions = []
-    
-    keys_for_deletion = []
-    for meta_group in meta_dict.values():
-        for meta_id, meta_info in meta_group.items():
-            # print(meta_id, meta_info)
-            if meta_info[0] not in ['1', 1] + exceptions:
-                keys_for_deletion.append(meta_id)
-
-    if vocal:
-        print(f'Dropping entries {keys_for_deletion} since they contain multiple values')
-
-    for key_for_deletion in keys_for_deletion:
-        del meta_dict[re.match(r'(INFO)|(FORMAT)|(FILTER)', key_for_deletion).group()][key_for_deletion]
-    
-    vcf_df.drop(keys_for_deletion, axis=1, inplace=True)
-    
