@@ -80,11 +80,11 @@ work/
 
 # Directories
 downloads/*
+!downloads/scripts/
 */data/
 */saved/
 */output/
 SVEnsemble.stornext/*
-~*/scripts/
 */tmp/
 */temp/
 */results/
