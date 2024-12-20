@@ -4,7 +4,7 @@ import pyranges as pr
 import re
 from typing import List
 
-import utils
+from . import utils
 
 def check_sv_format(vcf_df: pd.DataFrame) -> str | None:
     """

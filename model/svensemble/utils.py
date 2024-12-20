@@ -138,17 +138,14 @@ def add_vcf_col(vcf_df: pd.DataFrame, meta_dict: dict, col_name: str, col_values
     if field_type is None:
         if vocal:
             print("Inferring field type...")
-        sample_val = col_values[0]
+
         unique_vals = set(col_values)
-        if vocal:
-            print(f"Sample value: {sample_val}, type: {type(sample_val)}")
-            print(f"Number of unique values: {len(unique_vals)}")
         
-        if isinstance(sample_val, (bool, np.bool_)) or (isinstance(sample_val, (int, float, np.integer, np.floating)) and unique_vals <= {0, 1}):
+        if all(isinstance(x, (bool, np.bool_)) for x in col_values) or (all(isinstance(x, (int, float, np.integer, np.floating)) for x in col_values) and unique_vals <= {0, 1}):
             field_type = 'Flag'
-        elif isinstance(sample_val, (int, np.integer)) and all(isinstance(x, (int, np.integer)) for x in col_values):
+        elif all(isinstance(x, (int, np.integer)) for x in col_values):
             field_type = 'Integer'  
-        elif isinstance(sample_val, (float, np.floating)) and all(isinstance(x, (int, float, np.integer, np.floating)) for x in col_values):
+        elif all(isinstance(x, (float, np.floating)) for x in col_values):
             field_type = 'Float'
         elif all(isinstance(x, str) for x in col_values):
             field_type = 'String'
@@ -297,6 +294,58 @@ def encode_bnd_alts(alt_col):
     encodings = encodings.astype(int)
     
     return encodings
+
+def add_bnd_encoding(
+    vcf_df: pd.DataFrame,
+    inplace: bool = False
+) -> Union[pd.DataFrame, None]:
+    """Add breakend orientation encoding columns to a VCF DataFrame.
+    
+    Takes a VCF DataFrame in breakpoint format containing ALT fields for each breakend (ALT_bnd1, ALT_bnd2) and adds columns encoding
+    the orientation of each breakend in a pair, plus a combined orientation type.
+    
+    Args:
+        vcf_df: DataFrame containing VCF breakend data with ALT_bnd1/2 columns
+        inplace: If True, modify input DataFrame in place. If False, return copy.
+        
+    Returns:
+        If inplace=False, returns DataFrame with added encoding columns:
+            - bnd_pos_encoding_bnd1: Numeric encoding of first breakend orientation
+            - bnd_pos_encoding_bnd2: Numeric encoding of second breakend orientation  
+            - bp_type: Combined orientation encoding for the breakend pair
+        If inplace=True, returns None after modifying input DataFrame
+        
+    Raises:
+        ValueError: If required ALT_bnd1/2 columns are missing from input DataFrame
+    """
+    if not inplace:
+        vcf_df_local = vcf_df.copy()
+    else:
+        vcf_df_local = vcf_df
+
+    required_cols = ['ALT_bnd1', 'ALT_bnd2']
+    if not all(col in vcf_df_local.columns for col in required_cols):
+        raise ValueError('ALT_bnd1 and ALT_bnd2 columns are required for encoding')
+    
+    # Add orientation encoding for each breakend
+    vcf_df_local.loc[:, 'bnd_pos_encoding_bnd1'] = encode_bnd_alts(
+        vcf_df_local['ALT_bnd1']
+    )
+    vcf_df_local.loc[:, 'bnd_pos_encoding_bnd2'] = encode_bnd_alts(
+        vcf_df_local['ALT_bnd2']
+    )
+    
+    # Combine encodings into single type string
+    vcf_df_local.loc[:, 'bp_type'] = (
+        vcf_df_local['bnd_pos_encoding_bnd1'].astype(str) +
+        vcf_df_local['bnd_pos_encoding_bnd2'].astype(str)
+    )
+
+    if not inplace:
+        return vcf_df_local
+    else:
+        vcf_df = vcf_df_local
+        return None
 
 def get_meta_missing_in_df(vcf_df: pd.DataFrame, meta_dict: dict) -> list:
     """Find metadata fields that are missing from the VCF DataFrame.
