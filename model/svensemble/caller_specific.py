@@ -190,7 +190,7 @@ def gnomad_preprocess(
             gnomad_callset_local['FILTER_PASS'].astype(bool)
         ]
 
-    # Process evidence and metadata columns
+    # Process evidence column
     sv_utils.split_evidence_col(gnomad_callset_local, gnomad_meta_local)
 
     # Set confidence intervals based on evidence type
