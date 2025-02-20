@@ -115,7 +115,11 @@ def gridss_bnd_to_bp(
     if add_encoding:
         gridss_callset_local = sv_utils.add_bnd_encoding(gridss_callset_local, inplace=False)
     
-    return gridss_callset_local
+    if not inplace:
+        return gridss_callset_local
+    else:
+        gridss_callset = gridss_callset_local
+        return None
 
     
 def gnomad_preprocess(
@@ -219,8 +223,7 @@ def gnomad_preprocess(
 
 def gnomad_event_to_bnd(
     gnomad_callset: pd.DataFrame,
-    inplace: bool = False,
-    add_encoding: bool = True
+    inplace: bool = False
 ) -> Optional[pd.DataFrame]:
     """Convert gnomAD event-based SV records to breakend (BND) format.
     
@@ -343,5 +346,7 @@ def callset_to_bp(
     Raises:
         KeyError: If source is not found in dispatch dictionaries
     """
-    callset_bp = dispatch_to_bp[source](dispatch_preprocess[source](callset, meta)[0])
+    callset_bp = dispatch_to_bp[source](
+        dispatch_preprocess[source](callset, meta)[0]
+    )
     return callset_bp

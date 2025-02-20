@@ -1,3 +1,9 @@
+"""
+This module contains functions for merging variant callsets from different sources.
+
+The callsets are presumed to be in breakpoint (BP) notation. See `caller_specific.py` and `bndbpconv.py` for more details.
+"""
+
 import copy
 import importlib
 import re
