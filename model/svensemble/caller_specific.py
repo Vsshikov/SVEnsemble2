@@ -1,225 +1,251 @@
 import pandas as pd
 from typing import Union, Tuple, Optional, List, Any, Literal, Dict
 import copy
+import pysam
 
-
-from . import bndbpconv as bndc
+from . import events as evts
+from . import breakends as bnds
 from . import utils as sv_utils
+from . import _caller_params as caller_params
 
 def gridss_preprocess(
     gridss_callset: pd.DataFrame,
-    gridss_meta: dict,
-    inplace: bool = False
-) -> Union[Tuple[pd.DataFrame, dict], None]:
-    """Preprocess GRIDSS callset by splitting CIPOS values and converting column types.
-    
-    Args:
-        gridss_callset: DataFrame containing GRIDSS variant calls
-        gridss_meta: Dictionary containing GRIDSS metadata
-        inplace: If True, modify input DataFrame in-place. If False, return new copy.
-        
-    Returns:
-        If inplace=False, returns tuple of (processed_callset, processed_meta)
-        If inplace=True, returns None after modifying inputs in-place
-    """
-    if not inplace:
-        gridss_callset_local = gridss_callset.copy()
-        gridss_meta_local = copy.deepcopy(gridss_meta)
-    else:
-        gridss_callset_local = gridss_callset
-        gridss_meta_local = gridss_meta
-
-    # Split CIPOS string into left and right components
-    gridss_callset_cipos = (gridss_callset_local['INFO_CIPOS']
-                           .str.split(',', expand=True)
-                           .fillna('0')
-                           .astype(int))
-    
-    gridss_callset_ciposl = gridss_callset_cipos.loc[:, 0]
-    gridss_callset_ciposr = gridss_callset_cipos.loc[:, 1]
-
-    # Add separated CIPOS columns
-    gridss_callset_local, gridss_meta_local = sv_utils.add_vcf_col(
-        gridss_callset_local, 
-        gridss_meta_local,
-        'INFO_CIPOS_l',
-        gridss_callset_ciposl,
-        description='Left CIPOS'
-    )
-    
-    gridss_callset_local, gridss_meta_local = sv_utils.add_vcf_col(
-        gridss_callset_local,
-        gridss_meta_local, 
-        'INFO_CIPOS_r',
-        gridss_callset_ciposr,
-        description='Right CIPOS'
-    )
-
-    # Clean up and standardize columns
-    sv_utils.delete_mult_val_cols(gridss_callset_local, gridss_meta_local, vocal=True)
-    sv_utils.convert_col_types(gridss_callset_local, gridss_meta_local)
-    
-    gridss_callset_local = gridss_callset_local.reset_index(drop=True)
-
-    if not inplace:
-        return gridss_callset_local, gridss_meta_local
-    else:
-        gridss_callset = gridss_callset_local
-        gridss_meta = gridss_meta_local
-        return None
-
-
-def gridss_bnd_to_bp(
-    gridss_callset: pd.DataFrame,
     inplace: bool = False,
-    add_encoding: bool = True
-) -> pd.DataFrame:
-    """Convert GRIDSS breakend format to breakpoint format.
+    verbose: bool = False
+) -> Optional[pd.DataFrame]:
+    """Preprocess GRIDSS callset by splitting CIPOS values and cleaning columns.
     
-    Takes a DataFrame of GRIDSS breakend calls and converts them to breakpoints,
-    optionally adding orientation encoding information.
+    This function processes GRIDSS variant calls by:
+    1. Splitting the INFO_CIPOS field into separate left and right columns
+    2. Removing the original INFO_CIPOS column to avoid redundancy
     
     Args:
-        gridss_callset: DataFrame containing GRIDSS breakend calls
-        inplace: If True, modify input DataFrame in place. If False, create copy.
-        add_encoding: If True, add breakend orientation encoding columns
+        gridss_callset: DataFrame containing GRIDSS variant calls with INFO_CIPOS field
+        inplace: If True, modify input DataFrame in-place. If False, return new copy.
+        verbose: If True, print progress messages during processing
         
     Returns:
-        DataFrame with breakpoint pairs containing:
-            - Original fields split into bnd1/bnd2 columns
-            - bnd_pos_encoding_bnd1/2: Encoding of breakpoint orientations
-            - bndtype: Combined orientation encoding for the pair
-            
+        If inplace=False: Processed DataFrame with split CIPOS columns
+        If inplace=True: None (modifies input DataFrame in place)
+        
     Raises:
-        KeyError: If required CIPOS columns are missing from input DataFrame
+        KeyError: If INFO_CIPOS column is missing from input DataFrame
     """
-    # Verify required columns exist
-    try:
-        gridss_callset[['INFO_CIPOS_l', 'INFO_CIPOS_r']]
-    except KeyError:
-        raise KeyError(
-            "GRIDSS callset must contain INFO_CIPOS_l and INFO_CIPOS_r columns. "
-            "Run gridss_preprocess() to add them first."
-        )
-
-    # Create copy if not modifying in place
-    if not inplace:
-        gridss_callset_local = gridss_callset.copy()
-    else:
-        gridss_callset_local = gridss_callset
-
-    # Convert breakends to breakpoints
-    gridss_callset_local = bndc.bnd_to_bp(gridss_callset_local)
-
-    # Add orientation encoding if requested
-    if add_encoding:
-        gridss_callset_local = sv_utils.add_bnd_encoding(gridss_callset_local, inplace=False)
+    if verbose:
+        print("Preprocessing GRIDSS callset...")
     
+    # Create working copy if not modifying in place
     if not inplace:
-        return gridss_callset_local
+        gridss_callset_ = gridss_callset.copy()
     else:
-        gridss_callset = gridss_callset_local
+        gridss_callset_ = gridss_callset
+
+    # Split CIPOS values into left and right confidence intervals
+    if verbose:
+        print("Splitting CIPOS values...")
+    gridss_callset_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = (
+        sv_utils.split_cipos(gridss_callset_['INFO_CIPOS'])
+    )
+    
+    # Remove original CIPOS column to avoid redundancy
+    if verbose:
+        print("Dropping INFO_CIPOS column...")
+    gridss_callset_ = gridss_callset_.drop(columns=['INFO_CIPOS'])
+
+    # Return processed DataFrame or None based on inplace parameter
+    if not inplace:
+        if verbose:
+            print("Returning processed callset...")
+        return gridss_callset_
+    else:
+        if verbose:
+            print("Successfully modified input callset...")
         return None
 
+
+def gnomad_split_evidence(
+    evidence_series: pd.Series,
+    evidence_types: list[str] | None = None
+) -> pd.DataFrame:
+    """Split gnomAD evidence string into boolean columns for each evidence type.
     
+    Args:
+        evidence_series: Series containing evidence strings (e.g. 'SR,PE')
+        evidence_types: List of evidence types to check for. Defaults to ['SR','PE','RD']
+        
+    Returns:
+        DataFrame with boolean columns for each evidence type indicating presence
+    """
+    if evidence_types is None:
+        evidence_types = ['SR', 'PE', 'RD']
+        
+    evidence_df = pd.DataFrame(index=evidence_series.index, columns=evidence_types)
+    for evidence_type in evidence_types:
+        evidence_df[evidence_type] = evidence_series.apply(lambda x: evidence_type in x)
+    return evidence_df
+
+
+def gnomad_get_best_evidence(
+    evidence_series: pd.Series,
+    evidence_types: list[str] | None = None
+) -> pd.Series:
+    """Get the highest priority evidence type for each variant.
+    
+    Args:
+        evidence_series: Series containing evidence strings
+        evidence_types: List of evidence types in priority order. Defaults to ['SR','PE','RD']
+        
+    Returns:
+        Series containing the highest priority evidence type for each variant
+    """
+    if evidence_types is None:
+        evidence_types = ['SR', 'PE', 'RD']
+        
+    evidence_df = gnomad_split_evidence(evidence_series, evidence_types)
+    return evidence_df.idxmax(axis=1)
+
+
+def gnomad_get_cipos(
+    evidence_series: pd.Series,
+    evidence_types: list[str] | None = None,
+    cipos_dict: dict[str, tuple[int, int]] | None = None
+) -> pd.DataFrame:
+    """Get confidence interval positions based on evidence type.
+    
+    Args:
+        evidence_series: Series containing evidence strings
+        evidence_types: List of evidence types in priority order. Defaults to ['SR','PE','RD']
+        cipos_dict: Dictionary mapping evidence types to (left,right) CI sizes.
+                   Defaults to values from caller_params.gnomad_method_cipos
+                   
+    Returns:
+        DataFrame with INFO_CIPOS_l and INFO_CIPOS_r columns containing CI sizes
+    """
+    if evidence_types is None:
+        evidence_types = ['SR', 'PE', 'RD']
+    if cipos_dict is None:
+        cipos_dict = caller_params.gnomad_method_cipos
+        
+    evidence_df = gnomad_get_best_evidence(evidence_series, evidence_types)
+    cipos_sizes = evidence_df.map(cipos_dict)
+    return pd.DataFrame(
+        index=evidence_df.index,
+        data={
+            'INFO_CIPOS_l': -cipos_sizes,
+            'INFO_CIPOS_r': cipos_sizes
+        }
+    )
+
+
 def gnomad_preprocess(
     gnomad_callset: pd.DataFrame,
-    gnomad_meta: pd.DataFrame,
-    evidence_ci_sizes: Union[Dict[str, int], Literal['default']] = 'default',
-    viable_svtypes: Union[str, List[str]] = 'simple',
-    filter_pass_only: bool = True,
-    inplace: bool = False
-) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
+    evidence_cipos: Union[Dict[str, int], Literal['default']] = 'default',
+    svtypes_retain: Union[str, List[str]] = 'simple',
+    filter_pass_only: bool = False,
+    inplace: bool = False,
+    verbose: bool = False
+) -> pd.DataFrame | None:
     """Preprocess gnomAD structural variant callset.
     
     Processes a gnomAD SV callset by:
     1. Adding confidence interval sizes based on evidence type
     2. Filtering to specified SV types
     3. Optionally filtering to PASS variants only
-    4. Processing evidence and metadata columns
-    5. Setting EVENT field to match variant ID
     
     Args:
         gnomad_callset: DataFrame containing gnomAD SV calls
-        gnomad_meta: DataFrame containing metadata for gnomAD calls
-        evidence_ci_sizes: Dict mapping evidence types to CI sizes in bp, or 'default'
+        evidence_cipos: Dict mapping evidence types to CI sizes in bp, or 'default'
             Default maps SR->10bp, PE->100bp, RD->500bp
-        viable_svtypes: Either 'simple' for basic SV types (DEL,DUP,INV,INS),
+        svtypes_retain: Either 'simple' for basic SV types (DEL,DUP,INV,INS),
             or list of specific SV types to include
         filter_pass_only: If True, keep only variants with FILTER=PASS
-        inplace: If True, modify input DataFrames in place
+        inplace: If True, modify input DataFrame in place
+        verbose: If True, print processing information
         
     Returns:
-        If inplace=False: Tuple of (processed_callset, processed_meta)
-        If inplace=True: None (modifies inputs in place)
+        If inplace=False: Processed DataFrame
+        If inplace=True: None (modifies input in place)
         
     Raises:
         NotImplementedError: If unsupported SV types requested
     """
+    if verbose:
+        print("Preprocessing gnomAD callset...")
     # Define supported SV types
-    svtypes_supported = ['DEL', 'DUP', 'INV', 'INS']
+    svtypes_supported = caller_params.gnomad_supported_svtypes
+    if verbose:
+        print(f"SV types currently supported: {svtypes_supported}")
+    
+    # Define evidence CI sizes
+    if evidence_cipos == 'default':
+        evidence_cipos = caller_params.gnomad_method_cipos
+    if verbose:
+        print(f"Using default evidence CIPOS: {evidence_cipos}")
     
     # Validate and set viable SV types
-    if viable_svtypes == 'simple':
-        viable_svtypes = svtypes_supported
-    elif all(svtype in svtypes_supported for svtype in viable_svtypes):
-        viable_svtypes = viable_svtypes
+    if svtypes_retain == 'simple':
+        svtypes_retain = svtypes_supported
+        if verbose:
+            print(f"Using default viable SV types: {svtypes_retain}")
+    elif all(svtype in svtypes_supported for svtype in svtypes_retain):
+        svtypes_retain = svtypes_retain
+        if verbose:
+            print(f"Using specified viable SV types: {svtypes_retain}")
     else:
         raise NotImplementedError(f"Supported viable SV types: {svtypes_supported}")
-    
-    # Set default confidence interval sizes if not provided
-    if evidence_ci_sizes == 'default':
-        evidence_ci_sizes = {
-            'SR': 10,   # Split reads - highest resolution
-            'PE': 100,  # Paired-end reads - medium resolution  
-            'RD': 500   # Read depth - lowest resolution
-        }
 
     # Create copies if not modifying in place
     if not inplace:
-        gnomad_callset_local = gnomad_callset.copy()
-        gnomad_meta_local = copy.deepcopy(gnomad_meta)
+        gnomad_callset_ = gnomad_callset.copy()
     else:
-        gnomad_callset_local = gnomad_callset
-        gnomad_meta_local = gnomad_meta
+        gnomad_callset_ = gnomad_callset
 
     # Filter to desired SV types
-    gnomad_callset_local = gnomad_callset_local[
-        gnomad_callset_local['INFO_SVTYPE'].isin(viable_svtypes)
+    if verbose:
+        print(f"Filtering to specified SV types: {svtypes_retain}")
+    gnomad_callset_ = gnomad_callset_[
+        gnomad_callset_['INFO_SVTYPE'].isin(svtypes_retain)
     ]
+
+    # Some variants may lack CHR2 field
+    # Set it to CHROM for them
+    gnomad_callset_.loc[
+        gnomad_callset_['INFO_CHR2'].isna(),
+        'INFO_CHR2'
+    ] = gnomad_callset_['CHROM']
     
     # Apply FILTER=PASS filter if requested
     if filter_pass_only:
-        gnomad_callset_local = gnomad_callset_local[
-            gnomad_callset_local['FILTER_PASS'].astype(bool)
+        if verbose:
+            print("Filtering to PASS variants only")
+        gnomad_callset_ = gnomad_callset_[
+            gnomad_callset_['FILTER_PASS'].astype(bool)
         ]
 
-    # Process evidence column
-    sv_utils.split_evidence_col(gnomad_callset_local, gnomad_meta_local)
-
     # Set confidence intervals based on evidence type
-    match_margins = gnomad_callset_local['INFO_EVIDENCE_BEST'].map(evidence_ci_sizes)
-    gnomad_callset_local.loc[:, 'INFO_CIPOS_l'] = -match_margins
-    gnomad_callset_local.loc[:, 'INFO_CIPOS_r'] = match_margins
-
-    sv_utils.delete_mult_val_cols(
-        gnomad_callset_local,
-        gnomad_meta_local,
-        exceptions=['INFO_EVIDENCE'],
-        vocal=True
+    if verbose:
+        print("Setting confidence intervals based on evidence type")
+    gnomad_callset_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = gnomad_get_cipos(
+        gnomad_get_best_evidence(gnomad_callset_['INFO_EVIDENCE']),
+        evidence_types=evidence_cipos.keys(),
+        cipos_dict=evidence_cipos
     )
 
-    sv_utils.convert_col_types(gnomad_callset_local, gnomad_meta_local)
-
     # Set EVENT field to match variant ID
-    gnomad_callset_local.loc[:, 'INFO_EVENT'] = gnomad_callset_local['ID']
+    if verbose:
+        print("Setting EVENT field to match variant ID")
+    gnomad_callset_.loc[:, 'INFO_EVENT'] = gnomad_callset_['ID']
 
     if not inplace:
-        return gnomad_callset_local, gnomad_meta_local
+        if verbose:
+            print("Returning processed callset")
+        return gnomad_callset_
     else:
-        gnomad_callset = gnomad_callset_local
-        gnomad_meta = gnomad_meta_local
+        if verbose:
+            print("Successfully modified input callset")
+        gnomad_callset = gnomad_callset_
         return None
+    
 
 def gnomad_event_to_bnd(
     gnomad_callset: pd.DataFrame,
@@ -241,7 +267,7 @@ def gnomad_event_to_bnd(
         gnomad_callset_local = gnomad_callset
 
     # Convert events to breakend format
-    gnomad_callset_local = bndc.event_to_bnd(
+    gnomad_callset_local = evts.event_to_bnd(
         gnomad_callset_local
     )
 
@@ -250,103 +276,3 @@ def gnomad_event_to_bnd(
     else:
         gnomad_callset = gnomad_callset_local
         return None
-
-def gnomad_bnd_to_bp(
-    gnomad_callset_bnds: pd.DataFrame,
-    inplace: bool = False,
-    add_encoding: bool = True
-) -> Optional[pd.DataFrame]:
-    """Convert gnomAD breakend (BND) records to breakpoint (BP) format.
-    
-    Args:
-        gnomad_callset_bnds: DataFrame containing gnomAD variants in BND format
-        inplace: If True, modify input DataFrame in place. If False, return a copy
-    
-    Returns:
-        Modified DataFrame if inplace=False, None if inplace=True
-    """
-    if not inplace:
-        gnomad_callset_local = gnomad_callset_bnds.copy()
-    else:
-        gnomad_callset_local = gnomad_callset_bnds
-
-    # Convert breakends to breakpoint format
-    gnomad_callset_local = bndc.bnd_to_bp(
-        gnomad_callset_local,
-        force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
-    )
-
-    # Optionally add breakend encoding information
-    if add_encoding:
-        gnomad_callset_local = sv_utils.add_bnd_encoding(
-            gnomad_callset_local,
-            inplace=False
-        )
-
-    if not inplace:
-        return gnomad_callset_local
-    else:
-        gnomad_callset_bnds = gnomad_callset_local
-        return None
-    
-def gnomad_event_to_bp(
-    gnomad_callset: pd.DataFrame,
-    inplace: bool = False
-) -> Optional[pd.DataFrame]:
-    """Convert gnomAD event format to breakpoint (BP) format via breakend (BND) format.
-    
-    This function performs a two-step conversion:
-    1. Event format -> Breakend (BND) format
-    2. Breakend format -> Breakpoint (BP) format
-    
-    Args:
-        gnomad_callset: DataFrame containing gnomAD variants in event format
-        inplace: If True, modify input DataFrame in place. If False, return a copy
-        
-    Returns:
-        Modified DataFrame if inplace=False, None if inplace=True
-    """
-    gnomad_callset = gnomad_event_to_bnd(gnomad_callset, inplace=inplace)
-    gnomad_callset = gnomad_bnd_to_bp(gnomad_callset, inplace=inplace)
-    return gnomad_callset
-
-
-# Dispatch dictionaries for preprocessing and format conversion functions
-dispatch_preprocess = {
-    'gnomad': gnomad_preprocess,
-    'gridss': gridss_preprocess
-}
-
-dispatch_to_bp = {
-    'gnomad': gnomad_event_to_bp,
-    'gridss': gridss_bnd_to_bp
-}
-
-
-def callset_to_bp(
-    callset: pd.DataFrame,
-    meta: dict[str, Any],
-    source: Literal['gnomad', 'gridss']
-) -> pd.DataFrame:
-    """Convert a variant callset to breakpoint (BP) format.
-    
-    This function handles the conversion of variant calls from different sources
-    into a standardized breakpoint format by:
-    1. Preprocessing the data using source-specific functions
-    2. Converting to breakpoint format using source-specific converters
-    
-    Args:
-        callset: DataFrame containing variant calls
-        meta: Dictionary containing VCF metadata
-        source: Variant caller name ('gnomad' or 'gridss' currently supported)
-        
-    Returns:
-        DataFrame in breakpoint format
-        
-    Raises:
-        KeyError: If source is not found in dispatch dictionaries
-    """
-    callset_bp = dispatch_to_bp[source](
-        dispatch_preprocess[source](callset, meta)[0]
-    )
-    return callset_bp

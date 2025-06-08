@@ -90,6 +90,8 @@ SVEnsemble.stornext/*
 */results/
 */logs/
 */saved/
+callers/
+sv_calling/
 
 # Specific files
 pkg/gridss-2.13.2.tar
