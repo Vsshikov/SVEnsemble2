@@ -3,17 +3,21 @@
 __version__ = "0.0.1"
 
 from . import vcfparse
-from . import bndbpconv
+from . import breakends
+from . import breakpoints
+from . import events
 from . import caller_specific
 from . import benchmark
-from . import callset_merging
 from . import models
+from . import chunk_match
 
 __all__ = [
     "vcfparse",
-    "bndbpconv", 
+    "breakends",
+    "breakpoints",
+    "events",
     "caller_specific",
     "benchmark",
-    "callset_merging",
+    "chunk_match",
     "models"
 ]

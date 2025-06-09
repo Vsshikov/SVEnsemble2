@@ -16,9 +16,9 @@ import matplotlib as mpl
 import pyranges as pr
 from scipy.spatial import cKDTree
 
-from . import vcfparse as vcfp
-from . import bndbpconv as bndc
-from . import utils as sv_utils
+from ..svensemble import vcfparse as vcfp
+from ..svensemble import bndbpconv as bndc
+from ..svensemble import utils as sv_utils
 
 
 def preprocess_bp_df_for_kdtree(bp_df: pd.DataFrame) -> pd.DataFrame:
