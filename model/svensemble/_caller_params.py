@@ -3,6 +3,10 @@ This module contains parameters to use for loading and processing VCF files
 from specific callers supported by SVEnsemble2.
 As well as parameters for PU learning with those sets.
 
+Added callers:
+- gridss
+- manta
+
 The file also contains parameters for working with VCF files from reference SV sets.
 Currently, only gnomAD is supported.
 """
@@ -124,12 +128,21 @@ gnomad_method_cipos = {
     'RD': 500
 }
 
+manta_params = {
+    'base_cols': base_cols,
+    'filter_cols': ['PASS'],
+    'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'POS2', 'CIPOS', 'CIEND', 'MATEID', 'EVENT'],
+    'info_cols_pred': ['IMPRECISE', 'HOMLEN', 'BND_DEPTH']
+}
+
 insert_seq_source = {
     'gnomad': 'svlen',
-    'gridss': 'alt'
+    'gridss': 'alt',
+    'manta': 'svlen'
 }
 
 caller_param_dict = {
     'gnomad': gnomad_params,
-    'gridss': gridss_params
+    'gridss': gridss_params,
+    'manta': manta_params
 }

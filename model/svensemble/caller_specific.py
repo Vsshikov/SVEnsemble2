@@ -1,10 +1,7 @@
 import pandas as pd
-from typing import Union, Tuple, Optional, List, Any, Literal, Dict
-import copy
-import pysam
+from typing import Union, Optional, List, Literal, Dict
 
 from . import events as evts
-from . import breakends as bnds
 from . import utils as sv_utils
 from . import _caller_params as caller_params
 
@@ -222,10 +219,15 @@ def gnomad_preprocess(
             gnomad_callset_['FILTER_PASS'].astype(bool)
         ]
 
-    # Set confidence intervals based on evidence type
+    # Set confidence intervals for SV start and end based on evidence type
     if verbose:
         print("Setting confidence intervals based on evidence type")
     gnomad_callset_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = gnomad_get_cipos(
+        gnomad_get_best_evidence(gnomad_callset_['INFO_EVIDENCE']),
+        evidence_types=evidence_cipos.keys(),
+        cipos_dict=evidence_cipos
+    )
+    gnomad_callset_.loc[:, ['INFO_CIEND_l', 'INFO_CIEND_r']] = gnomad_get_cipos(
         gnomad_get_best_evidence(gnomad_callset_['INFO_EVIDENCE']),
         evidence_types=evidence_cipos.keys(),
         cipos_dict=evidence_cipos
@@ -276,3 +278,74 @@ def gnomad_event_to_bnd(
     else:
         gnomad_callset = gnomad_callset_local
         return None
+    
+# MANTA
+# Manta callset includes both event and bnd entries
+# For preprocessing they are handled separately
+# Part of the preprocessing is common between bnds and evts
+# Thus 3 functions are used to preprocess manta callset:
+# - manta_preprocess_both: common preprocessing for both event and bnd entries
+# - manta_preprocess_evts_only: preprocessing for event entries only
+# - manta_preprocess_bnd_only: preprocessing for bnd entries only
+
+def manta_preprocess_both(manta_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Common preprocessing steps for both event and bnd entries.
+    """
+    manta_df_ = manta_df.copy()
+
+    # When SVLEN is not applicable, it is set to None.
+    # We get rid of NaNs
+    manta_df_.loc[:, 'INFO_SVLEN'] = manta_df_.loc[:, 'INFO_SVLEN'].astype(float)
+    manta_df_.loc[:, 'INFO_SVLEN'] = manta_df_.loc[:, 'INFO_SVLEN'].fillna('0')
+    manta_df_.loc[:, 'INFO_SVLEN'] = manta_df_.loc[:, 'INFO_SVLEN'].astype(int)
+
+    # INFO_HOMLEN is a tuple initially. Manta is not supposed to have multiple HOMLEN values
+    # So pick the first value of the tuple
+    manta_df_.loc[:, 'INFO_HOMLEN'] = manta_df_.loc[:, 'INFO_HOMLEN'].str[0]
+
+    # Set INFO_EVENT to ID
+    manta_df_.loc[:, 'INFO_EVENT'] = manta_df_.loc[:, 'ID']
+
+    # Set INFO_CHR2 to CHROM
+    manta_df_.loc[:, 'INFO_CHR2'] = manta_df_.loc[:, 'CHROM']
+
+    # Drop INFO_POS2 as it does not contain information
+    manta_df_.loc[:, 'INFO_POS2'] = manta_df_.loc[:, 'INFO_POS2'].drop(columns=['INFO_POS2'])
+
+    return manta_df_
+
+def manta_preprocess_evts_only(manta_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Preprocessing for Manta event entries only.
+    """
+    manta_df_ = manta_df.copy()
+    # Ensure correct CIPOS_l/CIPOS_r and CIEND_l/CIEND_r values. Drop CIPOS and CIEND columns.
+    manta_df_.loc[manta_df_['INFO_CIEND'].isna(), 'INFO_CIEND'] = manta_df_.loc[manta_df_['INFO_CIEND'].isna(), 'INFO_CIPOS']
+    manta_df_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = (
+        sv_utils.split_cipos(manta_df_['INFO_CIPOS'])
+    )
+    manta_df_.loc[:, ['INFO_CIEND_l', 'INFO_CIEND_r']] = (
+        sv_utils.split_ciend(manta_df_['INFO_CIEND'])
+    )
+    cols_to_drop = ['INFO_CIPOS', 'INFO_CIEND']
+    manta_df_ = manta_df_.drop(columns=cols_to_drop)
+
+    # INFO_SVLEN is a tuple initially. Manta is not supposed to have multiple SVLEN values
+    # So pick the first value of the tuple
+    manta_df_.loc[:, 'INFO_SVLEN'] = manta_df_.loc[:, 'INFO_SVLEN'].str[0]
+    # Manta gives negative values for deletions. Convert to positive
+    manta_df_.loc[manta_df_['INFO_SVTYPE'] == 'DEL', 'INFO_SVLEN'] = -manta_df_.loc[manta_df_['INFO_SVTYPE'] == 'DEL', 'INFO_SVLEN']
+
+    return manta_preprocess_both(manta_df_)
+
+def manta_preprocess_bnd_only(manta_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Preprocessing for Manta BND entries only.
+    """
+    manta_df_ = manta_df.copy()
+    manta_df_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(manta_df_['INFO_CIPOS'])
+
+    cols_to_drop = ['INFO_CIPOS', 'INFO_CIEND']
+    manta_df_ = manta_df_.drop(columns=cols_to_drop)
+    return manta_preprocess_both(manta_df_)
