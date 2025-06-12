@@ -227,11 +227,8 @@ def gnomad_preprocess(
         evidence_types=evidence_cipos.keys(),
         cipos_dict=evidence_cipos
     )
-    gnomad_callset_.loc[:, ['INFO_CIEND_l', 'INFO_CIEND_r']] = gnomad_get_cipos(
-        gnomad_get_best_evidence(gnomad_callset_['INFO_EVIDENCE']),
-        evidence_types=evidence_cipos.keys(),
-        cipos_dict=evidence_cipos
-    )
+    gnomad_callset_.loc[:, 'INFO_CIEND_l'] = gnomad_callset_['INFO_CIPOS_l']
+    gnomad_callset_.loc[:, 'INFO_CIEND_r'] = gnomad_callset_['INFO_CIPOS_r']
 
     # Set EVENT field to match variant ID
     if verbose:

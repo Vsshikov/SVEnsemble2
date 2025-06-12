@@ -2,7 +2,8 @@ from matplotlib import pyplot as plt
 import pandas as pd
 from sklearn.metrics import roc_curve
 
-from . import bndbpconv as bndc
+from . import breakends as bnds
+from . import breakpoints as bps
 
 def load_truth_variants(ref_path):
     """Load reference variants from Kosugi study from BED file
@@ -69,9 +70,9 @@ def truth_event_to_bnd(ref_vcf):
         - bnd_pos_encoding: Encoding of breakpoint orientations
         - bndtype: Combined orientation encoding for the pair
     """
-    ref_vcf_bnds = bndc.event_to_bnd(ref_vcf)
-    ref_vcf_bnds.loc[:, 'bnd_pos_encoding'] = bndc.encode_bnd_alts(ref_vcf_bnds['ALT'])
-    ref_vcf_bps = bndc.bnd_to_bp(ref_vcf_bnds, force_diff_cols=['CHROM', 'INFO_CIPOS_l', 'INFO_CIPOS_r', 'bnd_pos_encoding'])
+    ref_vcf_bnds = bnds.event_to_bnd(ref_vcf)
+    ref_vcf_bnds.loc[:, 'bnd_pos_encoding'] = bnds.encode_bnd_alts(ref_vcf_bnds['ALT'])
+    ref_vcf_bps = bnds.bnd_to_bp(ref_vcf_bnds, force_diff_cols=['CHROM', 'INFO_CIPOS_l', 'INFO_CIPOS_r', 'bnd_pos_encoding'])
     ref_vcf_bps.loc[:, 'bndtype'] = ref_vcf_bps['bnd_pos_encoding_bnd1'].astype(str) + ref_vcf_bps['bnd_pos_encoding_bnd2'].astype(str)
     return ref_vcf_bps
 
