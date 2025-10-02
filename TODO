@@ -1,0 +1,6 @@
+- change pipeline to create separate matched_bps files for each training set
+- change preprocess_sample_for_pu func to preprocess_training_set_for_pu which will
+  only return 1 item with full preprocessed set
+
+F1 scores???
+Justin suggestion: 1/FP vs TP/FP, play with scales

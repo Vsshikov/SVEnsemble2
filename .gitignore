@@ -31,6 +31,7 @@
 *.xlsx
 *.xls
 *.txt
+*.pkl
 
 # Reference genome indexes
 *.amb
