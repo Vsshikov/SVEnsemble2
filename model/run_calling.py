@@ -120,7 +120,7 @@ weight_dict = {
 }
 
 # Initialize Random Forest classifier with:
-# - Number of features per split: sqrt(total features) 
+# - Number of features per split: sqrt(total features)
 # - Fixed random seed for reproducibility
 # - Class weights from above
 # - 500 trees in the forest

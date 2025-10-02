@@ -93,8 +93,12 @@ SVEnsemble.stornext/*
 */saved/
 callers/
 sv_calling/
+utils/bazam/
+utils/minimap/
 
 # Specific files
 pkg/gridss-2.13.2.tar
 # vast
 # wget-log
+data/HG002/wget-log
+data/HG002/data/wget-log

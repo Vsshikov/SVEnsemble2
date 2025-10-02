@@ -212,6 +212,7 @@ def event_to_bnd(vcf_df: pd.DataFrame) -> pd.DataFrame:
     if not all(col in vcf_df.columns for col in ['CHROM', 'POS', 'INFO_SVTYPE', 'INFO_SVLEN', 'INFO_CIPOS_l', 'INFO_CIPOS_r', 'INFO_CIEND_l', 'INFO_CIEND_r']):
         raise ValueError("CHROM, POS, INFO_SVTYPE, INFO_SVLEN, INFO_CIPOS_l, INFO_CIPOS_r, INFO_CIEND_l, and INFO_CIEND_r columns are required")
 
+    vcf_df_ = vcf_df.copy()
     # Check mandatory column dtypes:
     mandatory_types = {
         'CHROM': 'object',
@@ -223,19 +224,24 @@ def event_to_bnd(vcf_df: pd.DataFrame) -> pd.DataFrame:
         'INFO_CIEND_l': 'int',
         'INFO_CIEND_r': 'int'
     }
-    if not all(vcf_df[col].dtype == mandatory_types[col] for col in mandatory_types):
-        raise ValueError("Column dtypes do not match the required types")
+    if not all(vcf_df_[col].dtype == mandatory_types[col] for col in mandatory_types):
+        try:
+            for col, dtype in mandatory_types.items():
+                vcf_df_[col].astype(dtype)
+        except ValueError as e:
+            types = {col: vcf_df_[col].dtype for col in mandatory_types}
+            raise ValueError(f"Column dtypes do not match the required types, types: {types}, required: {mandatory_types}") from e
 
-    vcf_df_copy = vcf_df.copy()
-    vcf_df_copy = vcf_df_copy[~vcf_df_copy['CHROM'].isna()]
-    vcf_df_copy = vcf_df_copy.sort_values(['CHROM', 'POS'], key=utils.get_chrom_keys)
+
+    vcf_df_ = vcf_df_[~vcf_df_['CHROM'].isna()]
+    vcf_df_ = vcf_df_.sort_values(['CHROM', 'POS'], key=utils.get_chrom_keys)
 
     # Split by SV type
     svtype_dict = {
-        'DEL': vcf_df_copy[vcf_df_copy['INFO_SVTYPE'] == 'DEL'],
-        'DUP': vcf_df_copy[vcf_df_copy['INFO_SVTYPE'] == 'DUP'],
-        'INV': vcf_df_copy[vcf_df_copy['INFO_SVTYPE'] == 'INV'],
-        'INS': vcf_df_copy[vcf_df_copy['INFO_SVTYPE'] == 'INS']
+        'DEL': vcf_df_[vcf_df_['INFO_SVTYPE'] == 'DEL'],
+        'DUP': vcf_df_[vcf_df_['INFO_SVTYPE'] == 'DUP'],
+        'INV': vcf_df_[vcf_df_['INFO_SVTYPE'] == 'INV'],
+        'INS': vcf_df_[vcf_df_['INFO_SVTYPE'] == 'INS']
     }
 
     # Convert each type
