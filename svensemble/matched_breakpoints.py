@@ -4,7 +4,7 @@ Functions to handle dataframes with multiple matched breakpoint sets
 import pandas as pd
 import numpy as np
 
-import svensemble._caller_params as caller_params
+from . import _caller_params as caller_params
 from . import chunk_match
 
 def get_combined_insert_size(matchedbps_df: pd.DataFrame, matchedbps_callsets: list[str], inplace: bool = False) -> pd.DataFrame:
@@ -239,11 +239,12 @@ def preprocess_matchedbps_for_pu(
     # else: If not MultiIndex, skip filtering
 
     # Add a 'ref_match' column: True if '{reference_sample_name}_INFO_EVENT' is not null, else False
-    if f'{reference_sample_name}_INFO_EVENT' in training_df.index.names:
-        training_df = training_df.copy()
-        training_df['ref_match'] = training_df.index.get_level_values(f'{reference_sample_name}_INFO_EVENT').notna()
-    else:
-        raise ValueError(f"'{reference_sample_name}_INFO_EVENT' not found in joint_bp_df index.")
+    if reference_sample_name is not None:
+        if f'{reference_sample_name}_INFO_EVENT' in training_df.index.names:
+            training_df = training_df.copy()
+            training_df['ref_match'] = training_df.index.get_level_values(f'{reference_sample_name}_INFO_EVENT').notna()
+        else:
+            raise ValueError(f"'{reference_sample_name}_INFO_EVENT' not found in joint_bp_df index.")
 
     # Convert columns with boolean-like strings to proper bool dtype
     for column in training_df.columns:

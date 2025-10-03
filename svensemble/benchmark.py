@@ -215,7 +215,6 @@ def plot_reverse_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pa
 
             tp_no_zeros = tp[~zeros_mask]
             fp_no_zeros = fp[~zeros_mask]
-            thresholds_no_zeros = thresholds[~zeros_mask]
 
             reverse_fp = 1/fp_no_zeros
             tp_fp = tp_no_zeros/fp_no_zeros

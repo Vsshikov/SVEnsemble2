@@ -4,3 +4,5 @@
 
 F1 scores???
 Justin suggestion: 1/FP vs TP/FP, play with scales
+
+Rewrite unbiased_dict to be saved with {model_name}_dict.pkl architecture + importances and other downstream scripts to accomodate

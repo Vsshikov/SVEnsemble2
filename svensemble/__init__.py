@@ -10,6 +10,7 @@ from . import caller_specific
 from . import benchmark
 from . import models
 from . import chunk_match
+from . import matched_breakpoints
 
 __all__ = [
     "vcfparse",
@@ -19,5 +20,6 @@ __all__ = [
     "caller_specific",
     "benchmark",
     "chunk_match",
-    "models"
+    "models",
+    "matched_breakpoints"
 ]
