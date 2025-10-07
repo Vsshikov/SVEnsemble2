@@ -55,7 +55,9 @@ training_set_presets = {
         'gridss+manta_candidate': ['gridss', 'manta_candidate'],
         'gridss+manta_diploid': ['gridss', 'manta_diploid'],
         'gridss+manta_candidate+delly': ['gridss', 'manta_candidate', 'delly'],
-        'gridss+manta_diploid+delly': ['gridss', 'manta_diploid', 'delly']
+        'gridss+manta_diploid+delly': ['gridss', 'manta_diploid', 'delly'],
+        'delly+manta_candidate': ['delly', 'manta_candidate'],
+        'delly+manta_diploid': ['delly', 'manta_diploid']
     },
     'haploid': {
         'gridss': ['gridss'],

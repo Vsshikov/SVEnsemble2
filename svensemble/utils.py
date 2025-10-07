@@ -54,9 +54,10 @@ def _get_caller_callset_dict(sample_name: str, caller_name: str) -> dict:
         'manta_diploid': _get_manta_diploid_callset_dict,
         'delly': _get_delly_callset_dict
     }
+
     return caller_dispatch[caller_name](sample_name)
 
-def create_config_dict(sample_name: str, is_reference: bool = False, training_sets: str | dict[str, list[str]] = 'default'):
+def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground_truth: bool = False, training_sets: str | dict[str, list[str]] = 'default'):
     """
     Based on _caller_params, create a config dictionary for the sample.
     """
@@ -75,9 +76,15 @@ def create_config_dict(sample_name: str, is_reference: bool = False, training_se
             callset_names.add(callset_name)
     callset_names = list(callset_names)
 
-    if is_reference:
+    if is_ground_truth:
         config_dict = {
-            sample_name: _get_caller_callset_dict(sample_name, default_reference_set)
+            sample_name: {
+                'sample_dir': Path(f'data/{sample_name}'),
+                'is_reference': True,
+                'callsets': {
+                    sample_name: _get_caller_callset_dict(sample_name, default_reference_set)
+                }
+            }
         }
         return config_dict
 
@@ -89,9 +96,13 @@ def create_config_dict(sample_name: str, is_reference: bool = False, training_se
                 callset_name: _get_caller_callset_dict(sample_name, caller_name=callset_name)
                 for callset_name in callset_names
             },
-            'training_sets': _training_sets
+            'training_sets': _training_sets,
+            'ref_path': ref_path
         }
     }
+
+    if not config_dict:
+        raise ValueError(f"No config dictionary created for sample {sample_name}")
 
     return config_dict
 

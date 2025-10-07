@@ -123,8 +123,8 @@ def svensemble2_feature_importance(sample_name, ref_sample_name, training_set_na
         output_dir = '/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/model/figs/featureimportance'
 
     # Create sample config and reference sample config
-    sample_config = sv_utils.create_config_dict(sample_name, is_reference=False)[sample_name]
-    ref_sample_config = sv_utils.create_config_dict(ref_sample_name, is_reference=True)[ref_sample_name]
+    sample_config = sv_utils.create_config_dict(sample_name, is_ground_truth=False)[sample_name]
+    ref_sample_config = sv_utils.create_config_dict(ref_sample_name, is_ground_truth=True)[ref_sample_name]
 
     train_test_splits = load_svensemble2_train_test_splits(sample_config, ref_sample_config, training_set_name, verbose=True)
 

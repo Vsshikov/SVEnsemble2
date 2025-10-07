@@ -305,7 +305,7 @@ def gnomad_event_to_bnd(
 # - manta_preprocess_evts_only: preprocessing for event entries only
 # - manta_preprocess_bnd_only: preprocessing for bnd entries only
 
-def manta_preprocess_both(manta_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
+def manta_preprocess_common(manta_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
     """
     Common preprocessing steps for both event and bnd entries.
 
@@ -385,9 +385,9 @@ def manta_preprocess_evts_only(manta_df: pd.DataFrame, caller_params: dict|None 
     # Manta gives negative values for deletions. Convert to positive
     manta_df_.loc[manta_df_['INFO_SVTYPE'] == 'DEL', 'INFO_SVLEN'] = -manta_df_.loc[manta_df_['INFO_SVTYPE'] == 'DEL', 'INFO_SVLEN']
 
-    return manta_preprocess_both(manta_df_, caller_params)
+    return manta_preprocess_common(manta_df_, caller_params)
 
-def manta_preprocess_bnd_only(manta_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
+def manta_preprocess_bnds_only(manta_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
     """
     Preprocessing for Manta BND entries only.
     """
@@ -396,9 +396,10 @@ def manta_preprocess_bnd_only(manta_df: pd.DataFrame, caller_params: dict|None =
 
     cols_to_drop = ['INFO_CIPOS', 'INFO_CIEND']
     manta_df_ = manta_df_.drop(columns=cols_to_drop)
-    return manta_preprocess_both(manta_df_, caller_params)
+    return manta_preprocess_common(manta_df_, caller_params)
 
-def delly_preprocess_both(delly_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
+
+def delly_preprocess_common(delly_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
     """
     Common preprocessing steps for both event and bnd entries in Delly callset dataframe.
     """
@@ -410,10 +411,8 @@ def delly_preprocess_both(delly_df: pd.DataFrame, caller_params: dict|None = Non
     delly_df_.loc[:, 'INFO_SVLEN'] = delly_df_.loc[:, 'INFO_SVLEN'].fillna('0')
     delly_df_.loc[:, 'INFO_SVLEN'] = delly_df_.loc[:, 'INFO_SVLEN'].astype(int)
 
-    no_chr2_mask = delly_df_['INFO_CHR2'].isna()
-    delly_df_.loc[no_chr2_mask, 'INFO_CHR2'] = delly_df_.loc[no_chr2_mask, 'CHROM']
-
     return delly_df_
+
 
 def delly_preprocess_evts_only(delly_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
     """
@@ -431,4 +430,21 @@ def delly_preprocess_evts_only(delly_df: pd.DataFrame, caller_params: dict|None 
 
     delly_df_.loc[:, 'INFO_EVENT'] = delly_df_.loc[:, 'ID']
 
-    return delly_preprocess_both(delly_df_, caller_params)
+    no_chr2_mask = delly_df_['INFO_CHR2'].isna()
+    delly_df_.loc[no_chr2_mask, 'INFO_CHR2'] = delly_df_.loc[no_chr2_mask, 'CHROM']
+
+    return delly_preprocess_common(delly_df_, caller_params)
+
+def delly_preprocess_bnds_only(delly_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
+    """
+    Preprocessing for Delly BND entries only.
+    """
+    delly_df_ = delly_df.copy()
+    delly_df_.loc[:, 'INFO_EVENT'] = delly_df_.loc[:, 'ID'].str[:-4]
+
+    delly_df_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(delly_df_['INFO_CIPOS'])
+
+    cols_to_drop = ['INFO_CIPOS']
+    delly_df_ = delly_df_.drop(columns=cols_to_drop)
+
+    return delly_preprocess_common(delly_df_, caller_params)

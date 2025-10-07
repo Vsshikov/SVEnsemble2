@@ -42,7 +42,7 @@ samples = {}
 for sample_name in ['CHM13', 'NA12878', 'NA12878_30x']:
     samples.update(sv_utils.create_config_dict(sample_name))
 
-reference_sample_config = sv_utils.create_config_dict('gnomad', is_reference=True)
+reference_sample_config = sv_utils.create_config_dict('gnomad', is_ground_truth=True)
 
 for sample_name, sample_config in samples.items():
     bp_df_dict = {}

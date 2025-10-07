@@ -1,26 +1,24 @@
 #! /usr/bin/env python
 
-"""
-This is a modified version of the delly2bnd.py script from the DELLY github repository.
-https://github.com/dellytools/delly/blob/main/scripts/delly2bnd.py
-
-Unlike in the original, the main functionality is wrapped in a function
-To better integrate it into the SVEnsemble2 pipeline.
-
-The readfq function is also added to the script from:
-https://github.com/lh3/readfq/blob/master/readfq.py
-
-Otherwise, the functionality is the same.
-"""
-
 from __future__ import print_function
 import argparse
 import sys
+import gzip
 import cyvcf2
 import collections
-import gzip
 
+def argument_parsing():
+    """
+    Parse command-line options.
+    """
+    parser = argparse.ArgumentParser(description='Split BND calls')
+    parser.add_argument('-v', '--vcf', metavar='input.vcf.gz', required=True, dest='vcf', help='input VCF/BCF file (required)')
+    parser.add_argument('-r', '--ref', metavar='ref.fa', required=True, dest='ref', help='input reference (required)')
+    parser.add_argument('-o', '--out', metavar='out.vcf', required=True, dest='out', help='output VCF file (required)')
+    return parser.parse_args()
 
+"""Heng Li's FASTA/FASTQ parser
+"""
 def readfq(fp): # this is a generator function
     last = None # this is a buffer keeping the last unprocessed line
     while True: # mimic closure; is it a bad idea?
@@ -29,8 +27,7 @@ def readfq(fp): # this is a generator function
                 if l[0] in '>@': # fasta/q header line
                     last = l[:-1] # save this line
                     break
-        if not last:
-            break
+        if not last: break
         name, seqs, last = last[1:].partition(" ")[0], [], None
         for l in fp: # read the sequence
             if l[0] in '@+>':
@@ -39,8 +36,7 @@ def readfq(fp): # this is a generator function
             seqs.append(l[:-1])
         if not last or last[0] != '+': # this is a fasta record
             yield name, ''.join(seqs), None # yield a fasta record
-            if not last:
-                break
+            if not last: break
         else: # this is a fastq record
             seq, leng, seqs = ''.join(seqs), 0, []
             for l in fp: # read the quality
@@ -54,31 +50,15 @@ def readfq(fp): # this is a generator function
                 yield name, seq, None # yield a fasta record instead
                 break
 
-if __name__ == "__main__":
-    n, slen, qlen = 0, 0, 0
-    for name, seq, qual in readfq(sys.stdin):
-        n += 1
-        slen += len(seq)
-        qlen += qual and len(qual) or 0
-    print(n, '\t', slen, '\t', qlen)
-
-# Parse command line
-parser = argparse.ArgumentParser(description='Split BND calls')
-parser.add_argument('-v', '--vcf', metavar='input.vcf.gz', required=True, dest='vcf', help='input VCF/BCF file (required)')
-parser.add_argument('-r', '--ref', metavar='ref.fa', required=True, dest='ref', help='input reference (required)')
-parser.add_argument('-o', '--out', metavar='out.vcf', required=True, dest='out', help='output VCF file (required)')
-args = parser.parse_args()
-
-def delly2bnd(vcf, ref, out):
-    """
-    Split DELLY BND and TRA calls in a VCF/BCF file into separate breakend records,
-    and annotates each with the corresponding reference nucleotide at the breakpoint.
-    """
+def delly2bnd_noargparse(vcf: str, ref: str, out: str):
+    vcf_path = str(vcf)
+    ref_path = str(ref)
+    out_path = str(out)
     # Fetch breakpoint positions
     bndPos = collections.defaultdict(dict)
     oldChr = None
     if not len(bndPos):
-        vcf = cyvcf2.VCF(args.vcf)
+        vcf = cyvcf2.VCF(vcf_path)
         for record in vcf:
             if record.CHROM != oldChr:
                 oldChr = record.CHROM
@@ -106,7 +86,7 @@ def delly2bnd(vcf, ref, out):
 
         # Fetch nucleotides
         if True:
-            f_in = gzip.open(args.ref) if args.ref.endswith('.gz') else open(args.ref)
+            f_in = gzip.open(ref_path) if ref_path.endswith('.gz') else open(ref_path)
             for seqName, seqNuc, seqQuals in readfq(f_in):
                 if seqName in bndPos.keys():
                     print("Fetching breakpoint nucleotides...", seqName, file=sys.stderr)
@@ -114,9 +94,9 @@ def delly2bnd(vcf, ref, out):
                         bndPos[seqName][pos] = seqNuc[(pos-1):pos]
 
     # Parse VCF/BCF
-    vcf = cyvcf2.VCF(args.vcf)
+    vcf = cyvcf2.VCF(vcf_path)
     vcf.add_info_to_header({'ID': 'MATEID', 'Description': 'ID of mate breakends', 'Type':'String', 'Number': '.'})
-    w = cyvcf2.Writer(args.out, vcf)
+    w = cyvcf2.Writer(out_path, vcf)
     oldChr = None
     for record in vcf:
         if record.CHROM != oldChr:
@@ -179,7 +159,14 @@ def delly2bnd(vcf, ref, out):
     # Close file
     w.close()
 
+def delly2bnd(args) -> None:
+    delly2bnd_noargparse(args.vcf, args.ref, args.out)
 
-if __name__ == "__main__":
-    delly2bnd(args.vcf, args.ref, args.out)
 
+def main():
+    arguments = argument_parsing()
+    delly2bnd(arguments)
+
+
+if __name__ == '__main__':
+    main()

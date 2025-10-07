@@ -36,6 +36,10 @@ import svensemble.utils as sv_utils  # noqa: E402
 import svensemble.chunk_match as chunk_match  # noqa: E402
 import svensemble.matched_breakpoints as mbps  # noqa: E402
 import svensemble.models as models  # noqa: E402
+import svensemble.delly2bnd as delly2bnd  # noqa: E402
+
+
+default_ref_path = Path("/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/hg38.no_decoys.fa")
 
 
 def parse_preprocess_gnomad(
@@ -180,7 +184,6 @@ def parse_preprocess_gridss(
         gridss_bp_df.to_csv(output_path)
         if verbose:
             print(f"Saved breakpoints in {output_path}")
-        del gridss_df, gridss_meta, gridss_bp_df
 
 
     if 'gridss' in sample_config.get('callsets', {}):
@@ -226,7 +229,7 @@ def parse_preprocess_manta_candidate(
         manta_candidate_evt_only_df = manta_candidate_df[~manta_candidate_df['INFO_SVTYPE'].isin(['BND', 'INV'])]
         if verbose:
             print("Preprocessing Manta BND/INV variants")
-        manta_candidate_bnd_only_df = caller_specific.manta_preprocess_bnd_only(
+        manta_candidate_bnd_only_df = caller_specific.manta_preprocess_bnds_only(
             manta_candidate_bnd_only_df,
             caller_params=callset['params']
         )
@@ -253,7 +256,6 @@ def parse_preprocess_manta_candidate(
         manta_candidate_bp_df.to_csv(output_path)
         if verbose:
             print(f"Saved breakpoints in {output_path}")
-        del manta_candidate_df, manta_candidate_meta, manta_candidate_bnd_only_df, manta_candidate_evt_only_df, manta_candidate_evt_bnd_df, manta_candidate_bp_df
 
     if 'manta_candidate' in sample_config.get('callsets', {}):
         output_dir = sample_config['callsets']['manta_candidate']['svensemble_dir']
@@ -302,7 +304,7 @@ def parse_preprocess_manta_diploid(
         manta_evt_only_df = manta_diploid_df[~manta_diploid_df['INFO_SVTYPE'].isin(['BND', 'INV'])]
         if verbose:
             print("Preprocessing Manta diploid BND/INV variants")
-        manta_bnd_only_df = caller_specific.manta_preprocess_bnd_only(
+        manta_bnd_only_df = caller_specific.manta_preprocess_bnds_only(
             manta_bnd_only_df,
             caller_params=callset['params']
         )
@@ -329,7 +331,6 @@ def parse_preprocess_manta_diploid(
         manta_diploid_bp_df.to_csv(output_path)
         if verbose:
             print(f"Saved breakpoints in {output_path}")
-        del manta_diploid_df, manta_diploid_meta, manta_bnd_only_df, manta_evt_only_df, manta_evt_bnd_df, manta_diploid_bp_df
 
     if 'manta_diploid' in sample_config.get('callsets', {}):
         output_dir = sample_config['callsets']['manta_diploid']['svensemble_dir']
@@ -338,6 +339,75 @@ def parse_preprocess_manta_diploid(
             output_dir=output_dir,
             verbose=verbose
         )
+
+def parse_preprocess_delly(
+    sample_name: str,
+    sample_config: dict,
+    verbose: bool = False
+) -> None:
+    """
+    Read and preprocess the delly dataset for a sample.
+    """
+
+    def _process_delly_callset(callset: dict, ref_path: Path, output_dir: Path, verbose: bool = False) -> None:
+        """
+        Internal function to process a delly callset and save breakpoints.
+        """
+        if verbose:
+            print(f"Creating breakpoints from DELLY BND/TRA calls and saving to {output_dir / 'delly_bps.csv'}")
+
+        if not (output_dir / 'delly_bnd.vcf').exists():
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+        delly2bnd.delly2bnd_noargparse(
+            vcf=callset['path'],
+            ref=ref_path,
+            out=output_dir / 'delly_bnd.vcf'
+        )
+
+        if verbose:
+            print(f"Loading DELLY VCF from {callset['path']}")
+        delly_bnd_only_vcf = VariantFile(output_dir / 'delly_bnd.vcf')
+        delly_bnd_only_df, delly_bnd_only_meta = vcfp.parse_vcf_to_df(
+            vcf_file=delly_bnd_only_vcf,
+            caller_params=callset['params']
+        )
+        delly_bnd_only_df = caller_specific.delly_preprocess_bnds_only(delly_bnd_only_df, caller_params=callset['params'])
+
+
+        delly_vcf = VariantFile(callset['path'])
+        delly_df, delly_meta = vcfp.parse_vcf_to_df(
+            vcf_file=delly_vcf,
+            caller_params=callset['params']
+        )
+        delly_evt_only_df = delly_df[~delly_df['INFO_SVTYPE'].isin(['BND', 'TRA'])]
+        delly_evt_only_df = caller_specific.delly_preprocess_evts_only(delly_evt_only_df, caller_params=callset['params'])
+        delly_evt_bnd_df = evts.event_to_bnd(delly_evt_only_df)
+
+        delly_bnd_df = pd.concat([delly_evt_bnd_df, delly_bnd_only_df], axis=0)
+
+        delly_bp_df = bnds.bnd_to_bp(delly_bnd_df, force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r'])
+
+        output_path = output_dir / 'delly_bps.csv'
+        if verbose:
+            print(f"Saving breakpoints to {output_path}")
+        delly_bp_df.to_csv(output_path)
+        if verbose:
+            print(f"Saved breakpoints in {output_path}")
+
+    if 'delly' in sample_config.get('callsets', {}):
+        if 'ref_path' not in sample_config:
+            raise ValueError("Reference path not found in sample config")
+        output_dir = sample_config['callsets']['delly']['svensemble_dir']
+        _process_delly_callset(
+            callset=sample_config['callsets']['delly'],
+            ref_path=sample_config['ref_path'],
+            output_dir=output_dir,
+            verbose=verbose
+        )
+
+
+
 
 def parse_preprocess_sample(
     sample_name: str,
@@ -357,6 +427,7 @@ def parse_preprocess_sample(
         "gridss": parse_preprocess_gridss,
         "manta_diploid": parse_preprocess_manta_diploid,
         "manta_candidate": parse_preprocess_manta_candidate,
+        "delly": parse_preprocess_delly,
     }
 
     for callset_name in sample_config["callsets"].keys():
@@ -398,6 +469,16 @@ def load_manta_diploid_breakpoints(sample_config: dict) -> pd.DataFrame | None:
         return pd.read_csv(manta_diploid_bp_path)
     return None
 
+
+def load_delly_breakpoints(sample_config: dict) -> pd.DataFrame | None:
+    """Load DELLY breakpoints if available."""
+    if 'delly' in sample_config.get('callsets', {}):
+        delly_bp_path = (
+            sample_config['sample_dir'] /
+            'sv_calling' / 'delly' / 'svensemble2' / 'delly_bps.csv'
+        )
+        return pd.read_csv(delly_bp_path)
+    return None
 
 def load_gnomad_breakpoints(reference_sample_config: dict) -> pd.DataFrame:
     """Always load gnomAD reference breakpoints."""
@@ -484,7 +565,7 @@ def match_sample_breakpoints(
 def pu_train_predict_sample(
     sample_name: str,
     sample_config: dict,
-    reference_sample_config: dict,
+    ground_truth_sample_config: dict,
     verbose: bool = False
 ) -> None:
     """
@@ -519,12 +600,12 @@ def pu_train_predict_sample(
         # Preprocess for PU learning
         if verbose:
             print("Preprocessing sample for PU learning...")
-            print(f"Reference name: {reference_sample_config['callsets'][list(reference_sample_config['callsets'].keys())[0]]['source']}")
+            print(f"Reference name: {ground_truth_sample_config['callsets'][list(ground_truth_sample_config['callsets'].keys())[0]]['source']}")
 
         training_set_df = mbps.preprocess_matchedbps_for_pu(
             joint_bp_df,
             sample_config,
-            reference_sample_config['callsets'][list(reference_sample_config['callsets'].keys())[0]]['source'],
+            ground_truth_sample_config['callsets'][list(ground_truth_sample_config['callsets'].keys())[0]]['source'],
             training_set_name,
             verbose=verbose
         )
@@ -571,7 +652,7 @@ def pu_train_predict_sample(
         pickle.dump(unbiased_dict, f)
 
 
-def svensemble2(sample_names: list[str], reference_sample_name: str, verbose: bool = False, preprocess: bool = True, match: bool = True, train: bool = True) -> dict:
+def svensemble2(sample_names: list[str], ground_truth_sample_name: str, ref_path: Path, verbose: bool = False, preprocess: bool = True, match: bool = True, train: bool = True) -> dict:
     """
     Accepts a list of sample names and a data directory.
     For each name, reads the outputs of supported callers from the specified directory,
@@ -584,16 +665,17 @@ def svensemble2(sample_names: list[str], reference_sample_name: str, verbose: bo
 
     Args:
         sample_names: list of sample names to process
-        reference_sample_name: name of the reference sample
+        ground_truth_sample_name: name of the ground truth sample
+        ref_path: path to the reference genome
         data_dir: path to the data directory
         verbose: if True, print progress messages
     """
     # Create a config dict for the samples using the sample_names
     samples = {}
     for sample_name in sample_names:
-        samples.update(sv_utils.create_config_dict(sample_name, is_reference=False))
-    # Also create a config dict for the reference sample
-    samples.update(sv_utils.create_config_dict(reference_sample_name, is_reference=True))
+        samples.update(sv_utils.create_config_dict(sample_name, ref_path=ref_path, is_ground_truth=False))
+    # Also create a config dict for the ground truth sample
+    samples.update(sv_utils.create_config_dict(ground_truth_sample_name, ref_path=ref_path, is_ground_truth=True))
 
     if preprocess:
         # Parse and preprocess the samples
@@ -603,14 +685,14 @@ def svensemble2(sample_names: list[str], reference_sample_name: str, verbose: bo
     if match:
         # Match the breakpoints for each sample
         for sample_name, sample_config in samples.items():
-            if sample_name != reference_sample_name:
-                match_sample_breakpoints(sample_config, samples[reference_sample_name], verbose)
+            if sample_name != ground_truth_sample_name:
+                match_sample_breakpoints(sample_config, samples[ground_truth_sample_name], verbose)
 
     if train:
         # Train the PU models for each sample
         for sample_name, sample_config in samples.items():
-            if sample_name != reference_sample_name:
-                pu_train_predict_sample(sample_name, sample_config, samples[reference_sample_name], verbose)
+            if sample_name != ground_truth_sample_name:
+                pu_train_predict_sample(sample_name, sample_config, samples[ground_truth_sample_name], verbose)
 
 
 if __name__ == '__main__':
@@ -627,10 +709,16 @@ if __name__ == '__main__':
         help="Name of the sample to process."
     )
     parser.add_argument(
-        '--reference_sample_name',
+        '--ground_truth_sample_name',
         type=str,
         required=True,
         help="Name of the reference sample."
+    )
+    parser.add_argument(
+        '--ref_path',
+        type=str,
+        required=True,
+        help="Path to the reference genome."
     )
     parser.add_argument(
         '--verbose',
@@ -660,7 +748,8 @@ if __name__ == '__main__':
     # Run the main SVEnsemble2 pipeline with the provided arguments
     svensemble2(
         sample_names=[args.sample_name],
-        reference_sample_name=args.reference_sample_name,
+        ground_truth_sample_name=args.ground_truth_sample_name,
+        ref_path=args.ref_path,
         verbose=args.verbose,
         preprocess=args.preprocess,
         match=args.match,
