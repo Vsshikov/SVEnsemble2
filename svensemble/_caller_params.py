@@ -11,6 +11,8 @@ The file also contains parameters for working with VCF files from reference SV s
 Currently, only gnomAD is supported.
 """
 
+default_reference_set = 'gnomad'
+
 base_cols = ['CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL']
 
 # Caller-specific parameters are defined as dictionaries with the following keys:
@@ -49,8 +51,11 @@ training_set_presets = {
         'gridss': ['gridss'],
         'manta_candidate': ['manta_candidate'],
         'manta_diploid': ['manta_diploid'],
+        'delly': ['delly'],
         'gridss+manta_candidate': ['gridss', 'manta_candidate'],
-        'gridss+manta_diploid': ['gridss', 'manta_diploid']
+        'gridss+manta_diploid': ['gridss', 'manta_diploid'],
+        'gridss+manta_candidate+delly': ['gridss', 'manta_candidate', 'delly'],
+        'gridss+manta_diploid+delly': ['gridss', 'manta_diploid', 'delly']
     },
     'haploid': {
         'gridss': ['gridss'],
@@ -177,6 +182,16 @@ manta_diploid_params = default_params | {
     'bps_path': 'sv_calling/manta/svensemble2/manta_diploid_bps.csv'
 }
 
+delly_params = default_params | {
+    'filter_cols': ['PASS', 'LowQual'],
+    'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'CHR2', 'POS2', 'CIPOS', 'CIEND'],
+    'info_cols_pred': ['PE', 'MAPQ', 'SRMAPQ', 'SR', 'SRQ', 'CE', 'CT', 'SVLEN', 'IMPRECISE', 'SVTYPE', 'SVMETHOD', 'HOMLEN'],
+    'parse_format': True,
+    'format_cols': ['GT', 'GQ', 'RC', 'RCL', 'RCR', 'RDCN', 'DR', 'DV', 'RR', 'RV'],
+    'svlen_source': 'svlen',
+    'bps_path': 'sv_calling/delly/svensemble2/delly_bps.csv'
+}
+
 svensemble2_params = default_params | {
     'svlen_source': 'svensemble2_col'
 }
@@ -199,6 +214,7 @@ caller_param_dict = {
     'gridss': gridss_params,
     'manta_candidate': manta_candidate_params,
     'manta_diploid': manta_diploid_params,
+    'delly': delly_params,
     'svensemble2': svensemble2_params,
     'kosugi': kosugi_params,
     'chm13_val': chm13_params,
@@ -208,5 +224,6 @@ caller_param_dict = {
 caller_alt_priority = [
     'gridss',
     'manta_candidate',
-    'manta_diploid'
+    'manta_diploid',
+    'delly'
 ]

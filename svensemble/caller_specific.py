@@ -331,9 +331,6 @@ def manta_preprocess_both(manta_df: pd.DataFrame, caller_params: dict|None = Non
     # So pick the first value of the tuple
     manta_df_.loc[:, 'INFO_HOMLEN'] = manta_df_.loc[:, 'INFO_HOMLEN'].str[0]
 
-    # Set INFO_EVENT to ID
-    manta_df_.loc[:, 'INFO_EVENT'] = manta_df_.loc[:, 'ID']
-
     # Set INFO_CHR2 to CHROM
     manta_df_.loc[:, 'INFO_CHR2'] = manta_df_.loc[:, 'CHROM']
 
@@ -379,6 +376,9 @@ def manta_preprocess_evts_only(manta_df: pd.DataFrame, caller_params: dict|None 
     cols_to_drop = ['INFO_CIPOS', 'INFO_CIEND']
     manta_df_ = manta_df_.drop(columns=cols_to_drop)
 
+    # Set INFO_EVENT to ID
+    manta_df_.loc[:, 'INFO_EVENT'] = manta_df_.loc[:, 'ID']
+
     # INFO_SVLEN is a tuple initially. Manta is not supposed to have multiple SVLEN values
     # So pick the first value of the tuple
     manta_df_.loc[:, 'INFO_SVLEN'] = manta_df_.loc[:, 'INFO_SVLEN'].str[0]
@@ -397,3 +397,38 @@ def manta_preprocess_bnd_only(manta_df: pd.DataFrame, caller_params: dict|None =
     cols_to_drop = ['INFO_CIPOS', 'INFO_CIEND']
     manta_df_ = manta_df_.drop(columns=cols_to_drop)
     return manta_preprocess_both(manta_df_, caller_params)
+
+def delly_preprocess_both(delly_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
+    """
+    Common preprocessing steps for both event and bnd entries in Delly callset dataframe.
+    """
+    delly_df_ = delly_df.copy()
+
+    # When SVLEN is not applicable, it is set to None.
+    # We get rid of NaNs
+    delly_df_.loc[:, 'INFO_SVLEN'] = delly_df_.loc[:, 'INFO_SVLEN'].astype(float)
+    delly_df_.loc[:, 'INFO_SVLEN'] = delly_df_.loc[:, 'INFO_SVLEN'].fillna('0')
+    delly_df_.loc[:, 'INFO_SVLEN'] = delly_df_.loc[:, 'INFO_SVLEN'].astype(int)
+
+    no_chr2_mask = delly_df_['INFO_CHR2'].isna()
+    delly_df_.loc[no_chr2_mask, 'INFO_CHR2'] = delly_df_.loc[no_chr2_mask, 'CHROM']
+
+    return delly_df_
+
+def delly_preprocess_evts_only(delly_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
+    """
+    Preprocessing for Delly event entries only.
+    """
+    delly_df_ = delly_df.copy()
+    delly_df_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(delly_df_['INFO_CIPOS'])
+    delly_df_.loc[:, ['INFO_CIEND_l', 'INFO_CIEND_r']] = sv_utils.split_ciend(delly_df_['INFO_CIEND'])
+    cols_to_drop = ['INFO_CIPOS', 'INFO_CIEND']
+    delly_df_ = delly_df_.drop(columns=cols_to_drop)
+
+    delly_df_.loc[:, 'INFO_SVLEN'] = delly_df_.loc[:, 'INFO_SVLEN'].astype(float)
+    delly_df_.loc[:, 'INFO_SVLEN'] = delly_df_.loc[:, 'INFO_SVLEN'].fillna('0')
+    delly_df_.loc[:, 'INFO_SVLEN'] = delly_df_.loc[:, 'INFO_SVLEN'].astype(int)
+
+    delly_df_.loc[:, 'INFO_EVENT'] = delly_df_.loc[:, 'ID']
+
+    return delly_preprocess_both(delly_df_, caller_params)

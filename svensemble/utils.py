@@ -4,31 +4,80 @@ Utility functions for SVEnsemble
 
 import pandas as pd
 from pathlib import Path
-from ._caller_params import caller_param_dict, training_set_presets
+from ._caller_params import caller_param_dict, training_set_presets, default_reference_set
 
+def _get_gnomad_callset_dict(sample_name: str) -> dict:
+    return {
+        'source': 'gnomad',
+        'svensemble_dir': Path(f'data/{sample_name}/svensemble2'),
+        'path': Path(f'data/{sample_name}/{sample_name}.vcf.gz'),
+        'params': caller_param_dict['gnomad']
+    }
 
-def create_config_dict(sample_name: str, sample_sources: str | list[str] = 'all', is_reference: bool = False):
+def _get_gridss_callset_dict(sample_name: str) -> dict:
+    return {
+        'source': 'gridss',
+        'svensemble_dir': Path(f'data/{sample_name}/sv_calling/gridss/svensemble2'),
+        'path': Path(f'data/{sample_name}/sv_calling/gridss/out/{sample_name}.gridss.vcf'),
+        'params': caller_param_dict['gridss']
+    }
+
+def _get_manta_candidate_callset_dict(sample_name: str) -> dict:
+    return {
+        'source': 'manta_candidate',
+        'svensemble_dir': Path(f'data/{sample_name}/sv_calling/manta/svensemble2'),
+        'path': Path(f'data/{sample_name}/sv_calling/manta/results/variants/candidateSV.vcf.gz'),
+        'params': caller_param_dict['manta_candidate']
+    }
+
+def _get_manta_diploid_callset_dict(sample_name: str) -> dict:
+    return {
+        'source': 'manta_diploid',
+        'svensemble_dir': Path(f'data/{sample_name}/sv_calling/manta/svensemble2'),
+        'path': Path(f'data/{sample_name}/sv_calling/manta/results/variants/diploidSV.vcf.gz'),
+        'params': caller_param_dict['manta_diploid']
+    }
+
+def _get_delly_callset_dict(sample_name: str) -> dict:
+    return {
+        'source': 'delly',
+        'svensemble_dir': Path(f'data/{sample_name}/sv_calling/delly/svensemble2'),
+        'path': Path(f'data/{sample_name}/sv_calling/delly/out/{sample_name}.delly.bcf'),
+        'params': caller_param_dict['delly']
+    }
+
+def _get_caller_callset_dict(sample_name: str, caller_name: str) -> dict:
+    caller_dispatch = {
+        'gnomad': _get_gnomad_callset_dict,
+        'gridss': _get_gridss_callset_dict,
+        'manta_candidate': _get_manta_candidate_callset_dict,
+        'manta_diploid': _get_manta_diploid_callset_dict,
+        'delly': _get_delly_callset_dict
+    }
+    return caller_dispatch[caller_name](sample_name)
+
+def create_config_dict(sample_name: str, is_reference: bool = False, training_sets: str | dict[str, list[str]] = 'default'):
     """
     Based on _caller_params, create a config dictionary for the sample.
     """
-    if sample_sources == 'all':
-        sample_sources = ['gridss', 'manta_candidate', 'manta_diploid']
-    sources_to_drop = set(sample_sources) - set(caller_param_dict.keys())
+    if training_sets == 'default':
+        _training_sets = training_set_presets['default']
+    elif isinstance(training_sets, dict):
+        _training_sets = training_sets
+    else:
+        raise ValueError(f'Invalid training set: {training_sets}')
+
+    # Training sets are all lists of calleset names
+    # Find all unique callset names in the training sets
+    callset_names = set()
+    for training_set in _training_sets.values():
+        for callset_name in training_set:
+            callset_names.add(callset_name)
+    callset_names = list(callset_names)
 
     if is_reference:
         config_dict = {
-            sample_name: {
-                'sample_dir': Path(f'data/{sample_name}'),
-                'is_reference': True,
-                'callsets': {
-                    sample_name: {
-                        'source': sample_name,
-                        'svensemble_dir': Path(f'data/{sample_name}/svensemble2'),
-                        'path': Path(f'data/{sample_name}/{sample_name}.vcf.gz'),
-                        'params': caller_param_dict[sample_name]
-                    }
-                }
-            }
+            sample_name: _get_caller_callset_dict(sample_name, default_reference_set)
         }
         return config_dict
 
@@ -37,31 +86,12 @@ def create_config_dict(sample_name: str, sample_sources: str | list[str] = 'all'
             'sample_dir': Path(f'data/{sample_name}'),
             'is_reference': False,
             'callsets': {
-                'gridss': {
-                    'source': 'gridss',
-                    'svensemble_dir': Path(f'data/{sample_name}/sv_calling/gridss/svensemble2'),
-                    'path': Path(f'data/{sample_name}/sv_calling/gridss/out/{sample_name}.gridss.vcf'),
-                    'params': caller_param_dict['gridss']
-                },
-                'manta_candidate': {
-                    'source': 'manta_candidate',
-                    'svensemble_dir': Path(f'data/{sample_name}/sv_calling/manta/svensemble2'),
-                    'path': Path(f'data/{sample_name}/sv_calling/manta/results/variants/candidateSV.vcf.gz'),
-                    'params': caller_param_dict['manta_candidate']
-                },
-                'manta_diploid': {
-                    'source': 'manta_diploid',
-                    'svensemble_dir': Path(f'data/{sample_name}/sv_calling/manta/svensemble2'),
-                    'path': Path(f'data/{sample_name}/sv_calling/manta/results/variants/diploidSV.vcf.gz'),
-                    'params': caller_param_dict['manta_diploid']
-                }
+                callset_name: _get_caller_callset_dict(sample_name, caller_name=callset_name)
+                for callset_name in callset_names
             },
-            'training_sets': training_set_presets['default']
+            'training_sets': _training_sets
         }
     }
-
-    for source in sources_to_drop:
-        del config_dict[sample_name][source]
 
     return config_dict
 

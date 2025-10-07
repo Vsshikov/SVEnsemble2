@@ -1,0 +1,51 @@
+#!/bin/bash
+
+#SBATCH --job-name=NA12878_30x.delly
+#SBATCH --mem=31GB
+#SBATCH --cpus-per-task=16
+#SBATCH --time=24:00:00
+
+# Load required modules
+MODULES="samtools micromamba"
+
+# Define paths
+DATA_DIR="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/NA12878_30x"
+DELLY_PATH="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/callers/delly"
+DELLY_BIN="${DELLY_PATH}/delly_v1.5.0_linux_x86_64bit"
+DELLY2BND_PATH="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/callers/delly"
+
+GENOME_FASTA="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/hg38.no_decoys.fa"
+# EXCLUDE_BED="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/ENCFF356LFX.bed"
+
+WORKDIR="${DATA_DIR}/sv_calling/delly"
+INPUT_BAM="${DATA_DIR}/aligned/NA12878.minimap.30x.bam"
+DELLY_OUTPUT_BCF="${WORKDIR}/out/$(basename "${INPUT_BAM}" .bam).delly.bcf"
+DELLY2BND_OUTPUT_VCF="${DELLY_OUTPUT_BCF%.bcf}.2bnd.vcf"
+
+
+# Prepare environment
+module purge
+module load ${MODULES}
+
+# Create output directory if it doesn't exist
+mkdir -p "${WORKDIR}/out"
+
+# Create a sorted bam if not present.
+SORTED_BAM="${WORKDIR}/temp/$(basename "${INPUT_BAM}" .bam).sorted.bam"
+if [ ! -f "${SORTED_BAM}" ]; then
+    mkdir -p "${WORKDIR}/temp"
+    samtools sort -o "${SORTED_BAM}" "${INPUT_BAM}"
+    samtools index "${SORTED_BAM}"
+fi
+
+# Run DELLY
+"${DELLY_BIN}" call -g "${GENOME_FASTA}" -o "${DELLY_OUTPUT_BCF}" "${SORTED_BAM}"
+
+# Run delly2bnd.py
+micromamba run -n SVEnsemble2 python "${DELLY2BND_PATH}/delly2bnd.py" -v $DELLY_OUTPUT_BCF -r $GENOME_FASTA -o $DELLY2BND_OUTPUT_VCF
+# Add an EVENT entry to INFO field of the VCF.
+# EVENT will be similar to ID field but
+
+# Create final output by joining the bcf and the vcf.
+# Before joining remove BND calls from the BCF as the VCF will containg them in the right notation.
+bcftools sort -O b -o bnd.bcf out.vcf

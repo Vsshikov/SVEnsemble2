@@ -6,3 +6,16 @@ F1 scores???
 Justin suggestion: 1/FP vs TP/FP, play with scales
 
 Rewrite unbiased_dict to be saved with {model_name}_dict.pkl architecture + importances and other downstream scripts to accomodate
+
+
+delly preprocessing:
+BOTH:
+- ensure there are no iterable variables
+- create universal CHR2 variable, not just for cases where there are 2 chrs in an SV
+- check SAMPLE entries for weirdness
+EVTS:
+- split CIPOS/CIEND
+- ensure SVLEN is integer and there are no NaNs
+- create INFO_EVENT variable
+BNDS:
+- split CIPOS, drop CIEND
