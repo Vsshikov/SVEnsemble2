@@ -61,8 +61,11 @@ def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground
     """
     Based on _caller_params, create a config dictionary for the sample.
     """
-    if training_sets == 'default':
-        _training_sets = training_set_presets['default']
+    if isinstance(training_sets, str):
+        if training_sets in training_set_presets.keys():
+            _training_sets = training_set_presets[training_sets]
+        else:
+            raise ValueError(f'Invalid training set: {training_sets}')
     elif isinstance(training_sets, dict):
         _training_sets = training_sets
     else:

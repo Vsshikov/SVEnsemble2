@@ -63,6 +63,13 @@ training_set_presets = {
         'gridss': ['gridss'],
         'manta_candidate': ['manta_candidate'],
         'gridss+manta_candidate': ['gridss', 'manta_candidate']
+    },
+    'gridss_manta': {
+        'gridss': ['gridss'],
+        'manta_candidate': ['manta_candidate'],
+        'manta_diploid': ['manta_diploid'],
+        'gridss+manta_candidate': ['gridss', 'manta_candidate'],
+        'gridss+manta_diploid': ['gridss', 'manta_diploid']
     }
 }
 

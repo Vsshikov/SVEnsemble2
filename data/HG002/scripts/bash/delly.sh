@@ -17,7 +17,7 @@ GENOME_FASTA="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/
 # EXCLUDE_BED="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/ENCFF356LFX.bed"
 
 WORKDIR="${DATA_DIR}/sv_calling/delly"
-INPUT_BAM="${DATA_DIR}/aligned/HG002.GRCh38.60x.1.bam"
+INPUT_BAM="${DATA_DIR}/aligned/HG002.bam"
 OUTPUT_BCF="${WORKDIR}/out/$(basename "${INPUT_BAM}" .bam).delly.bcf"
 
 # Prepare environment

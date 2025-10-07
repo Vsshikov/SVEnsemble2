@@ -40,12 +40,3 @@ fi
 
 # Run DELLY
 "${DELLY_BIN}" call -g "${GENOME_FASTA}" -o "${DELLY_OUTPUT_BCF}" "${SORTED_BAM}"
-
-# Run delly2bnd.py
-micromamba run -n SVEnsemble2 python "${DELLY2BND_PATH}/delly2bnd.py" -v $DELLY_OUTPUT_BCF -r $GENOME_FASTA -o $DELLY2BND_OUTPUT_VCF
-# Add an EVENT entry to INFO field of the VCF.
-# EVENT will be similar to ID field but
-
-# Create final output by joining the bcf and the vcf.
-# Before joining remove BND calls from the BCF as the VCF will containg them in the right notation.
-bcftools sort -O b -o bnd.bcf out.vcf
