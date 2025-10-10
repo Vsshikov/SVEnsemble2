@@ -89,7 +89,7 @@ def plot_svensemble2_permutation_importance(importances, stds=None, plot_n=20, o
     importance_df = pd.DataFrame({'importances': importances, 'stds': stds}).sort_values(by='importances', ascending=False).iloc[:plot_n, :]
 
     fig, ax = plt.subplots()
-    importance_df.plot(ax=ax, kind='barh', xerr='stds', x='importances')
+    importance_df.plot(ax=ax, kind='barh', yerr='stds', y='importances')
     ax.set_title("Mean accuracy decrease")
     ax.set_ylabel("Feature importances using permutation on full model")
     if title is not None:
@@ -103,7 +103,7 @@ def plot_svensemble2_permutation_importance(importances, stds=None, plot_n=20, o
         plt.show()
 
 
-def svensemble2_feature_importance(sample_name, ref_sample_name, training_set_name, model_name='unbiased', output_dir=None, n_repeats=10, random_state=42, plot_n=20):
+def svensemble2_feature_importance(sample_name, ref_sample_name, training_set_name, model_name='unbiased', output_dir=None, rerun_calc=False, n_repeats=10, random_state=42, plot_n=20):
     """
     Compute feature importances for the specified training set in the specified sample.
     Loads all the files using sample names and saves the importances and plots to specified output directory.
@@ -121,24 +121,40 @@ def svensemble2_feature_importance(sample_name, ref_sample_name, training_set_na
     # TEMPORARY: DEFAULT OUTPUT DIR
     if output_dir is None:
         output_dir = '/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/model/figs/featureimportance'
+        output_png = f'{output_dir}/svensemble2_permutation_importance_{sample_name}_{training_set_name}_{model_name}.png'
+        output_csv = f'{output_dir}/svensemble2_permutation_importance_{sample_name}_{training_set_name}_{model_name}.csv'
 
-    # Create sample config and reference sample config
-    sample_config = sv_utils.create_config_dict(sample_name, is_ground_truth=False)[sample_name]
-    ref_sample_config = sv_utils.create_config_dict(ref_sample_name, is_ground_truth=True)[ref_sample_name]
+    if rerun_calc and os.path.exists(output_csv):
+        os.remove(output_csv)
+        os.remove(output_png)
 
-    train_test_splits = load_svensemble2_train_test_splits(sample_config, ref_sample_config, training_set_name, verbose=True)
+    if os.path.exists(output_csv):
+        importances_df = pd.read_csv(output_csv, index_col=0)
+        importances_series = importances_df['importances']
+        importances_stds = importances_df['stds']
 
-    # Load the trained model + predictions
-    svensemble2_model = pickle.load(open(f'{sample_config["sample_dir"]}/sv_calling/svensemble2/unbiased_dict.pkl', 'rb'))[training_set_name]['RF_fit']
+    else:
 
-    importances = svensemble2_permutation_importance(svensemble2_model, train_test_splits['X_val'], train_test_splits['y_val'], n_repeats=n_repeats, random_state=random_state)
+        # Create sample config and reference sample config
+        sample_config = sv_utils.create_config_dict(sample_name, is_ground_truth=False)[sample_name]
+        ref_sample_config = sv_utils.create_config_dict(ref_sample_name, is_ground_truth=True)[ref_sample_name]
 
-    importances_series = pd.Series(importances.importances_mean, index=train_test_splits['X_val'].columns)
-    importances_stds = pd.Series(importances.importances_std, index=train_test_splits['X_val'].columns)
+        train_test_splits = load_svensemble2_train_test_splits(sample_config, ref_sample_config, training_set_name, verbose=True)
 
-    plot_svensemble2_permutation_importance(importances_series, stds=importances_stds, plot_n=plot_n, output=f'{output_dir}/svensemble2_permutation_importance_{sample_name}_{training_set_name}_{model_name}.png', title=f"{sample_name}\n{training_set_name}\n{model_name}")
+        # Load the trained model + predictions
+        svensemble2_model = pickle.load(open(f'{sample_config["sample_dir"]}/sv_calling/svensemble2/unbiased_dict.pkl', 'rb'))[training_set_name]['RF_fit']
 
-    pd.DataFrame({'importances': importances_series, 'stds': importances_stds}).to_csv(f'{output_dir}/svensemble2_permutation_importance_{sample_name}_{training_set_name}_{model_name}.csv')
+        importances = svensemble2_permutation_importance(svensemble2_model, train_test_splits['X_val'], train_test_splits['y_val'], n_repeats=n_repeats, random_state=random_state)
+
+
+        importances_series = pd.Series(importances.importances_mean, index=train_test_splits['X_val'].columns)
+        importances_stds = pd.Series(importances.importances_std, index=train_test_splits['X_val'].columns)
+
+        pd.DataFrame({'importances': importances_series, 'stds': importances_stds}).to_csv(output_csv)
+
+    plot_svensemble2_permutation_importance(importances_series, stds=importances_stds, plot_n=plot_n, output=output_png, title=f"{sample_name}\n{training_set_name}\n{model_name}")
+
+
 
 
 if __name__ == '__main__':
@@ -189,6 +205,12 @@ if __name__ == '__main__':
         type=str,
         default=None,
         help="Directory to save the output."
+    )
+    parser.add_argument(
+        '--rerun_calc',
+        type=bool,
+        default=False,
+        help="Whether to rerun the calculation."
     )
     parser.add_argument(
         '--n_repeats',

@@ -45,6 +45,7 @@ default_params = {
     'parse_format': False,
     'format_cols': default_format_cols,
     'is_reference': False,
+    'qual_metric': 'QUAL'
 }
 training_set_presets = {
     'default': {
@@ -178,7 +179,8 @@ manta_candidate_params = default_params | {
     'info_cols_pred': ['IMPRECISE', 'HOMLEN', 'BND_DEPTH', 'SVLEN', 'PAIR_COUNT', 'UPSTREAM_PAIR_COUNT', 'DOWNSTREAM_PAIR_COUNT', 'BND_PAIR_COUNT'],
     'parse_format': False,
     'svlen_source': 'svlen',
-    'bps_path': 'sv_calling/manta/svensemble2/manta_candidate_bps.csv'
+    'bps_path': 'sv_calling/manta/svensemble2/manta_candidate_bps.csv',
+    'qual_metric': 'INFO_TOTAL_PAIR_COUNT'
 }
 
 manta_diploid_params = default_params | {

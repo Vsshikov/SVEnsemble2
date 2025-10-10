@@ -4,47 +4,62 @@ Utility functions for SVEnsemble
 
 import pandas as pd
 from pathlib import Path
+from collections import defaultdict
 from ._caller_params import caller_param_dict, training_set_presets, default_reference_set
+from ._sample_params import sample_val_sets, sample_val_set_template
+from typing import Dict, Any
+
+human_chroms = [f'chr{i}' for i in range(1, 23)] + ['chrX', 'chrY', 'chrM']
 
 def _get_gnomad_callset_dict(sample_name: str) -> dict:
-    return {
-        'source': 'gnomad',
-        'svensemble_dir': Path(f'data/{sample_name}/svensemble2'),
-        'path': Path(f'data/{sample_name}/{sample_name}.vcf.gz'),
-        'params': caller_param_dict['gnomad']
-    }
+    return defaultdict(str,
+        {
+            'source': 'gnomad',
+            'svensemble_dir': Path(f'data/{sample_name}/svensemble2'),
+            'path': Path(f'data/{sample_name}/{sample_name}.vcf.gz'),
+            'params': caller_param_dict['gnomad']
+        }
+    )
 
 def _get_gridss_callset_dict(sample_name: str) -> dict:
-    return {
-        'source': 'gridss',
-        'svensemble_dir': Path(f'data/{sample_name}/sv_calling/gridss/svensemble2'),
-        'path': Path(f'data/{sample_name}/sv_calling/gridss/out/{sample_name}.gridss.vcf'),
-        'params': caller_param_dict['gridss']
-    }
+    return defaultdict(str,
+        {
+            'source': 'gridss',
+            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/gridss/svensemble2'),
+            'path': Path(f'data/{sample_name}/sv_calling/gridss/out/{sample_name}.gridss.vcf'),
+            'params': caller_param_dict['gridss']
+        }
+    )
 
 def _get_manta_candidate_callset_dict(sample_name: str) -> dict:
-    return {
-        'source': 'manta_candidate',
-        'svensemble_dir': Path(f'data/{sample_name}/sv_calling/manta/svensemble2'),
-        'path': Path(f'data/{sample_name}/sv_calling/manta/results/variants/candidateSV.vcf.gz'),
-        'params': caller_param_dict['manta_candidate']
-    }
+    return defaultdict(str,
+        {
+            'source': 'manta_candidate',
+            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/manta/svensemble2'),
+            'path': Path(f'data/{sample_name}/sv_calling/manta/results/variants/candidateSV.vcf.gz'),
+            'params': caller_param_dict['manta_candidate']
+        }
+    )
 
 def _get_manta_diploid_callset_dict(sample_name: str) -> dict:
-    return {
-        'source': 'manta_diploid',
-        'svensemble_dir': Path(f'data/{sample_name}/sv_calling/manta/svensemble2'),
-        'path': Path(f'data/{sample_name}/sv_calling/manta/results/variants/diploidSV.vcf.gz'),
-        'params': caller_param_dict['manta_diploid']
-    }
+    return defaultdict(str,
+        {
+            'source': 'manta_diploid',
+            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/manta/svensemble2'),
+            'path': Path(f'data/{sample_name}/sv_calling/manta/results/variants/diploidSV.vcf.gz'),
+            'params': caller_param_dict['manta_diploid']
+        }
+    )
 
 def _get_delly_callset_dict(sample_name: str) -> dict:
-    return {
-        'source': 'delly',
-        'svensemble_dir': Path(f'data/{sample_name}/sv_calling/delly/svensemble2'),
-        'path': Path(f'data/{sample_name}/sv_calling/delly/out/{sample_name}.delly.bcf'),
-        'params': caller_param_dict['delly']
-    }
+    return defaultdict(str,
+        {
+            'source': 'delly',
+            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/delly/svensemble2'),
+            'path': Path(f'data/{sample_name}/sv_calling/delly/out/{sample_name}.delly.bcf'),
+            'params': caller_param_dict['delly']
+        }
+    )
 
 def _get_caller_callset_dict(sample_name: str, caller_name: str) -> dict:
     caller_dispatch = {
@@ -57,7 +72,7 @@ def _get_caller_callset_dict(sample_name: str, caller_name: str) -> dict:
 
     return caller_dispatch[caller_name](sample_name)
 
-def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground_truth: bool = False, training_sets: str | dict[str, list[str]] = 'default'):
+def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground_truth: bool = False, training_sets: str | dict[str, list[str]] = 'default', val_set: None | str | dict[str, Any] = None):
     """
     Based on _caller_params, create a config dictionary for the sample.
     """
@@ -79,6 +94,21 @@ def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground
             callset_names.add(callset_name)
     callset_names = list(callset_names)
 
+    # If a validation set exists for the sample, add it to the config dict.
+    if val_set == 'use_name':
+        if sample_name not in sample_val_sets.keys():
+            raise ValueError(f'Validation set not found for sample: {sample_name}')
+        val_set = sample_val_sets[sample_name]
+    elif isinstance(val_set, dict):
+        if all(key in val_set.keys() for key in sample_val_set_template.keys()):
+            val_set = val_set
+        else:
+            raise ValueError(f'Invalid validation set: {val_set}')
+    elif val_set is None:
+        val_set = None
+    else:
+        raise ValueError(f'Invalid validation set: {val_set}')
+
     if is_ground_truth:
         config_dict = {
             sample_name: {
@@ -89,7 +119,7 @@ def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground
                 }
             }
         }
-        return config_dict
+        return defaultdict(str, config_dict)
 
     config_dict = {
         sample_name: {
@@ -100,12 +130,15 @@ def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground
                 for callset_name in callset_names
             },
             'training_sets': _training_sets,
-            'ref_path': ref_path
+            'ref_path': ref_path,
+            'val_set': val_set
         }
     }
 
     if not config_dict:
         raise ValueError(f"No config dictionary created for sample {sample_name}")
+
+    config_dict = defaultdict(str, config_dict)
 
     return config_dict
 
@@ -174,3 +207,35 @@ def split_ciend(ciend_col: pd.Series, default_ciend: tuple[int, int] = (0, 0)) -
     ciend_df.loc[:, ciend_col.name.replace('INFO_CIEND', 'INFO_CIEND_l')] = ciend_col.str[0].fillna(default_ciend[0]).astype(int)
     ciend_df.loc[:, ciend_col.name.replace('INFO_CIEND', 'INFO_CIEND_r')] = ciend_col.str[1].fillna(default_ciend[1]).astype(int)
     return ciend_df.drop(columns=[ciend_col.name])
+
+
+def create_samples_config_table(samples: Dict[str, Dict[str, Any]]) -> pd.DataFrame:
+    """
+    Create a configuration table (CSV) listing all sample, training set, and model name combinations.
+
+    Args:
+        samples (Dict[str, Dict[str, Any]]):
+            Dictionary mapping sample names to their configuration dictionaries.
+            Each configuration dictionary is expected to contain a 'training_sets' key,
+            which is iterable of training set names.
+
+    Returns:
+        pandas.DataFrame:
+            DataFrame with columns ['sample_name', 'training_set_name', 'model_name'].
+            Each row is a combination of sample, training set, and model name ("unbiased").
+    """
+    sample_names: list = []
+    training_set_names: list = []
+    model_names: list = []
+
+    for sample_name, sample_config in samples.items():
+        for training_set_name in sample_config['training_sets']:
+            sample_names.append(sample_name)
+            training_set_names.append(training_set_name)
+            model_names.append('unbiased')
+
+    return pd.DataFrame({
+        'sample_name': sample_names,
+        'training_set_name': training_set_names,
+        'model_name': model_names
+    })

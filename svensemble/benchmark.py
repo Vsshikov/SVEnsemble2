@@ -3,9 +3,16 @@ import pandas as pd
 from sklearn.metrics import roc_curve
 from sklearn.metrics import precision_recall_curve
 import numpy as np
+from typing import Dict, Any
 
 from . import breakends as bnds
 from . import events as evts
+from . import utils as sv_utils
+from . import _caller_params as caller_params
+from . import _sample_params as sample_params
+from . import vcfparse as vcfp
+from pathlib import Path
+import pysam
 
 def load_truth_variants(ref_path):
     """Load reference variants from Kosugi study from BED file
@@ -272,3 +279,158 @@ def plot_precision_recall_curves(sample_val_dict, ax=None, use_counts=True):
     plt.ylabel(ylabel, size='large', weight=700)
 
     return ax
+
+
+def preprocess_hg002_val_set(sample, vcf_path, force_rerun=False, long_val=True):
+    """
+    Preprocess the HG002 validation VCF file for benchmarking by parsing, annotating,
+    and converting SV events to breakpoints. Results are stored as a CSV.
+
+    Args:
+        sample (dict): Dictionary containing metadata for HG002 sample, must include correct 'val_set' key with 'path' value.
+        vcf_path (str or Path): Path to the input VCF file for HG002.
+        force_rerun (bool, optional): If True, forces preprocessing even if the output exists.
+
+    Saves:
+        Writes the processed breakpoints dataframe to sample['val_set']['path'] as CSV.
+    """
+    # Only run if the annotated file does not exist, or if force_rerun is True
+    if not Path(sample['val_set']['path']).exists() or force_rerun:
+
+        # Parse the input VCF file using the predefined caller parameters
+        hg002_val_vcf = pysam.VariantFile(vcf_path)
+        hg002_val_vcf_df, hg002_val_vcf_meta = vcfp.parse_vcf_to_df(
+            hg002_val_vcf, caller_params=caller_params.hg002_params
+        )
+
+        # Filter out entries with missing SVTYPE
+        hg002_val_vcf_df = hg002_val_vcf_df[hg002_val_vcf_df['INFO_SVTYPE'].notna()]
+
+        # Assign unique event IDs and set them as VCF IDs
+        hg002_val_vcf_df.loc[:, 'INFO_EVENT'] = [
+            f'HG002_{i}' for i in range(len(hg002_val_vcf_df))
+        ]
+        hg002_val_vcf_df.loc[:, 'ID'] = hg002_val_vcf_df['INFO_EVENT']
+
+        # Set dummy confidence intervals for positions and ends, and set INFO_CHR2 to chromosome name
+        hg002_val_vcf_df.loc[:, 'INFO_CIPOS_l'] = -10
+        hg002_val_vcf_df.loc[:, 'INFO_CIPOS_r'] = 10
+        hg002_val_vcf_df.loc[:, 'INFO_CIEND_l'] = -10
+        hg002_val_vcf_df.loc[:, 'INFO_CIEND_r'] = 10
+        hg002_val_vcf_df.loc[:, 'INFO_CHR2'] = hg002_val_vcf_df['CHROM']
+
+        # Transform events to breakend format, then to breakpoints
+        hg002_val_vcf_df_bnds = evts.event_to_bnd(hg002_val_vcf_df)
+        hg002_val_vcf_df_bps = bnds.bnd_to_bp(hg002_val_vcf_df_bnds)
+
+        # If only 'long' variants are desired, filter for SVLEN > 50
+        if long_val:
+            hg002_val_vcf_df_bps = hg002_val_vcf_df_bps[
+                hg002_val_vcf_df_bps['INFO_SVLEN'] > 50
+            ]
+
+        # Save the processed DataFrame as CSV
+        hg002_val_vcf_df_bps.to_csv(sample['val_set']['path'], index=False)
+
+
+def preprocess_kosugi_val_set(sample, vcf_path, force_rerun=False, long_val=True):
+    """
+    Preprocess the Kosugi validation set, converting to VCF-like breakpoints and saving as CSV.
+
+    Args:
+        sample (dict): Dictionary with at least key 'val_set' containing 'path'.
+        force_rerun (bool, optional): If True, regenerate even if the file already exists.
+        long_val (bool, optional): Only retain variants with SVLEN > 50 if True.
+
+    Saves:
+        CSV file at sample['val_set']['path'] with breakpoint-format variants.
+    """
+    out_path = Path(sample['val_set']['path'])
+
+    if not out_path.exists() or force_rerun:
+        val_df = load_truth_variants(
+            vcf_path
+        )
+        val_vcf = truth_to_vcf_df(val_df)
+
+        # Convert Kosugi variant DataFrame to breakpoint format
+        val_vcf_bps = truth_event_to_bnd(val_vcf)
+
+        if long_val:
+            val_vcf_bps = val_vcf_bps[val_vcf_bps['INFO_SVLEN'] > 50]
+
+        val_vcf_bps.to_csv(out_path, index=False)
+
+
+def preprocess_chm13_val_set(sample, vcf_path, force_rerun=False):
+    """
+    Preprocess CHM13 validation set: filter, normalize, convert to breakpoints, save as CSV.
+
+    Args:
+        sample (dict): Dictionary with at least key 'val_set' containing 'path'.
+        force_rerun (bool, optional): If True, regenerate even if the file already exists.
+
+    Saves:
+        CSV file at sample['val_set']['path'] with breakpoint-format variants.
+    """
+    out_path = Path(sample['val_set']['path'])
+
+    if not out_path.exists() or force_rerun:
+        # Read raw CHM13 validation annotation data
+        chm_val_df = pd.read_csv(
+            vcf_path
+        )
+
+        chm_val_vcf_df = chm_val_df.copy()
+
+        # Filter for rows with valid coordinates and correct assembly
+        chm_val_vcf_df = chm_val_vcf_df.dropna(subset=['Start', 'End'])
+        chm_val_vcf_df = chm_val_vcf_df[
+            chm_val_vcf_df['Assembly Name'] == 'GRCh38 (hg38)'
+        ]
+
+        # Standardize variant type nomenclature
+        chm_rename_dict = {
+            'insertion': 'INS',
+            'deletion': 'DEL',
+            'inversion': 'INV',
+        }
+        chm_val_vcf_df.loc[:, 'Variant Call type'] = chm_val_vcf_df[
+            'Variant Call type'
+        ].map(chm_rename_dict)
+
+        # Ensure variant coordinates are integers
+        chm_val_vcf_df.loc[:, 'Start'] = chm_val_vcf_df['Start'].astype(int)
+        chm_val_vcf_df.loc[:, 'End'] = chm_val_vcf_df['End'].astype(int)
+
+        # Prepare field names and assign standardized VCF-like values
+        chm_val_cols_to_keep = [
+            'CHROM', 'POS', 'INFO_CHR2', 'REF', 'ALT', 'ID',
+            'INFO_EVENT', 'INFO_SVTYPE', 'INFO_SVLEN', 'INFO_END',
+            'INFO_CIPOS_l', 'INFO_CIPOS_r', 'INFO_CIEND_l', 'INFO_CIEND_r'
+        ]
+        chm_val_vcf_df.loc[:, 'CHROM'] = 'chr' + chm_val_vcf_df['Chromosome'].astype(str)
+        chm_val_vcf_df.loc[:, 'POS'] = chm_val_vcf_df['Start'] + 1
+        chm_val_vcf_df.loc[:, 'INFO_CHR2'] = 'chr' + chm_val_vcf_df['Chromosome'].astype(str)
+        chm_val_vcf_df.loc[:, 'INFO_END'] = chm_val_vcf_df['End']
+        chm_val_vcf_df.loc[:, 'REF'] = '.'
+        chm_val_vcf_df.loc[:, 'ALT'] = '.'
+        chm_val_vcf_df.loc[:, 'ID'] = chm_val_vcf_df['Variant ID']
+        chm_val_vcf_df.loc[:, 'INFO_EVENT'] = chm_val_vcf_df['Variant ID']
+        chm_val_vcf_df.loc[:, 'INFO_SVTYPE'] = chm_val_vcf_df['Variant Call type']
+        chm_val_vcf_df.loc[:, 'INFO_SVLEN'] = 0
+        chm_val_vcf_df.loc[:, 'INFO_CIPOS_l'] = -10
+        chm_val_vcf_df.loc[:, 'INFO_CIPOS_r'] = 10
+        chm_val_vcf_df.loc[:, 'INFO_CIEND_l'] = -10
+        chm_val_vcf_df.loc[:, 'INFO_CIEND_r'] = 10
+
+        # Subset and retain only canonical chromosomes
+        chm_val_vcf_df = chm_val_vcf_df[chm_val_cols_to_keep]
+        chm_val_vcf_df = chm_val_vcf_df[
+            chm_val_vcf_df['CHROM'].isin(sv_utils.human_chroms)
+        ]
+
+        # Convert to breakpoint format. No SVLEN in this reference set for long_val filter.
+        result_bps = bnds.bnd_to_bp(evts.event_to_bnd(chm_val_vcf_df))
+
+        result_bps.to_csv(out_path, index=False)
