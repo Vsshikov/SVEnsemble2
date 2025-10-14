@@ -5,7 +5,7 @@
 #SBATCH --error=svensemble2_importances.err
 #SBATCH --time=10:00:00
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 
 """
 Functions for computing feature importances for svensemble2 models.
@@ -30,49 +30,43 @@ if WORKDIR not in sys.path:
 import svensemble.matched_breakpoints as matchedbps  # noqa: E402
 import svensemble.utils as sv_utils  # noqa: E402
 
-def load_svensemble2_train_test_splits(sample_config, reference_sample_config, training_set_name, verbose=False) -> dict[str, pd.DataFrame]:
-    joint_bp_path = (
-        sample_config['sample_dir'] /
-        'sv_calling' /
-        'svensemble2' /
-        f'matched_bps_{training_set_name}.csv'
-    )
 
-    if verbose:
-        print(f"Loading joint breakpoints from: {joint_bp_path}")
-    joint_bp_df = pd.read_csv(joint_bp_path, low_memory=False)
+def load_svensemble2_val_Xy_from_pickles(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, verbose=False):
+    samples = pickle.load(open(samples_pkl_path, 'rb'))
+    val_dict = pickle.load(open(val_dict_pkl_path, 'rb'))
 
-    # Preprocess for PU learning
-    if verbose:
-        print("Preprocessing sample for PU learning...")
-        print(f"Reference name: {reference_sample_config['callsets'][list(reference_sample_config['callsets'].keys())[0]]['source']}")
+    matched_bps = samples[sample_name]['matched_bps'][training_set_name].copy()
+    matched_bps.loc[:, 'val_INFO_EVENT'] = np.where(val_dict[sample_name][f'svensemble2_{training_set_name}']['is_in_val'], True, np.nan)
 
-    training_set_df = matchedbps.preprocess_matchedbps_for_pu(
-        joint_bp_df,
-        sample_config,
-        reference_sample_config['callsets'][list(reference_sample_config['callsets'].keys())[0]]['source'],
-        training_set_name,
+    preprocessed_matched_bps = matchedbps.preprocess_matchedbps_for_pu(
+        joint_bp_df=matched_bps,
+        sample_config=samples[sample_name],
+        match_sample_name='val',
+        training_set_name=training_set_name,
+        add_match_ids_to_index=False,
         verbose=verbose
     )
 
-    X, y = matchedbps.get_X_y_from_training_df(
-        training_set_df,
-        match_col='ref_match'
-    )
-    X_train, X_val, y_train, y_val = skm.train_test_split(
-        X, y, train_size=0.8, random_state=0
-    )
+    return matchedbps.get_X_y_from_training_df(preprocessed_matched_bps, match_col='ref_match')
 
-    return {
-        'X_train': X_train,
-        'X_val': X_val,
-        'y_train': y_train,
-        'y_val': y_val
-    }
 
 def svensemble2_permutation_importance(model, X, y, n_repeats=10, random_state=42):
 
     start_time = time.time()
+
+    # Check if features in the model are the same as the dataframe columns
+    # If extra columns present in the dataframe, remove them
+    # If impossible to make features/columns the same, raise an error
+    if set(model.feature_names_in_) != set(X.columns):
+        extra_features = set(X.columns) - set(model.feature_names_in_)
+        missing_features = set(model.feature_names_in_) - set(X.columns)
+        if len(extra_features) > 0:
+            print(f"Extra features in the dataframe: {extra_features}")
+            X = X.drop(columns=extra_features)
+        if len(missing_features) > 0:
+            print(f"Missing features in the dataframe: {missing_features}")
+            raise ValueError("Features in the model are not the same as the dataframe columns")
+
     result = permutation_importance(
         model, X, y, n_repeats=n_repeats, random_state=random_state
     )
@@ -103,7 +97,7 @@ def plot_svensemble2_permutation_importance(importances, stds=None, plot_n=20, o
         plt.show()
 
 
-def svensemble2_feature_importance(sample_name, ref_sample_name, training_set_name, model_name='unbiased', output_dir=None, rerun_calc=False, n_repeats=10, random_state=42, plot_n=20):
+def svensemble2_feature_importance(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, model_name='unbiased', output_dir=None, rerun_calc=False, n_repeats=10, random_state=42, plot_n=20, verbose=False):
     """
     Compute feature importances for the specified training set in the specified sample.
     Loads all the files using sample names and saves the importances and plots to specified output directory.
@@ -114,9 +108,16 @@ def svensemble2_feature_importance(sample_name, ref_sample_name, training_set_na
 
     Args:
         sample_name (str): Name of the sample to process.
-        ref_sample_name (str): Name of the reference sample.
+        samples_pkl_path (str): Path to the samples pickle file.
+        val_dict_pkl_path (str): Path to the val dictionary pickle file.
         training_set_name (str): Name of the training set to process.
+        model_name (str): Name of the model to process.
+        output_dir (str): Path to the output directory.
+        rerun_calc (bool): Whether to rerun the calculation.
         n_repeats (int): Number of times to repeat the permutation importance calculation.
+        random_state (int): Random state to use for the permutation importance calculation.
+        plot_n (int): Number of features to plot.
+        verbose (bool): Whether to print verbose output.
     """
     # TEMPORARY: DEFAULT OUTPUT DIR
     if output_dir is None:
@@ -134,21 +135,15 @@ def svensemble2_feature_importance(sample_name, ref_sample_name, training_set_na
         importances_stds = importances_df['stds']
 
     else:
-
-        # Create sample config and reference sample config
-        sample_config = sv_utils.create_config_dict(sample_name, is_ground_truth=False)[sample_name]
-        ref_sample_config = sv_utils.create_config_dict(ref_sample_name, is_ground_truth=True)[ref_sample_name]
-
-        train_test_splits = load_svensemble2_train_test_splits(sample_config, ref_sample_config, training_set_name, verbose=True)
+        X, y = load_svensemble2_val_Xy_from_pickles(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, verbose=verbose)
 
         # Load the trained model + predictions
-        svensemble2_model = pickle.load(open(f'{sample_config["sample_dir"]}/sv_calling/svensemble2/unbiased_dict.pkl', 'rb'))[training_set_name]['RF_fit']
+        svensemble2_model = pickle.load(open(samples_pkl_path, 'rb'))[sample_name]['pred_dicts'][training_set_name]['RF_fit']
 
-        importances = svensemble2_permutation_importance(svensemble2_model, train_test_splits['X_val'], train_test_splits['y_val'], n_repeats=n_repeats, random_state=random_state)
+        importances = svensemble2_permutation_importance(svensemble2_model, X, y, n_repeats=n_repeats, random_state=random_state)
 
-
-        importances_series = pd.Series(importances.importances_mean, index=train_test_splits['X_val'].columns)
-        importances_stds = pd.Series(importances.importances_std, index=train_test_splits['X_val'].columns)
+        importances_series = pd.Series(importances.importances_mean, index=X.columns)
+        importances_stds = pd.Series(importances.importances_std, index=X.columns)
 
         pd.DataFrame({'importances': importances_series, 'stds': importances_stds}).to_csv(output_csv)
 
@@ -163,6 +158,18 @@ if __name__ == '__main__':
     # Create the argument parser for command-line execution
     parser = argparse.ArgumentParser(
         description="Compute feature importances for svensemble2 models."
+    )
+    parser.add_argument(
+        '--samples_pkl_path',
+        type=str,
+        required=False,
+        help="Path to the samples pickle file."
+    )
+    parser.add_argument(
+        '--val_dict_pkl_path',
+        type=str,
+        required=False,
+        help="Path to the val dictionary pickle file."
     )
     parser.add_argument(
         '--config_file',
@@ -181,12 +188,6 @@ if __name__ == '__main__':
         type=str,
         required=False,
         help="Name of the sample to process."
-    )
-    parser.add_argument(
-        '--ref_sample_name',
-        type=str,
-        default='gnomad',
-        help="Name of the reference sample."
     )
     parser.add_argument(
         '--training_set_name',
@@ -249,11 +250,13 @@ if __name__ == '__main__':
         model_name = args.model_name
 
     svensemble2_feature_importance(
-        sample_name,
-        ref_sample_name=args.ref_sample_name,
+        samples_pkl_path=args.samples_pkl_path,
+        val_dict_pkl_path=args.val_dict_pkl_path,
+        sample_name=sample_name,
         training_set_name=training_set_name,
         model_name=model_name,
         output_dir=args.output_dir,
+        rerun_calc=args.rerun_calc,
         n_repeats=args.n_repeats,
         random_state=args.random_state,
         plot_n=args.plot_n

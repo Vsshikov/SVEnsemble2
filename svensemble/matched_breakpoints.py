@@ -7,6 +7,15 @@ import numpy as np
 from . import _caller_params as caller_params
 from . import chunk_match
 
+def generate_svensemble2_ids(matchedbps_df: pd.DataFrame, callsets: list[str], prefix: str = 'svensemble2_') -> pd.Series:
+    """
+    Generate svensemble IDs for a matched breakpoints DataFrame.
+    """
+    svensemble2_id = pd.Series(index=matchedbps_df.index, dtype=str)
+    svensemble2_id = matchedbps_df[[f'{callset}_INFO_EVENT' for callset in callsets]].astype(str).agg('|'.join, axis=1)
+    svensemble2_id = prefix + pd.factorize(svensemble2_id)[0].astype(str)
+    return svensemble2_id
+
 def get_combined_insert_size(matchedbps_df: pd.DataFrame, matchedbps_callsets: list[str], inplace: bool = False) -> pd.DataFrame:
     """
     Compute the max insert size for each callset and aggregate into a single column.
@@ -168,8 +177,9 @@ def matchedbps_to_bps(
 def preprocess_matchedbps_for_pu(
     joint_bp_df: pd.DataFrame,
     sample_config: dict,
-    reference_sample_name: str,
+    match_sample_name: str,
     training_set_name: str,
+    add_match_ids_to_index: bool = True,
     verbose: bool = False
 ) -> pd.DataFrame:
     """
@@ -238,13 +248,12 @@ def preprocess_matchedbps_for_pu(
             training_df = training_df[mask.values]
     # else: If not MultiIndex, skip filtering
 
-    # Add a 'ref_match' column: True if '{reference_sample_name}_INFO_EVENT' is not null, else False
-    if reference_sample_name is not None:
-        if f'{reference_sample_name}_INFO_EVENT' in training_df.index.names:
-            training_df = training_df.copy()
-            training_df['ref_match'] = training_df.index.get_level_values(f'{reference_sample_name}_INFO_EVENT').notna()
+    # Add a 'ref_match' column: True if '{match_sample_name}_INFO_EVENT' is not null, else False
+    if match_sample_name is not None:
+        if f'{match_sample_name}_INFO_EVENT' in training_df.index.names:
+            training_df['ref_match'] = training_df.index.get_level_values(f'{match_sample_name}_INFO_EVENT').notna()
         else:
-            raise ValueError(f"'{reference_sample_name}_INFO_EVENT' not found in joint_bp_df index.")
+            raise ValueError(f"'{match_sample_name}_INFO_EVENT' not found in joint_bp_df index.")
 
     # Convert columns with boolean-like strings to proper bool dtype
     for column in training_df.columns:
@@ -278,6 +287,10 @@ def preprocess_matchedbps_for_pu(
     if constant_cols and verbose:
         print(f"Dropping {len(constant_cols)} constant columns: {constant_cols}")
     training_df = training_df.drop(columns=constant_cols)
+
+    # Drop the match_sample_INFO_EVENT index from multiindex if specified by add_match_ids_to_index=False
+    if not add_match_ids_to_index:
+        training_df.index = training_df.index.droplevel(f'{match_sample_name}_INFO_EVENT')
 
     return training_df
 

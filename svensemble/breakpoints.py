@@ -173,3 +173,31 @@ def get_bp_chroms_orientations(bp_df: pd.DataFrame):
         raise ValueError("ALT_bnd1 and ALT_bnd2 columns must be present in the dataframe")
     return bp_df['CHROM_bnd1'] + '_' + bp_df['CHROM_bnd2'] + '_' + bnds.process_breakend_alt(bp_df['ALT_bnd1'])['relative_pos'] + bnds.process_breakend_alt(bp_df['ALT_bnd2'])['relative_pos']
 
+def trim_cipos(bp_df: pd.DataFrame, by: int | None | tuple[int, int] = None, up_to: int | None | tuple[int, int] = None):
+    """
+    Trims the confidence intervals of the breakpoints in the dataframe.
+
+    Args:
+        bp_df: DataFrame containing breakpoints.
+        by: If int, trims the confidence intervals by the given number of bases on both sides.
+            If tuple, trims the confidence intervals by the given number of bases on the left and right sides respectively.
+        up_to: Maximum length of the confidence intervals. If any CIPOS is greater than this, it is set to this value. Applied after first trimming step if present
+
+    Returns:
+        DataFrame with trimmed confidence intervals.
+    """
+    bp_df_ = bp_df.copy()
+
+    if by is None:
+        by = (0, 0)
+    elif isinstance(by, int):
+        by = (by, by)
+    if up_to is None:
+        up_to = (np.inf, np.inf)
+    elif isinstance(up_to, int):
+        up_to = (up_to, up_to)
+
+    for bnd in ['bnd1', 'bnd2']:
+        bp_df_.loc[:, f'INFO_CIPOS_l_{bnd}'] = np.clip(bp_df_[f'INFO_CIPOS_l_{bnd}'] + by[0], -up_to[0], 0)
+        bp_df_.loc[:, f'INFO_CIPOS_r_{bnd}'] = np.clip(bp_df_[f'INFO_CIPOS_r_{bnd}'] - by[1], 0, up_to[1])
+    return bp_df
