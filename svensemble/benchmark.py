@@ -86,6 +86,19 @@ def truth_event_to_bnd(ref_vcf):
 
 
 
+def get_plot_colors(n_callsets):
+    """
+    Get a list of colors for plotting based on number of callsets.
+    Uses tab20 if n_callsets > 10, otherwise default color cycle (None entries).
+    """
+    if n_callsets > 10:
+        color_map = plt.get_cmap('tab20')
+        # tab20 has 20 colors; for >20 callsets colors will repeat
+        colors = [color_map(i % 20) for i in range(n_callsets)]
+    else:
+        colors = [None] * n_callsets  # Use default color cycle
+    return colors
+
 def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pass=False, title=None):
     """
     Plot ROC curves for multiple prediction arrays against corresponding truth series
@@ -104,7 +117,11 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pass=False
     if title is not None:
         ax.set_title(title)
 
-    for callset in sample_val_dict.keys():
+    callsets = list(sample_val_dict.keys())
+    n_callsets = len(callsets)
+    colors = get_plot_colors(n_callsets)
+
+    for idx, callset in enumerate(callsets):
         callset_val_df = sample_val_dict[callset].dropna().copy()
 
         if filter_pass and 'FILTER_PASS' in sample_val_dict[callset].columns:
@@ -138,11 +155,10 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pass=False
 
         if use_counts:
             # Convert rates to counts
-            tp = tpr * total_tp
-            fp = fpr * total_tn
-            ax.plot(fp, tp, label=callset)
-        else:
-            ax.plot(fpr, tpr, label=callset)
+            tpr = tpr * total_tp
+            fpr = fpr * total_tn
+
+        ax.plot(fpr, tpr, label=callset, color=colors[idx])
 
     # Add a dotted diagonal line from (0, 0) to (total_tn, total_tp) if use_counts, else from (0, 0) to (1, 1)
     # if use_counts:
@@ -182,7 +198,11 @@ def plot_reverse_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pa
     ax.set_xscale('log')
     ax.set_yscale('log')
 
-    for callset in sample_val_dict.keys():
+    callsets = list(sample_val_dict.keys())
+    n_callsets = len(callsets)
+    colors = get_plot_colors(n_callsets)
+
+    for idx, callset in enumerate(callsets):
         callset_val_df = sample_val_dict[callset].dropna().copy()
 
         if filter_pass and 'FILTER_PASS' in sample_val_dict[callset].columns:
@@ -226,9 +246,9 @@ def plot_reverse_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pa
             reverse_fp = 1/fp_no_zeros
             tp_fp = tp_no_zeros/fp_no_zeros
 
-            ax.plot(reverse_fp, tp_fp, label=callset)
+            ax.plot(reverse_fp, tp_fp, label=callset, color=colors[idx])
         else:
-            ax.plot(fpr, tpr, label=callset)
+            ax.plot(fpr, tpr, label=callset, color=colors[idx])
 
     # Add a dotted diagonal line from (0, 0) to (total_tn, total_tp) if use_counts, else from (0, 0) to (1, 1)
     # if use_counts:
@@ -434,3 +454,5 @@ def preprocess_chm13_val_set(sample, vcf_path, force_rerun=False):
         result_bps = bnds.bnd_to_bp(evts.event_to_bnd(chm_val_vcf_df))
 
         result_bps.to_csv(out_path, index=False)
+
+

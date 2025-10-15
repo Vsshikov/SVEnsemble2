@@ -140,6 +140,19 @@ def svensemble2_feature_importance(samples_pkl_path, val_dict_pkl_path, sample_n
         # Load the trained model + predictions
         svensemble2_model = pickle.load(open(samples_pkl_path, 'rb'))[sample_name]['pred_dicts'][training_set_name]['RF_fit']
 
+        # Check if features in the model are the same as the X columns
+        # If extra columns present in the dataframe, remove them
+        # If impossible to make features/columns the same, raise an error
+        if set(svensemble2_model.feature_names_in_) != set(X.columns):
+            extra_features = set(X.columns) - set(svensemble2_model.feature_names_in_)
+            missing_features = set(svensemble2_model.feature_names_in_) - set(X.columns)
+            if len(extra_features) > 0:
+                print(f"Extra features in the dataframe: {extra_features}, dropping them")
+                X = X.drop(columns=extra_features)
+            if len(missing_features) > 0:
+                print(f"Missing features in the dataframe: {missing_features}")
+                raise ValueError("Features in the model are not the same as the dataframe columns")
+
         importances = svensemble2_permutation_importance(svensemble2_model, X, y, n_repeats=n_repeats, random_state=random_state)
 
         importances_series = pd.Series(importances.importances_mean, index=X.columns)
