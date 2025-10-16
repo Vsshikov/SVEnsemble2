@@ -8,13 +8,21 @@ import pandas as pd
 import pyranges as pr
 
 from . import breakends as bnds
+from . import events as evts
 from . import utils
+from . import _caller_params as caller_params
 
 def get_insert_seq_len_from_svensemble2_len_col(bp_df: pd.DataFrame) -> pd.Series:
     """
     Extracts insert sequence length from the 'svensemble2_insert_size' column.
     """
     return bp_df['svensemble2_insert_size']
+
+insert_source_dispatch = {
+    'svlen': evts.get_insert_seq_len_from_svlen,
+    'alt': bnds.get_insert_seq_len_from_alt,
+    'svensemble2_col': get_insert_seq_len_from_svensemble2_len_col
+}
 
 def sort_bp_df(bp_df: pd.DataFrame, chrom_keys: dict) -> pd.DataFrame:
     """
@@ -201,3 +209,63 @@ def trim_cipos(bp_df: pd.DataFrame, by: int | None | tuple[int, int] = None, up_
         bp_df_.loc[:, f'INFO_CIPOS_l_{bnd}'] = np.clip(bp_df_[f'INFO_CIPOS_l_{bnd}'] + by[0], -up_to[0], 0)
         bp_df_.loc[:, f'INFO_CIPOS_r_{bnd}'] = np.clip(bp_df_[f'INFO_CIPOS_r_{bnd}'] - by[1], 0, up_to[1])
     return bp_df
+
+def get_insert_size(bp_df: pd.DataFrame, source: str | None = None) -> pd.Series:
+    """
+    Calculates insert sequence length from ALT or SVLEN column
+    Requires 'source' column to be present in the dataframe or source to be provided
+    """
+    bp_df_ = bp_df.copy()
+
+    insert_sizes = pd.Series(index=bp_df.index)
+
+    if isinstance(source, str):
+        bp_df_.loc[:, 'source'] = source
+
+    for source in bp_df_['source'].unique():
+        insert_sizes.loc[bp_df_['source'] == source] = (
+            insert_source_dispatch[caller_params.caller_param_dict[source]['svlen_source']](
+                bp_df_[bp_df_['source'] == source]
+            )
+        )
+    insert_sizes.loc[insert_sizes < 0] = 0
+    insert_sizes = insert_sizes.fillna(0)  # Convert NAs to 0
+    insert_sizes = insert_sizes.astype(int)
+    return insert_sizes
+
+
+def annotate_svtypes(bps_df, source):
+
+    ins_lens = get_insert_size(bps_df, source=source)
+    bnd1 = bnds.process_breakend_alt(bps_df['ALT_bnd1'])
+    bnd2 = bnds.process_breakend_alt(bps_df['ALT_bnd2'])
+
+    same_chrom_mask = bps_df['CHROM_bnd1'] == bps_df['CHROM_bnd2']
+    del_ins_bnds_mask = (bnd1['relative_pos'] == 'N[') & (bnd2['relative_pos'] == ']N')
+    dup_bnds_mask = (bnd1['relative_pos'] == ']N') & (bnd2['relative_pos'] == 'N[')
+    inv_bnds_mask = (
+        ((bnd1['relative_pos'] == 'N]') & (bnd2['relative_pos'] == 'N]')) |
+        ((bnd1['relative_pos'] == '[N') & (bnd2['relative_pos'] == '[N'))
+    )
+    pos2_pos1_more_than_lens_mask = (bps_df['POS_bnd2'] - bps_df['POS_bnd1']) > ins_lens
+
+    del_mask = same_chrom_mask & del_ins_bnds_mask & pos2_pos1_more_than_lens_mask
+    ins_mask = same_chrom_mask & del_ins_bnds_mask & ~pos2_pos1_more_than_lens_mask
+    dup_mask = same_chrom_mask & dup_bnds_mask
+    inv_mask = same_chrom_mask & inv_bnds_mask
+
+    svtypes = np.full(len(bps_df), np.nan, dtype=object)
+
+    svtype_dict = {
+        'DEL': del_mask,
+        'INS': ins_mask,
+        'DUP': dup_mask,
+        'INV': inv_mask,
+    }
+
+    for svtype, svtype_mask in svtype_dict.items():
+        svtypes[svtype_mask] = svtype
+
+    svtypes = np.where(pd.isna(svtypes), 'OTHER', svtypes)
+
+    return svtypes

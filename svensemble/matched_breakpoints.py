@@ -322,6 +322,13 @@ def get_X_y_from_training_df(
     X = pd.get_dummies(training_df_copy.drop(columns=[match_col]))
     X = X.fillna(0)
 
+    # Convert all columns to int if possible or float if not
+    for column in X.columns:
+        try:
+            X[column] = X[column].astype(int)
+        except ValueError:
+            X[column] = X[column].astype(float)
+
     y = training_df_copy[match_col]
 
     return X, y

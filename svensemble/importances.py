@@ -28,7 +28,6 @@ if WORKDIR not in sys.path:
     sys.path.insert(0, WORKDIR)
 
 import svensemble.matched_breakpoints as matchedbps  # noqa: E402
-import svensemble.utils as sv_utils  # noqa: E402
 
 
 def load_svensemble2_val_Xy_from_pickles(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, verbose=False):

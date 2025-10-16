@@ -141,30 +141,6 @@ def dist_matrix_ref(ref_bp_df: pd.DataFrame, bp_df: pd.DataFrame, which_bnd: str
 
     return dists
 
-insert_source_dispatch = {
-    'svlen': evts.get_insert_seq_len_from_svlen,
-    'alt': bnds.get_insert_seq_len_from_alt,
-    'svensemble2_col': bps.get_insert_seq_len_from_svensemble2_len_col
-}
-
-def get_insert_size(bp_df: pd.DataFrame) -> pd.Series:
-    """
-    Calculates insert sequence length from ALT or SVLEN column
-    Requires 'source' column to be present in the dataframe
-    """
-    insert_sizes = pd.Series(index=bp_df.index)
-    for source in bp_df['source'].unique():
-        insert_sizes.loc[bp_df['source'] == source] = (
-            insert_source_dispatch[caller_params.caller_param_dict[source]['svlen_source']](
-                bp_df[bp_df['source'] == source]
-            )
-        )
-    insert_sizes.loc[insert_sizes < 0] = 0
-    insert_sizes = insert_sizes.fillna(0)  # Convert NAs to 0
-    insert_sizes = insert_sizes.astype(int)
-    return insert_sizes
-
-
 def _get_zeros(shape: tuple[int, int]) -> np.ndarray:
     return np.zeros(shape, dtype=np.float64)
 
@@ -273,7 +249,7 @@ def get_pairwise_matches(
     zipped_bp_df_ = zipped_bp_df[col_retain_list].copy()
 
     # unique_sources = list(zipped_bp_df['source'].unique())
-    zipped_bp_df_.loc[:, 'insert_size'] = get_insert_size(zipped_bp_df_)
+    zipped_bp_df_.loc[:, 'insert_size'] = bps.get_insert_size(zipped_bp_df_)
 
     # Generate all possible source combinations
     # source_combinations = [
