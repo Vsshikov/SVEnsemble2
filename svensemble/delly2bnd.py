@@ -17,7 +17,8 @@ def argument_parsing():
     parser.add_argument('-o', '--out', metavar='out.vcf', required=True, dest='out', help='output VCF file (required)')
     return parser.parse_args()
 
-"""Heng Li's FASTA/FASTQ parser
+"""
+Heng Li's FASTA/FASTQ parser
 """
 def readfq(fp): # this is a generator function
     last = None # this is a buffer keeping the last unprocessed line

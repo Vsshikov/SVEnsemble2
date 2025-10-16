@@ -99,7 +99,7 @@ def get_plot_colors(n_callsets):
         colors = [None] * n_callsets  # Use default color cycle
     return colors
 
-def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pass=False, title=None):
+def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pass=False, title=None, svtype=None):
     """
     Plot ROC curves for multiple prediction arrays against corresponding truth series
 
@@ -131,6 +131,9 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pass=False
             sample_mask = np.ones(len(callset_val_df), dtype=bool)
         else:
             sample_mask = np.ones(len(callset_val_df), dtype=bool)
+
+        if svtype is not None:
+            sample_mask = sample_mask & (callset_val_df['INFO_INFERRED_SVTYPE'] == svtype)
 
         # Remove rows with NaNs and apply sample mask
         callset_val_df = callset_val_df.loc[sample_mask, :]
@@ -177,7 +180,7 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pass=False
     return ax
 
 
-def plot_reverse_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pass=False, title=None):
+def plot_reverse_roc_curves(sample_val_dict, svtype=None, ax=None, use_counts=True, filter_pass=False, title=None):
     """
     Plot ROC curves for multiple prediction arrays against corresponding truth series
 
@@ -212,6 +215,9 @@ def plot_reverse_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pa
             sample_mask = np.ones(len(callset_val_df), dtype=bool)
         else:
             sample_mask = np.ones(len(callset_val_df), dtype=bool)
+
+        if svtype is not None:
+            sample_mask = sample_mask & (callset_val_df['INFO_INFERRED_SVTYPE'] == svtype)
 
         # Remove rows with NaNs and apply sample mask
         callset_val_df = callset_val_df.loc[sample_mask, :]
