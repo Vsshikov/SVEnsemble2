@@ -6,6 +6,7 @@ As well as parameters for PU learning with those sets.
 Added callers:
 - gridss
 - manta
+- delly
 
 The file also contains parameters for working with VCF files from reference SV sets.
 Currently, only gnomAD is supported.
@@ -45,8 +46,11 @@ default_params = {
     'parse_format': False,
     'format_cols': default_format_cols,
     'is_reference': False,
-    'qual_metric': 'QUAL'
+    'qual_metric': 'QUAL',
+    'svlen_source': 'svlen',
+    'bnd2_pos': 'svlen'
 }
+
 training_set_presets = {
     'default': {
         'gridss': ['gridss'],
@@ -154,7 +158,8 @@ gridss_params = default_params | {
     'info_cols_pred': gridss_info_pred_cols,
     'parse_format': False,
     'svlen_source': 'alt',
-    'bps_path': 'sv_calling/gridss/svensemble2/gridss_bps.csv'
+    'bps_path': 'sv_calling/gridss/svensemble2/gridss_bps.csv',
+    'bnd2_pos': None
 }
 
 gnomad_params = default_params | {
@@ -200,7 +205,8 @@ delly_params = default_params | {
     'parse_format': True,
     'format_cols': ['GT', 'GQ', 'RC', 'RCL', 'RCR', 'RDCN', 'DR', 'DV', 'RR', 'RV'],
     'svlen_source': 'svlen',
-    'bps_path': 'sv_calling/delly/svensemble2/delly_bps.csv'
+    'bps_path': 'sv_calling/delly/svensemble2/delly_bps.csv',
+    'bnd2_pos': 'end'
 }
 
 svensemble2_params = default_params | {
@@ -212,7 +218,8 @@ kosugi_params = default_params | {
 }
 
 chm13_params = default_params | {
-    'svlen_source': 'svlen'
+    'svlen_source': 'svlen',
+    'bnd2_pos': 'end'
 }
 
 hg002_params = default_params | {

@@ -270,7 +270,7 @@ def annotate_svtypes(bps_df, source):
 
     return svtypes
 
-def get_del_size(bps_df: pd.DataFrame) -> pd.Series:
+def get_del_size(bps_df: pd.DataFrame, *args) -> pd.Series:
     """
     Calculates deletion size from POS values in bps_df
     Reuqires INFO_INFERRED_SVTYPE, to be present in the dataframe in addition to normal bps_df columns
@@ -284,3 +284,21 @@ def get_del_size(bps_df: pd.DataFrame) -> pd.Series:
     del_size = del_size.astype(int)
 
     return del_size
+
+def get_sv_sizes(bps_df: pd.DataFrame, source: str | None = None) -> pd.Series:
+
+    bps_df_ = bps_df.copy()
+
+    sv_size_dispatch = {
+        'DEL': get_del_size,
+        'INS': get_insert_size,
+    }
+
+    sv_sizes = pd.Series(index=bps_df.index)
+    for svtype in bps_df['INFO_INFERRED_SVTYPE'].unique():
+        if svtype in sv_size_dispatch:
+            sv_sizes.loc[bps_df_['INFO_INFERRED_SVTYPE'] == svtype] = sv_size_dispatch[svtype](bps_df_[bps_df_['INFO_INFERRED_SVTYPE'] == svtype], source)
+        else:
+            sv_sizes.loc[bps_df_['INFO_INFERRED_SVTYPE'] == svtype] = np.nan
+
+    return sv_sizes

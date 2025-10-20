@@ -11,7 +11,17 @@ from . import utils
 
 drop_cols = ['INFO_CHR2', 'INFO_CIEND_l', 'INFO_CIEND_r']
 
-def convert_del_to_bnd(del_vcf_df: pd.DataFrame) -> pd.DataFrame:
+def _get_bnd2_pos(bnd_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.Series:
+    """
+    Calculates the position of the second breakend
+    """
+    _bnd2_pos_dispatch = {
+        'svlen': lambda x: x['POS'].astype(int) + x['INFO_SVLEN'].astype(int) + 1,
+        'end': lambda x: x['INFO_END'].astype(int) + 1
+    }
+    return _bnd2_pos_dispatch[bnd2_pos](bnd_df)
+
+def convert_del_to_bnd(del_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.DataFrame:
     """
     Converts deletion records to breakend notation.
 
@@ -21,6 +31,9 @@ def convert_del_to_bnd(del_vcf_df: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         del_vcf_df: DataFrame with deletion records
+        bnd2_pos: what information to use to calculate the position of the second breakend
+        - 'svlen': POS + INFO_SVLEN + 1
+        - 'end': INFO_END
 
     Returns:
         DataFrame containing breakend notation entries
@@ -31,7 +44,7 @@ def convert_del_to_bnd(del_vcf_df: pd.DataFrame) -> pd.DataFrame:
     bp1.loc[:, 'CHROM'] = bp1['CHROM']
     bp1.loc[:, 'POS'] = bp1['POS'] - 1
     bp1.loc[:, 'INFO_MATEID'] = bp1['INFO_EVENT'] + '_bp2'
-    bp1.loc[:, 'ALT'] = 'N[' + bp1['INFO_CHR2'].astype(str) + ':' + (bp1['POS'].astype(int) + bp1['INFO_SVLEN'].astype(int) + 1).astype(str) + '['
+    bp1.loc[:, 'ALT'] = 'N[' + bp1['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(bp1, bnd2_pos)).astype(str) + '['
     bp1.loc[:, 'INFO_CIPOS_l'] = bp1.loc[:, 'INFO_CIEND_l']
     bp1.loc[:, 'INFO_CIPOS_r'] = bp1.loc[:, 'INFO_CIEND_r']
     bp1 = bp1.drop(columns=drop_cols)
@@ -39,7 +52,7 @@ def convert_del_to_bnd(del_vcf_df: pd.DataFrame) -> pd.DataFrame:
     bp2 = del_vcf_df.copy()
     bp2.loc[:, 'ID'] = bp2['ID'] + '_bp2'
     bp2.loc[:, 'CHROM'] = bp2['INFO_CHR2']
-    bp2.loc[:, 'POS'] = bp2['POS'].astype(int) + bp2['INFO_SVLEN'].astype(int) + 1
+    bp2.loc[:, 'POS'] = _get_bnd2_pos(bp2, bnd2_pos)
     bp2.loc[:, 'INFO_MATEID'] = bp2['INFO_EVENT'] + '_bp1'
     bp2.loc[:, 'ALT'] = ']' + bp2['CHROM'].astype(str) + ':' + (bp2['POS'].astype(int) - 1).astype(str) + ']N'
     bp2.loc[:, 'INFO_CIPOS_l'] = bp2.loc[:, 'INFO_CIEND_l']
@@ -48,7 +61,7 @@ def convert_del_to_bnd(del_vcf_df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([bp1, bp2], axis=0)
 
 
-def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame) -> pd.DataFrame:
+def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.DataFrame:
     """
     Converts inversion records to breakend notation.
 
@@ -60,7 +73,9 @@ def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         inv_vcf_df: DataFrame with inversion records
-
+        bnd2_pos: what information to use to calculate the position of the second breakend
+        - 'svlen': POS + INFO_SVLEN + 1
+        - 'end': INFO_END
     Returns:
         DataFrame containing breakend notation entries
     """
@@ -71,7 +86,7 @@ def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame) -> pd.DataFrame:
     bp1.loc[:, 'POS'] = bp1['POS']
     bp1.loc[:, 'INFO_EVENT'] = bp1['INFO_EVENT'] + '_e1'
     bp1.loc[:, 'INFO_MATEID'] = bp1['INFO_EVENT'] + '_bp3'
-    bp1.loc[:, 'ALT'] = 'N]' + bp1['INFO_CHR2'].astype(str) + ':' + (bp1['POS'].astype(int) + bp1['INFO_SVLEN'].astype(int)).astype(str) + ']'
+    bp1.loc[:, 'ALT'] = 'N]' + bp1['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(bp1, bnd2_pos) - 1).astype(str) + ']'
     bp1.loc[:, 'INFO_CIPOS_l'] = bp1.loc[:, 'INFO_CIEND_l']
     bp1.loc[:, 'INFO_CIPOS_r'] = bp1.loc[:, 'INFO_CIEND_r']
     bp1 = bp1.drop(columns=drop_cols)
@@ -83,7 +98,7 @@ def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame) -> pd.DataFrame:
     bp2.loc[:, 'POS'] = bp2['POS'] + 1
     bp2.loc[:, 'INFO_EVENT'] = bp2['INFO_EVENT'] + '_e2'
     bp2.loc[:, 'INFO_MATEID'] = bp2['INFO_EVENT'] + '_bp4'
-    bp2.loc[:, 'ALT'] = '[' + bp2['INFO_CHR2'].astype(str) + ':' + (bp2['POS'].astype(int) + bp2['INFO_SVLEN'].astype(int) + 1).astype(str) + '[N'
+    bp2.loc[:, 'ALT'] = '[' + bp2['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(bp2, bnd2_pos)).astype(str) + '[N'
     bp2.loc[:, 'INFO_CIPOS_l'] = bp2.loc[:, 'INFO_CIEND_l']
     bp2.loc[:, 'INFO_CIPOS_r'] = bp2.loc[:, 'INFO_CIEND_r']
     bp2 = bp2.drop(columns=drop_cols)
@@ -91,7 +106,7 @@ def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame) -> pd.DataFrame:
     bp3 = inv_vcf_df.copy()
     bp3.loc[:, 'ID'] = bp3['ID'] + '_bp3'
     bp3.loc[:, 'CHROM'] = bp3['INFO_CHR2']
-    bp3.loc[:, 'POS'] = bp3['POS'].astype(int) + bp3['INFO_SVLEN'].astype(int)
+    bp3.loc[:, 'POS'] = _get_bnd2_pos(bp3, bnd2_pos) - 1
     bp3.loc[:, 'INFO_EVENT'] = bp3['INFO_EVENT'] + '_e1'
     bp3.loc[:, 'INFO_MATEID'] = bp3['INFO_EVENT'] + '_bp1'
     bp3.loc[:, 'ALT'] = 'N]' + bp3['CHROM'].astype(str) + ':' + (bp3['POS'].astype(int)).astype(str) + ']'
@@ -102,7 +117,7 @@ def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame) -> pd.DataFrame:
     bp4 = inv_vcf_df.copy()
     bp4.loc[:, 'ID'] = bp4['ID'] + '_bp4'
     bp4.loc[:, 'CHROM'] = bp4['INFO_CHR2']
-    bp4.loc[:, 'POS'] = bp4['POS'].astype(int) + bp4['INFO_SVLEN'].astype(int) + 1
+    bp4.loc[:, 'POS'] = _get_bnd2_pos(bp4, bnd2_pos)
     bp4.loc[:, 'INFO_EVENT'] = bp4['INFO_EVENT'] + '_e2'
     bp4.loc[:, 'INFO_MATEID'] = bp4['INFO_EVENT'] + '_bp2'
     bp4.loc[:, 'ALT'] = '[' + bp4['CHROM'].astype(str) + ':' + (bp4['POS'].astype(int) + 1).astype(str) + '[N'
@@ -112,7 +127,7 @@ def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame) -> pd.DataFrame:
 
     return pd.concat([bp1, bp2, bp3, bp4], axis=0)
 
-def convert_dup_to_bnd(dup_vcf_df: pd.DataFrame) -> pd.DataFrame:
+def convert_dup_to_bnd(dup_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.DataFrame:
     """
     Converts duplication records to breakend notation.
 
@@ -122,7 +137,9 @@ def convert_dup_to_bnd(dup_vcf_df: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         dup_vcf_df: DataFrame with duplication records
-
+        bnd2_pos: what information to use to calculate the position of the second breakend
+        - 'svlen': POS + INFO_SVLEN + 1
+        - 'end': INFO_END
     Returns:
         DataFrame containing breakend notation entries
     """
@@ -130,7 +147,7 @@ def convert_dup_to_bnd(dup_vcf_df: pd.DataFrame) -> pd.DataFrame:
     bp1 = dup_vcf_df.copy()
     bp1.loc[:, 'ID'] = bp1['ID'] + '_bp1'
     bp1.loc[:, 'CHROM'] = bp1['INFO_CHR2']
-    bp1.loc[:, 'POS'] = bp1['POS'].astype(int) + bp1['INFO_SVLEN'].astype(int)
+    bp1.loc[:, 'POS'] = _get_bnd2_pos(bp1, bnd2_pos)
     bp1.loc[:, 'INFO_MATEID'] = bp1['INFO_EVENT'] + '_bp2'
     bp1.loc[:, 'ALT'] = 'N[' + bp1['CHROM'].astype(str) + ':' + bp1['POS'].astype(str) + '['
     bp1.loc[:, 'INFO_CIPOS_l'] = bp1.loc[:, 'INFO_CIEND_l']
@@ -143,14 +160,14 @@ def convert_dup_to_bnd(dup_vcf_df: pd.DataFrame) -> pd.DataFrame:
     bp2.loc[:, 'CHROM'] = bp2['CHROM']
     bp2.loc[:, 'POS'] = bp2['POS']
     bp2.loc[:, 'INFO_MATEID'] = bp2['INFO_EVENT'] + '_bp1'
-    bp2.loc[:, 'ALT'] = ']' + bp2['INFO_CHR2'].astype(str) + ':' + (bp2['POS'].astype(int) + bp2['INFO_SVLEN'].astype(int)).astype(str) + ']N'
+    bp2.loc[:, 'ALT'] = ']' + bp2['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(bp2, bnd2_pos)).astype(str) + ']N'
     bp2.loc[:, 'INFO_CIPOS_l'] = bp2.loc[:, 'INFO_CIEND_l']
     bp2.loc[:, 'INFO_CIPOS_r'] = bp2.loc[:, 'INFO_CIEND_r']
     bp2 = bp2.drop(columns=drop_cols)
 
     return pd.concat([bp1, bp2], axis=0)
 
-def convert_ins_to_bnd(ins_vcf_df: pd.DataFrame) -> pd.DataFrame:
+def convert_ins_to_bnd(ins_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.DataFrame:
     """
     Converts insertion records to breakend notation.
 
@@ -160,7 +177,9 @@ def convert_ins_to_bnd(ins_vcf_df: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         ins_vcf_df: DataFrame with insertion records
-
+        bnd2_pos: what information to use to calculate the position of the second breakend
+        - 'svlen': POS + INFO_SVLEN + 1
+        - 'end': INFO_END
     Returns:
         DataFrame containing breakend notation entries
     """
@@ -170,7 +189,7 @@ def convert_ins_to_bnd(ins_vcf_df: pd.DataFrame) -> pd.DataFrame:
     bp1.loc[:, 'CHROM'] = bp1['CHROM']
     bp1.loc[:, 'POS'] = bp1['POS']
     bp1.loc[:, 'INFO_MATEID'] = bp1['INFO_EVENT'] + '_bp2'
-    bp1.loc[:, 'ALT'] = 'N[' + bp1['CHROM'].astype(str) + ':' + (bp1['POS'].astype(int) + 1).astype(str) + '['
+    bp1.loc[:, 'ALT'] = 'N[' + bp1['CHROM'].astype(str) + ':' + _get_bnd2_pos(bp1, bnd2_pos).astype(str) + '['
     bp1.loc[:, 'INFO_CIPOS_l'] = bp1.loc[:, 'INFO_CIEND_l']
     bp1.loc[:, 'INFO_CIPOS_r'] = bp1.loc[:, 'INFO_CIEND_r']
     bp1 = bp1.drop(columns=drop_cols)
@@ -179,7 +198,7 @@ def convert_ins_to_bnd(ins_vcf_df: pd.DataFrame) -> pd.DataFrame:
     bp2 = ins_vcf_df.copy()
     bp2.loc[:, 'ID'] = bp2['ID'] + '_bp2'
     bp2.loc[:, 'CHROM'] = bp2['CHROM']
-    bp2.loc[:, 'POS'] = bp2['POS'].astype(int) + 1
+    bp2.loc[:, 'POS'] = _get_bnd2_pos(bp2, bnd2_pos)
     bp2.loc[:, 'INFO_MATEID'] = bp2['INFO_EVENT'] + '_bp1'
     bp2.loc[:, 'ALT'] = ']' + bp2['CHROM'].astype(str) + ':' + (bp2['POS'].astype(int)).astype(str) + ']N'
     bp2.loc[:, 'INFO_CIPOS_l'] = bp2.loc[:, 'INFO_CIEND_l']
@@ -195,7 +214,7 @@ svtype_dispatch = {
     'INS': convert_ins_to_bnd
 }
 
-def event_to_bnd(vcf_df: pd.DataFrame) -> pd.DataFrame:
+def event_to_bnd(vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.DataFrame:
     """
     Converts structural variant events to breakend notation.
 
@@ -204,7 +223,9 @@ def event_to_bnd(vcf_df: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         vcf_df: DataFrame with SV events
-
+        bnd2_pos: what information to use to calculate the position of the second breakend
+        - 'svlen': POS + INFO_SVLEN + 1
+        - 'end': INFO_END
     Returns:
         DataFrame with breakend records
     """
@@ -248,7 +269,7 @@ def event_to_bnd(vcf_df: pd.DataFrame) -> pd.DataFrame:
     bnd_dfs = []
     for svtype, svtype_df in svtype_dict.items():
         if len(svtype_df) > 0:
-            bnd_dfs.append(svtype_dispatch[svtype](svtype_df))
+            bnd_dfs.append(svtype_dispatch[svtype](svtype_df, bnd2_pos))
 
     if not bnd_dfs:
         print('No breakends found, returning empty DataFrame')
