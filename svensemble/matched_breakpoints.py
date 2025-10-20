@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 
 from . import _caller_params as caller_params
-from . import chunk_match
+from . import breakpoints as bps
 
 def generate_svensemble2_ids(matchedbps_df: pd.DataFrame, callsets: list[str], prefix: str = 'svensemble2_') -> pd.Series:
     """
@@ -34,7 +34,7 @@ def get_combined_insert_size(matchedbps_df: pd.DataFrame, matchedbps_callsets: l
         matchedbps_no_prefix = matchedbps_df.rename(
             columns=lambda col: col[len(f"{callset}_"):] if col.startswith(f"{callset}_") else col
         )
-        matchedbps_df[f"{callset}_insert_size"] = chunk_match.get_insert_size(
+        matchedbps_df[f"{callset}_insert_size"] = bps.get_insert_size(
             pd.concat(
                 [
                     matchedbps_no_prefix,
@@ -219,6 +219,10 @@ def preprocess_matchedbps_for_pu(
             f'{callset}_SAMPLE_{col}'
             for col in caller_params.caller_param_dict[callset]['format_cols']
         )
+        # Quality metric column may not be included in the training_cols list, so add it if it exists and is not already in training_cols
+        if (caller_params.caller_param_dict[callset]['qual_metric'] not in training_cols) and (caller_params.caller_param_dict[callset]['qual_metric'] is not None):
+            training_cols.append(caller_params.caller_param_dict[callset]['qual_metric'])
+
     # Find all columns in joint_bp_df that start with any of the training_col names
     for col in training_cols:
         cols_to_retain.extend(
