@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from typing import Union, Optional, List, Literal, Dict
 
 from . import events as evts
@@ -433,6 +434,10 @@ def delly_preprocess_evts_only(delly_df: pd.DataFrame, caller_params: dict|None 
     no_chr2_mask = delly_df_['INFO_CHR2'].isna()
     delly_df_.loc[no_chr2_mask, 'INFO_CHR2'] = delly_df_.loc[no_chr2_mask, 'CHROM']
 
+    if np.any(delly_df_['INFO_END'].isna()):
+        raise ValueError(f"INFO_END is missing for some entries: {delly_df_['INFO_END'].isna().sum()} out of {delly_df_.shape[0]} entries")
+
+
     return delly_preprocess_common(delly_df_, caller_params)
 
 def delly_preprocess_bnds_only(delly_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
@@ -443,6 +448,8 @@ def delly_preprocess_bnds_only(delly_df: pd.DataFrame, caller_params: dict|None 
     delly_df_.loc[:, 'INFO_EVENT'] = delly_df_.loc[:, 'ID'].str[:-4]
 
     delly_df_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(delly_df_['INFO_CIPOS'])
+
+    delly_df_.loc[:, 'INFO_END'] = delly_df_.loc[:, 'INFO_POS2'].astype(int)
 
     cols_to_drop = ['INFO_CIPOS']
     delly_df_ = delly_df_.drop(columns=cols_to_drop)

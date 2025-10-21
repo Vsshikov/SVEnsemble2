@@ -206,8 +206,9 @@ manta_diploid_params = default_params | {
 }
 
 delly_params = default_params | {
+    'base_cols': base_cols + ['INFO_END'],
     'filter_cols': ['PASS', 'LowQual'],
-    'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'CHR2', 'END', 'CIPOS', 'CIEND'],
+    'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'CHR2', 'POS2', 'CIPOS', 'CIEND'],
     'info_cols_pred': ['PE', 'MAPQ', 'SRMAPQ', 'SR', 'SRQ', 'CE', 'CT', 'SVLEN', 'IMPRECISE', 'SVTYPE', 'SVMETHOD', 'HOMLEN'],
     'parse_format': True,
     'format_cols': ['GT', 'GQ', 'RC', 'RCL', 'RCR', 'RDCN', 'DR', 'DV', 'RR', 'RV'],

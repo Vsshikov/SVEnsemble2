@@ -164,14 +164,22 @@ def _remove_unused_format_header_fields(vcf_file: VariantFile, field_info: dict)
     if format_dropped:
         print(f'Dropping {format_dropped} from meta as it is not present in specified format cols')
 
+base_field_dispatch = {
+    'CHROM': lambda x: x.chrom,
+    'POS': lambda x: x.pos,
+    'ID': lambda x: x.id,
+    'REF': lambda x: x.ref,
+    'ALT': lambda x: x.alts[0],
+    'QUAL': lambda x: x.qual,
+    # For some callers we need to fetch INFO_END which is inaccessible through normal INFO interface
+    # We need to access record.stop for this
+    'INFO_END': lambda x: x.stop
+}
+
 def _fetch_base_fields(record: VariantRecord, base_fields: dict) -> None:
     """Parse basic variant fields from a VCF record."""
-    base_fields['CHROM'].append(record.chrom)
-    base_fields['POS'].append(record.pos)
-    base_fields['ID'].append(record.id)
-    base_fields['REF'].append(record.ref)
-    base_fields['ALT'].append(record.alts[0])
-    base_fields['QUAL'].append(record.qual)
+    for field in base_fields:
+        base_fields[field].append(base_field_dispatch[field](record))
 
 def _fetch_filter_fields(
     record: VariantRecord,
