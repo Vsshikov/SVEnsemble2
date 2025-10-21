@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from . import utils
+from . import _caller_params as caller_params
 
 drop_cols = ['INFO_CHR2', 'INFO_CIEND_l', 'INFO_CIEND_r']
 
@@ -17,7 +18,8 @@ def _get_bnd2_pos(bnd_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.Series:
     """
     _bnd2_pos_dispatch = {
         'svlen': lambda x: x['POS'].astype(int) + x['INFO_SVLEN'].astype(int) + 1,
-        'end': lambda x: x['INFO_END'].astype(int) + 1
+        'end': lambda x: x['INFO_END'].astype(int) + 1,
+        'pos2': lambda x: x['INFO_POS2'].astype(int) + 1
     }
     return _bnd2_pos_dispatch[bnd2_pos](bnd_df)
 
@@ -279,9 +281,16 @@ def event_to_bnd(vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.DataFrame:
 
 def get_insert_seq_len_from_svlen(bp_df: pd.DataFrame):
     """
-    Calculates insert sequence length from SVLEN column
-    Requires INFO_SVLEN and INFO_SVTYPE columns to be present in the dataframe
+    Calculates insert sequence length from INFO_SVLEN column
+    Requires INFO_SVLEN and one of the svtype columns (see _caller_params.svtype_cols) to be present in the dataframe
 
     Insert seq len is nonzero only for INS and DUPs
     """
-    return np.where(bp_df['INFO_SVTYPE'].isin(['INS']), bp_df['INFO_SVLEN'], 0)
+    for svtype_col in caller_params.svtype_cols:
+        try:
+            insert_seq_len = np.where(bp_df[svtype_col].isin(['INS']), bp_df['INFO_SVLEN'], 0)
+            return insert_seq_len
+        except KeyError:
+            continue
+    raise KeyError(f"None of the following columns were found in the dataframe: {caller_params.svtype_cols}, required for get_insert_seq_len_from_svlen")
+

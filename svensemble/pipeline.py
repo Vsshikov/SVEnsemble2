@@ -37,6 +37,7 @@ import svensemble.chunk_match as chunk_match  # noqa: E402
 import svensemble.matched_breakpoints as mbps  # noqa: E402
 import svensemble.models as models  # noqa: E402
 import svensemble.delly2bnd as delly2bnd  # noqa: E402
+import svensemble._caller_params as caller_params  # noqa: E402
 
 
 default_ref_path = Path("/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/hg38.no_decoys.fa")
@@ -382,7 +383,7 @@ def parse_preprocess_delly(
         )
         delly_evt_only_df = delly_df[~delly_df['INFO_SVTYPE'].isin(['BND', 'TRA'])]
         delly_evt_only_df = caller_specific.delly_preprocess_evts_only(delly_evt_only_df, caller_params=callset['params'])
-        delly_evt_bnd_df = evts.event_to_bnd(delly_evt_only_df)
+        delly_evt_bnd_df = evts.event_to_bnd(delly_evt_only_df, bnd2_pos=caller_params.delly_params['bnd2_pos'])
 
         delly_bnd_df = pd.concat([delly_evt_bnd_df, delly_bnd_only_df], axis=0)
 
