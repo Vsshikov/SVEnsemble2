@@ -11,6 +11,7 @@ from . import utils as sv_utils
 from . import _caller_params as caller_params
 from . import _sample_params as sample_params
 from . import vcfparse as vcfp
+from . import chunk_match as chunk_match
 from pathlib import Path
 import pysam
 
@@ -462,3 +463,67 @@ def preprocess_chm13_val_set(sample, vcf_path, force_rerun=False):
         result_bps.to_csv(out_path, index=False)
 
 
+def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, verbose=True):
+    """
+    Given dataframes of a callset and a validation set, match them and return a dataframe with the following columns:
+    INFO_EVENT, {qual_metric}, is_in_val, INFO_INFERRED_SVTYPE, {FILTER_PASS}
+
+    qual_metric column is dependent on the callset and is specified in the callset params
+    FILTER_PASS column is returned only if it is present in the callset
+    """
+    callset_bps_ = callset_bps.copy()
+    val_set_ = val_set.copy()
+
+    # Caller-specific operations go here
+    if callset_name == 'manta_candidate':
+        callset_bps_.loc[:, 'INFO_TOTAL_PAIR_COUNT'] = \
+            callset_bps_['INFO_UPSTREAM_PAIR_COUNT'] + \
+            callset_bps_['INFO_DOWNSTREAM_PAIR_COUNT'] + \
+            callset_bps_['INFO_PAIR_COUNT']
+
+    matched_ids = chunk_match.inner_join_bps(
+        bp_df_dict={
+            callset_name: callset_bps_,
+            sample_config['val_set']['name']: val_set_
+        },
+        max_dist=200,
+        ids_only=True,
+        ignore_size=True
+    )
+    callset_bps_.loc[:, 'is_in_val'] = callset_bps_['INFO_EVENT'].isin(matched_ids[f'{callset_name}_INFO_EVENT'])
+    cols_to_keep = ['INFO_EVENT', f'{sample_config['callsets'][callset_name]['params']['qual_metric']}', 'is_in_val']
+    if 'FILTER_PASS' in callset_bps_.columns:
+        cols_to_keep.append('FILTER_PASS')
+    if 'INFO_INFERRED_SVTYPE' in callset_bps_.columns:
+        cols_to_keep.append('INFO_INFERRED_SVTYPE')
+
+    return callset_bps_.loc[callset_bps_['INFO_EVENT'].notna(), cols_to_keep]
+
+
+def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name, model_name, verbose=True):
+    svens_calls_ = svensemble2_bps.copy()
+    val_set_ = val_set.copy()
+
+    matched_ids = chunk_match.inner_join_bps(
+        bp_df_dict={
+            'svensemble2': svens_calls_,
+            sample_config['val_set']['name']: val_set_
+        },
+        max_dist=200,
+        ids_only=True,
+        ignore_size=True
+    )
+
+    svens_calls_.loc[:, 'is_in_val'] = svens_calls_['INFO_EVENT'].isin(matched_ids['svensemble2_INFO_EVENT'])
+
+    val_df = svensemble2_bps[
+        [
+            'INFO_EVENT',
+            f'{training_set_name}_{model_name}_pred',
+            'is_in_val',
+            'INFO_INFERRED_SVTYPE'
+        ]
+    ]
+    val_df = val_df[val_df[f'{training_set_name}_{model_name}_pred'].notna()]
+
+    return val_df

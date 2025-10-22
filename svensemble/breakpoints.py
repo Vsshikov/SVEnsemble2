@@ -235,39 +235,61 @@ def get_insert_size(bp_df: pd.DataFrame, source: str | None = None) -> pd.Series
 
 
 def annotate_svtypes(bps_df, source):
+    """
+    Annotate structural variant types for each breakpoint-pair record in a DataFrame.
 
+    This function infers canonical SV types (DEL, INS, DUP, INV, or OTHER) from
+    paired breakend orientation and chromosomal context.
+
+    Args:
+        bps_df (pd.DataFrame): DataFrame with breakpoint-pair records.
+        source (str): SV caller/source string, required for insert size calculation.
+
+    Returns:
+        np.ndarray: Array of SV type strings for each record.
+    """
     ins_lens = get_insert_size(bps_df, source=source)
     bnd1 = bnds.process_breakend_alt(bps_df['ALT_bnd1'])
     bnd2 = bnds.process_breakend_alt(bps_df['ALT_bnd2'])
 
-    same_chrom_mask = bps_df['CHROM_bnd1'] == bps_df['CHROM_bnd2']
-    del_ins_bnds_mask = (bnd1['relative_pos'] == 'N[') & (bnd2['relative_pos'] == ']N')
-    dup_bnds_mask = (bnd1['relative_pos'] == ']N') & (bnd2['relative_pos'] == 'N[')
-    inv_bnds_mask = (
-        ((bnd1['relative_pos'] == 'N]') & (bnd2['relative_pos'] == 'N]')) |
-        ((bnd1['relative_pos'] == '[N') & (bnd2['relative_pos'] == '[N'))
-    )
-    pos2_pos1_more_than_lens_mask = (bps_df['POS_bnd2'] - bps_df['POS_bnd1']) > ins_lens
+    same_chrom_mask = bps_df["CHROM_bnd1"] == bps_df["CHROM_bnd2"]
 
-    del_mask = same_chrom_mask & del_ins_bnds_mask & pos2_pos1_more_than_lens_mask
-    ins_mask = same_chrom_mask & del_ins_bnds_mask & ~pos2_pos1_more_than_lens_mask
+    del_ins_bnds_mask = (
+        (bnd1["relative_pos"] == "N[") & (bnd2["relative_pos"] == "]N")
+    )
+    dup_bnds_mask = (
+        (bnd1["relative_pos"] == "]N") & (bnd2["relative_pos"] == "N[")
+    )
+    inv_bnds_mask = (
+        ((bnd1["relative_pos"] == "N]") & (bnd2["relative_pos"] == "N]"))
+        | ((bnd1["relative_pos"] == "[N") & (bnd2["relative_pos"] == "[N"))
+    )
+    pos2_gt_pos1_plus_ins_mask = (
+        (bps_df["POS_bnd2"] - bps_df["POS_bnd1"]) > ins_lens
+    )
+
+    del_mask = (
+        same_chrom_mask & del_ins_bnds_mask & pos2_gt_pos1_plus_ins_mask
+    )
+    ins_mask = (
+        same_chrom_mask & del_ins_bnds_mask & ~pos2_gt_pos1_plus_ins_mask
+    )
     dup_mask = same_chrom_mask & dup_bnds_mask
     inv_mask = same_chrom_mask & inv_bnds_mask
 
     svtypes = np.full(len(bps_df), np.nan, dtype=object)
 
     svtype_dict = {
-        'DEL': del_mask,
-        'INS': ins_mask,
-        'DUP': dup_mask,
-        'INV': inv_mask,
+        "DEL": del_mask,
+        "INS": ins_mask,
+        "DUP": dup_mask,
+        "INV": inv_mask,
     }
 
-    for svtype, svtype_mask in svtype_dict.items():
-        svtypes[svtype_mask] = svtype
+    for svtype, mask in svtype_dict.items():
+        svtypes[mask] = svtype
 
-    svtypes = np.where(pd.isna(svtypes), 'OTHER', svtypes)
-
+    svtypes = np.where(pd.isna(svtypes), "OTHER", svtypes)
     return svtypes
 
 def get_del_size(bps_df: pd.DataFrame, *args) -> pd.Series:
@@ -285,20 +307,98 @@ def get_del_size(bps_df: pd.DataFrame, *args) -> pd.Series:
 
     return del_size
 
+def get_bps_insert_size(bps_df: pd.DataFrame) -> pd.Series:
+    """
+    Calculates insert size from POS values in bps_df
+    Reuqires INFO_INFERRED_SVTYPE, to be present in the dataframe in addition to normal bps_df columns
+    """
+    bps_df_ = bps_df.copy()
+    return bps_df_['POS_bnd2'] - bps_df_['POS_bnd1']
+
 def get_sv_sizes(bps_df: pd.DataFrame, source: str | None = None) -> pd.Series:
 
     bps_df_ = bps_df.copy()
+
+    try:
+        inferred_svtypes = bps_df_['INFO_INFERRED_SVTYPE']
+    except KeyError:
+        inferred_svtypes = annotate_svtypes(bps_df_, source)
+        bps_df_.loc[:, 'INFO_INFERRED_SVTYPE'] = inferred_svtypes
 
     sv_size_dispatch = {
         'DEL': get_del_size,
         'INS': get_insert_size,
     }
 
-    sv_sizes = pd.Series(index=bps_df.index)
-    for svtype in bps_df['INFO_INFERRED_SVTYPE'].unique():
+    sv_sizes = pd.Series(index=bps_df_.index)
+    for svtype in np.unique(inferred_svtypes):
         if svtype in sv_size_dispatch:
-            sv_sizes.loc[bps_df_['INFO_INFERRED_SVTYPE'] == svtype] = sv_size_dispatch[svtype](bps_df_[bps_df_['INFO_INFERRED_SVTYPE'] == svtype], source)
+            sv_sizes.loc[inferred_svtypes == svtype] = sv_size_dispatch[svtype](bps_df_[inferred_svtypes == svtype], source)
         else:
-            sv_sizes.loc[bps_df_['INFO_INFERRED_SVTYPE'] == svtype] = np.nan
+            sv_sizes.loc[inferred_svtypes == svtype] = np.nan
+
 
     return sv_sizes
+
+
+def _get_svlen_svtype_filter_mask(
+    bps_df: pd.DataFrame,
+    source: str,
+    svlens: tuple[int, int] | None = None,
+    svtypes: list[str] | None = None
+) -> pd.DataFrame:
+    """
+    Filter a breakpoint DataFrame for given SVLEN and SVTYPE ranges.
+
+    Args:
+        bps_df (pd.DataFrame): Breakpoint DataFrame.
+        source (str): Source/caller name, needed for annotation.
+        svlens (tuple, optional): Tuple of (min, max) length. Defaults to (0, np.inf).
+        svtypes (list[str], optional): List of SV types to include. Defaults to ['DEL', 'DUP', 'INV', 'TRA'].
+
+    Returns:
+        pd.DataFrame: Filtered breakpoint DataFrame.
+    """
+    if svlens is None:
+        svlens = caller_params.default_sv_lens
+    elif not isinstance(svlens, tuple):
+        raise ValueError('svlens argument must be a tuple of (min, max) lengths or None')
+    svlen_min, svlen_max = svlens
+
+    if svtypes is None:
+        svtypes = caller_params.default_sv_types
+
+    bps_df = bps_df.copy()
+
+    print(source, svtypes)
+
+    svtype_mask = pd.Series(annotate_svtypes(bps_df, source)).isin(svtypes)
+    print(f'svtype mask: {svtype_mask.sum()}')
+    sv_sizes = get_sv_sizes(bps_df, source)
+    svlen_mask = (sv_sizes >= svlen_min) & (sv_sizes <= svlen_max)
+    print(f'svlen mask: {svlen_mask.sum()}')
+
+    return svtype_mask & svlen_mask
+
+
+def svlen_svtype_filter(
+    bps_df: pd.DataFrame,
+    source: str,
+    svlens: tuple[int, int] | None = None,
+    svtypes: list[str] | None = None
+) -> pd.DataFrame:
+    """
+    Filter a breakpoint DataFrame for given SVLEN and SVTYPE ranges.
+
+    Args:
+        bps_df (pd.DataFrame): Breakpoint DataFrame.
+        source (str): Source/caller name, needed for annotation.
+        svlens (tuple, optional): Tuple of (min, max) length. Defaults to (0, np.inf).
+        svtype (list[str], optional): List of SV types to include. Defaults to ['DEL', 'DUP', 'INV', 'INS', 'TRA'].
+
+    Returns:
+        pd.DataFrame: Filtered breakpoint DataFrame.
+    """
+    svlen_svtype_mask = _get_svlen_svtype_filter_mask(bps_df, source, svlens=svlens, svtypes=svtypes)
+
+    return bps_df.loc[svlen_svtype_mask].copy()

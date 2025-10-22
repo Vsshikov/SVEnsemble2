@@ -1,5 +1,6 @@
 """
 Functions to handle dataframes with multiple matched breakpoint sets
+Some of the functions related to SVEnsemble2 metrics are also in this module.
 """
 import pandas as pd
 import numpy as np
@@ -157,6 +158,7 @@ def matchedbps_to_bps(
                 continue
             missing_alts = merged_coords_matched_bps.loc[:, f"ALT_bnd{bnd}"].isna()
             if missing_alts.any():
+                merged_coords_matched_bps[f"ALT_bnd{bnd}"] = merged_coords_matched_bps[f"ALT_bnd{bnd}"].astype(object)
                 merged_coords_matched_bps.loc[missing_alts, f"ALT_bnd{bnd}"] = merged_coords_matched_bps.loc[missing_alts, f"{callset_name}_ALT_bnd{bnd}"]
 
 
@@ -336,3 +338,66 @@ def get_X_y_from_training_df(
     y = training_df_copy[match_col]
 
     return X, y
+
+def get_svensemble2_calls(
+    matchedbps_df: pd.DataFrame,
+    pred_df: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    Summarizes SVEnsemble2 calls by merging matched breakpoint and prediction DataFrames,
+    computing combined insert sizes, generating unique SVEnsemble2 IDs, and formatting results.
+
+    Args:
+        matchedbps_df (pd.DataFrame): DataFrame of matched breakpoints.
+        pred_df (pd.DataFrame): DataFrame containing model predictions and INFO_EVENT keys.
+
+    Returns:
+        pd.DataFrame: Unified DataFrame of SVEnsemble2 summary calls with consensus coordinates, insert size, unique ID, and predictions.
+    """
+    # Create a working copy of the matched breakpoints to avoid modifying the input DataFrame
+    matchedbps_df_copy = matchedbps_df.copy()
+
+    # Infer callset list based on prefixes of INFO_EVENT columns in pred_df
+    callsets = [col.replace('_INFO_EVENT', '') for col in pred_df.columns if 'INFO_EVENT' in col]
+
+    # Merge the predictions into the matched breakpoints data using the INFO_EVENT columns as keys
+    matchedbps_df_copy = matchedbps_df_copy.merge(
+        pred_df,
+        on=[f'{callset}_INFO_EVENT' for callset in callsets]
+    )
+
+    # Compute the combined (aggregate/max) insert size across all callsets and store in a new column
+    matchedbps_df_copy['svensemble2_insert_size'] = get_combined_insert_size(
+        matchedbps_df_copy, callsets
+    )
+
+    # Generate a unique identifier for each SV by concatenating INFO_EVENT fields from all callsets
+    # This is useful for matching SVs across different sets and preserving provenance
+    matchedbps_df_copy.loc[:, 'INFO_EVENT'] = generate_svensemble2_ids(
+        matchedbps_df_copy, callsets
+    )
+
+    # Infer the training_set_name and model_name from the single prediction column in pred_df
+    # Expect column like "{training_set_name}_{model_name}_pred"
+    prediction_cols = [col for col in pred_df.columns if col.endswith('_pred')]
+    if len(prediction_cols) != 1:
+        raise ValueError("There should be exactly one prediction column in pred_df ending with '_pred'")
+    pred_col = prediction_cols[0]
+    # Split out training_set_name and model_name
+    name_parts = pred_col.rsplit('_', 2)
+    if len(name_parts) == 3:
+        training_set_name, model_name, _ = name_parts
+    else:
+        raise ValueError(f"Prediction column name does not match expected pattern: '{pred_col}'")
+
+
+    # Convert to a SVEnsemble2 "bps" format, retaining coordinate/ALT consensus, insert size, unique ID, and predictions column
+    return matchedbps_to_bps(
+        matchedbps_df_copy,
+        callsets,
+        extra_cols=[
+            'svensemble2_insert_size',
+            'INFO_EVENT',
+            f"{training_set_name}_{model_name}_pred"
+        ]
+    )
