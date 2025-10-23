@@ -3,7 +3,9 @@ import pandas as pd
 from sklearn.metrics import roc_curve
 from sklearn.metrics import precision_recall_curve
 import numpy as np
-from typing import Dict, Any
+import pickle
+from typing import Dict, Any, List, Tuple
+from collections import defaultdict
 
 from . import breakends as bnds
 from . import events as evts
@@ -12,6 +14,8 @@ from . import _caller_params as caller_params
 from . import _sample_params as sample_params
 from . import vcfparse as vcfp
 from . import chunk_match as chunk_match
+from . import breakpoints as bps
+from . import matched_breakpoints as matchedbps
 from pathlib import Path
 import pysam
 
@@ -458,12 +462,12 @@ def preprocess_chm13_val_set(sample, vcf_path, force_rerun=False):
         ]
 
         # Convert to breakpoint format. No SVLEN in this reference set for long_val filter.
-        result_bps = bnds.bnd_to_bp(evts.event_to_bnd(chm_val_vcf_df))
+        result_bps = bnds.bnd_to_bp(evts.event_to_bnd(chm_val_vcf_df, bnd2_pos='end'))
 
         result_bps.to_csv(out_path, index=False)
 
 
-def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, verbose=True):
+def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, val_match_margin=1000, verbose=True):
     """
     Given dataframes of a callset and a validation set, match them and return a dataframe with the following columns:
     INFO_EVENT, {qual_metric}, is_in_val, INFO_INFERRED_SVTYPE, {FILTER_PASS}
@@ -486,7 +490,7 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, ve
             callset_name: callset_bps_,
             sample_config['val_set']['name']: val_set_
         },
-        max_dist=200,
+        max_dist=val_match_margin,
         ids_only=True,
         ignore_size=True
     )
@@ -500,7 +504,7 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, ve
     return callset_bps_.loc[callset_bps_['INFO_EVENT'].notna(), cols_to_keep]
 
 
-def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name, model_name, verbose=True):
+def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name, model_name, val_match_margin=1000, verbose=True):
     svens_calls_ = svensemble2_bps.copy()
     val_set_ = val_set.copy()
 
@@ -509,21 +513,312 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, tr
             'svensemble2': svens_calls_,
             sample_config['val_set']['name']: val_set_
         },
-        max_dist=200,
+        max_dist=val_match_margin,
         ids_only=True,
         ignore_size=True
     )
 
     svens_calls_.loc[:, 'is_in_val'] = svens_calls_['INFO_EVENT'].isin(matched_ids['svensemble2_INFO_EVENT'])
+    cols_to_keep = ['INFO_EVENT', f'{training_set_name}_{model_name}_pred', 'is_in_val']
+    if 'INFO_INFERRED_SVTYPE' in svens_calls_.columns:
+        cols_to_keep.append('INFO_INFERRED_SVTYPE')
 
-    val_df = svensemble2_bps[
-        [
-            'INFO_EVENT',
-            f'{training_set_name}_{model_name}_pred',
-            'is_in_val',
-            'INFO_INFERRED_SVTYPE'
-        ]
-    ]
+    val_df = svens_calls_[cols_to_keep]
     val_df = val_df[val_df[f'{training_set_name}_{model_name}_pred'].notna()]
 
     return val_df
+
+def preprocess_sample_for_benchmark(
+    sample_name: str,
+    model_name: str,
+    save_pickle: bool = True
+) -> Dict[str, Any]:
+    """
+    Preprocess a sample for benchmarking with a specified SVEnsemble2 model.
+
+    Args:
+        sample_name (str): Name of the sample.
+        model_name (str): SVEnsemble2 model name.
+        sv_types (List[str]): List of SV types to include (e.g., ['DEL']).
+        sv_len_lower (int): Lower bound on SV length.
+        sv_len_upper (int): Upper bound on SV length.
+        save_pickle (bool): Whether to save the processed sample to a pickle file.
+
+    Returns:
+        Dict[str, Any]: Preprocessed sample dictionary.
+    """
+    # Initialize training sets from presets
+    training_sets = caller_params.training_set_presets['default']
+
+    # Create main sample configuration dictionary
+    sample = sv_utils.create_config_dict(
+        sample_name,
+        training_sets=training_sets,
+        val_set='use_name'
+    )[sample_name]
+
+    # Prepare a blank matched_bps dict per training set
+    sample['matched_bps'] = {
+        training_set_name: None
+        for training_set_name in sample['training_sets']
+    }
+
+    # Load original callset breakpoints tables
+    for callset_name in sample['callsets']:
+        callset_bps_path = (
+            sample["callsets"][callset_name]["svensemble_dir"] /
+            f"{callset_name}_bps.csv"
+        )
+        sample['callsets'][callset_name]['bps'] = pd.read_csv(callset_bps_path, low_memory=False)
+
+    # Load matched breakpoints tables for each training set
+    for training_set_name in sample['training_sets']:
+        matched_bps_path = (
+            sample['sample_dir']
+            / 'sv_calling'
+            / 'svensemble2'
+            / f'matched_bps_{training_set_name}.csv'
+        )
+        # Read CSV into DataFrame
+        sample['matched_bps'][training_set_name] = pd.read_csv(
+            matched_bps_path, low_memory=False
+        )
+
+    # Load prediction dictionaries (pickled)
+    unbiased_dict_path = (
+        sample['sample_dir']
+        / 'sv_calling'
+        / 'svensemble2'
+        / 'unbiased_dict.pkl'
+    )
+    with open(unbiased_dict_path, 'rb') as f:
+        sample['pred_dicts'] = pickle.load(f)
+
+    # Adjust prediction DataFrames: reset index, drop/rename columns appropriately
+    for training_set, pred_dict in sample['pred_dicts'].items():
+        df = pred_dict['y']
+        df.reset_index(inplace=True, drop=False)
+        # Remove unnecessary columns if present
+        drop_cols = [col for col in ['gnomad_INFO_EVENT', 0] if col in df.columns]
+        if drop_cols:
+            df.drop(columns=drop_cols, inplace=True)
+        # Rename prediction column to consistent naming
+        if 1 in df.columns:
+            df.rename(
+                columns={1: f'{training_set}_{model_name}_pred'},
+                inplace=True
+            )
+
+    # Extra preprocessing/annotations per callset type
+    for training_set_name, training_set_callsets in sample['training_sets'].items():
+        # Annotate gridss_FILTER_PASS with logical AND of both bnd filter passes
+        if 'gridss' in training_set_callsets:
+            sample['matched_bps'][training_set_name].loc[
+                :, 'gridss_FILTER_PASS'
+            ] = np.all(
+                sample['matched_bps'][training_set_name][
+                    ['gridss_FILTER_PASS_bnd1', 'gridss_FILTER_PASS_bnd2']
+                ].astype(bool),
+                axis=1
+            )
+        # Combine manta_candidate pair counts into a total
+        if 'manta_candidate' in training_set_callsets:
+            sample['matched_bps'][training_set_name].loc[:, 'manta_candidate_INFO_TOTAL_PAIR_COUNT'] = (
+                sample['matched_bps'][training_set_name]['manta_candidate_INFO_UPSTREAM_PAIR_COUNT'] +
+                sample['matched_bps'][training_set_name]['manta_candidate_INFO_DOWNSTREAM_PAIR_COUNT'] +
+                sample['matched_bps'][training_set_name]['manta_candidate_INFO_PAIR_COUNT']
+            )
+
+    # Generate SVEnsemble2 calls for each training set, using matched breakpoints and predictions
+    sample['svensemble2_calls'] = defaultdict(dict)
+    for training_set, _ in training_sets.items():
+        sample['svensemble2_calls'][training_set] = matchedbps.get_svensemble2_calls(
+            sample['matched_bps'][training_set],
+            sample['pred_dicts'][training_set]['y']
+        )
+
+    # Save processed sample as pickle if requested
+    if save_pickle:
+        out_filename = (
+            f"{sample_name}.{model_name}.pkl"
+        )
+        out_path = (
+            sample['sample_dir']
+            / 'sv_calling'
+            / 'svensemble2'
+            / out_filename
+        )
+        with open(out_path, 'wb') as f:
+            pickle.dump(sample, f)
+
+        return
+
+    return sample
+
+
+def filter_sample_by_type_len(
+    sample: Dict[str, Any],
+    svtypes: List[str] | None = None,
+    svlens: Tuple[int, int] | None = None
+) -> Dict[str, Any]:
+    """
+    Filter a sample by SV type and length.
+    """
+    # Filters SVensemble2 and original callsets first
+    # Then uses a mask from SVEnsemble2 calls to filter matched_bps
+    # Does so for each original callset and training set
+    if svtypes is None:
+        svtypes = caller_params.default_sv_types
+    if svlens is None:
+        svlens = caller_params.default_sv_lens
+
+    svlen_lower, svlen_upper = svlens
+
+    sample_ = sample.copy()
+
+    for training_set_name, training_set_callsets in sample_['training_sets'].items():
+        svlen_svtype_mask = bps._get_svlen_svtype_filter_mask(
+            sample_['svensemble2_calls'][training_set_name],
+            'svensemble2',
+            svlens=svlens,
+            svtypes=svtypes
+        )
+        sample_['svensemble2_calls'][training_set_name] = sample_['svensemble2_calls'][training_set_name][svlen_svtype_mask]
+        sample_['matched_bps'][training_set_name] = sample_['matched_bps'][training_set_name][svlen_svtype_mask]
+
+    for callset in sample['callsets']:
+        sample_['callsets'][callset]['bps'] = bps.svlen_svtype_filter(
+            sample_['callsets'][callset]['bps'],
+            callset,
+            svlens=svlens,
+            svtypes=svtypes
+        )
+
+    return sample_
+
+
+# Benchmark a single sample's callsets and SVEnsemble2 ensemble predictions against a validation set,
+# saving the results in a nested dict (callset/SVEnsemble2) structure to disk.
+def benchmark_sample(
+    sample_name,
+    model_name,
+    svtypes,
+    svlens,
+    training_sets: List[str] | str | None = None,
+    val_match_margin: int = 1000,
+    save_pickle=True,
+    verbose=False
+):
+    """|
+    Benchmark callset and SVEnsemble2 predictions for a sample against the corresponding validation set.
+
+    Args:
+        sample_name (str): Name of the sample.
+        model_name (str): Model identifier (e.g. 'unbiased').
+        svtypes (list or tuple): Structural variant types to consider.
+        svlens (tuple): SV length range (min, max).
+        training_sets (list or str): Training sets to consider.
+        save_pickle (bool, optional): Whether to save results or return results as a dict. Default: True.
+        verbose (bool, optional): Whether to print processing info. Default: True.
+
+    Returns:
+        None. Writes a pickled nested dict with validation results to sample dir.
+    """
+    if training_sets is None:
+        training_sets = caller_params.training_set_presets['default']
+    if isinstance(training_sets, str):
+        training_sets = caller_params.training_set_presets[training_sets]
+
+    # Build config dict for the sample, with all paths
+    sample_dict = sv_utils.create_config_dict(
+        sample_name,
+        training_sets=training_sets,
+        val_set="use_name"
+    )[sample_name]
+
+    # Load filtered sample .pkl with SVEnsemble2 runs in the `svensemble2_calls` dictionary, etc.
+    sample_path = (
+        sample_dict["sample_dir"] / "sv_calling" / "svensemble2" /
+        f"{sample_name}.{model_name}.pkl"
+    )
+    with open(sample_path, "rb") as f:
+        sample = pickle.load(f)
+
+    sample = filter_sample_by_type_len(sample, svtypes=svtypes, svlens=svlens)
+
+    # Prepare result dictionary for storing validation info for callsets and SVEnsemble2 predictions
+    sample_val_dict = defaultdict(dict)
+
+    # Load and filter the sample's validation set for type and length
+    if sample["val_set"] is None:
+        print(f"{sample_name} has no validation set, skipping")
+        return
+
+    val_set = pd.read_csv(sample["val_set"]["path"])
+    val_set = bps.svlen_svtype_filter(
+        val_set, sample["val_set"]["name"], svtypes=svtypes, svlens=svlens
+    )
+    if val_set.shape[0] == 0:
+        raise ValueError(f"No {sample['val_set']['name']} calls found for {sample_name} after filtering")
+
+    # Validate original callsets (non-ensemble predictions)
+    for callset_name in sample["callsets"].keys():
+
+        callset_bps = sample['callsets'][callset_name]['bps']
+
+        val_df = validate_basic_callset(
+            callset_bps,
+            val_set,
+            sample,
+            callset_name,
+            val_match_margin=val_match_margin,
+            verbose=verbose
+        )
+        # Store result under this callset name
+        sample_val_dict[callset_name] = val_df
+        if verbose:
+            match_count = val_df["is_in_val"].sum()
+            total_count = len(val_df)
+            print(
+                f"{callset_name} callset for {sample_name} processed "
+                f"({match_count} matches out of {total_count} predictions)"
+            )
+
+    # Validate SVEnsemble2 predictions for each training set
+    for training_set_name in sample["training_sets"].keys():
+        svensemble_preds = sample["svensemble2_calls"][training_set_name]
+        val_df = validate_svensemble2_predictions(
+            svensemble_preds,
+            val_set,
+            sample,
+            training_set_name,
+            model_name,
+            val_match_margin=val_match_margin,
+            verbose=verbose
+        )
+        dict_key = f"svensemble2_{training_set_name}"
+        sample_val_dict[dict_key] = val_df
+        if verbose:
+            match_count = val_df["is_in_val"].sum()
+            total_count = len(val_df)
+            print(
+                f"SVEnsemble2 predictions ({training_set_name}) for {sample_name} processed "
+                f"({match_count} matches out of {total_count} predictions)"
+            )
+
+    # Save validation result dict if requested
+    if svtypes is None:
+        svtypes_str = ['all']
+    else:
+        svtypes_str = svtypes
+    if save_pickle:
+        val_dict_path = (
+            sample["sample_dir"] / "sv_calling" / "svensemble2" /
+            f"{sample_name}.{model_name}.{'-'.join(svtypes_str)}.{svlens[0]}:{svlens[1]}.val_dict.pkl"
+        )
+        with open(val_dict_path, "wb") as f:
+            pickle.dump(dict(sample_val_dict), f)
+        return
+
+    return sample_val_dict
+

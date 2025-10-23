@@ -246,7 +246,7 @@ def annotate_svtypes(bps_df, source):
         source (str): SV caller/source string, required for insert size calculation.
 
     Returns:
-        np.ndarray: Array of SV type strings for each record.
+        pd.Series: Series of SV type strings for each record.
     """
     ins_lens = get_insert_size(bps_df, source=source)
     bnd1 = bnds.process_breakend_alt(bps_df['ALT_bnd1'])
@@ -289,7 +289,9 @@ def annotate_svtypes(bps_df, source):
     for svtype, mask in svtype_dict.items():
         svtypes[mask] = svtype
 
-    svtypes = np.where(pd.isna(svtypes), "OTHER", svtypes)
+    svtypes = pd.Series(np.where(pd.isna(svtypes), "OTHER", svtypes))
+    svtypes.index = bps_df.index
+
     return svtypes
 
 def get_del_size(bps_df: pd.DataFrame, *args) -> pd.Series:
@@ -346,9 +348,9 @@ def _get_svlen_svtype_filter_mask(
     source: str,
     svlens: tuple[int, int] | None = None,
     svtypes: list[str] | None = None
-) -> pd.DataFrame:
+) -> pd.Series:
     """
-    Filter a breakpoint DataFrame for given SVLEN and SVTYPE ranges.
+    Get mask of breakpoint DataFrame for given SVLEN and SVTYPE ranges.
 
     Args:
         bps_df (pd.DataFrame): Breakpoint DataFrame.
@@ -357,7 +359,7 @@ def _get_svlen_svtype_filter_mask(
         svtypes (list[str], optional): List of SV types to include. Defaults to ['DEL', 'DUP', 'INV', 'TRA'].
 
     Returns:
-        pd.DataFrame: Filtered breakpoint DataFrame.
+        pd.Series: Mask of breakpoint DataFrame for given SVLEN and SVTYPE ranges.
     """
     if svlens is None:
         svlens = caller_params.default_sv_lens
@@ -368,15 +370,10 @@ def _get_svlen_svtype_filter_mask(
     if svtypes is None:
         svtypes = caller_params.default_sv_types
 
-    bps_df = bps_df.copy()
 
-    print(source, svtypes)
-
-    svtype_mask = pd.Series(annotate_svtypes(bps_df, source)).isin(svtypes)
-    print(f'svtype mask: {svtype_mask.sum()}')
+    svtype_mask = annotate_svtypes(bps_df, source).isin(svtypes)
     sv_sizes = get_sv_sizes(bps_df, source)
     svlen_mask = (sv_sizes >= svlen_min) & (sv_sizes <= svlen_max)
-    print(f'svlen mask: {svlen_mask.sum()}')
 
     return svtype_mask & svlen_mask
 
