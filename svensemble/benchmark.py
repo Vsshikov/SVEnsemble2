@@ -6,6 +6,7 @@ import numpy as np
 import pickle
 from typing import Dict, Any, List, Tuple
 from collections import defaultdict
+from copy import deepcopy
 
 from . import breakends as bnds
 from . import events as evts
@@ -674,7 +675,7 @@ def filter_sample_by_type_len(
 
     svlen_lower, svlen_upper = svlens
 
-    sample_ = sample.copy()
+    sample_ = deepcopy(sample)
 
     for training_set_name, training_set_callsets in sample_['training_sets'].items():
         svlen_svtype_mask = bps._get_svlen_svtype_filter_mask(
@@ -702,10 +703,11 @@ def filter_sample_by_type_len(
 def benchmark_sample(
     sample_name,
     model_name,
-    svtypes,
-    svlens,
+    svtypes=None,
+    svlens=None,
     training_sets: List[str] | str | None = None,
     val_match_margin: int = 1000,
+    skip_filtering: bool = False,
     save_pickle=True,
     verbose=False
 ):
@@ -724,10 +726,24 @@ def benchmark_sample(
     Returns:
         None. Writes a pickled nested dict with validation results to sample dir.
     """
+    # Check that there are no svtypes/svlens specified if skip_filtering is True
+    if skip_filtering and (svtypes is not None or svlens is not None):
+        raise ValueError("Cannot specify svtypes/svlens if set to skip filtering")
+
     if training_sets is None:
         training_sets = caller_params.training_set_presets['default']
     if isinstance(training_sets, str):
         training_sets = caller_params.training_set_presets[training_sets]
+
+    if skip_filtering:
+        svtypes_str = ['all']
+    else:
+        svtypes_str = '-'.join(svtypes)
+    if skip_filtering:
+        svlens_str = 'all_lens'
+    else:
+        svlens_str = f'{svlens[0]}:{svlens[1]}'
+
 
     # Build config dict for the sample, with all paths
     sample_dict = sv_utils.create_config_dict(
@@ -744,7 +760,8 @@ def benchmark_sample(
     with open(sample_path, "rb") as f:
         sample = pickle.load(f)
 
-    sample = filter_sample_by_type_len(sample, svtypes=svtypes, svlens=svlens)
+    if not skip_filtering:
+        sample = filter_sample_by_type_len(sample, svtypes=svtypes, svlens=svlens)
 
     # Prepare result dictionary for storing validation info for callsets and SVEnsemble2 predictions
     sample_val_dict = defaultdict(dict)
@@ -807,14 +824,11 @@ def benchmark_sample(
             )
 
     # Save validation result dict if requested
-    if svtypes is None:
-        svtypes_str = ['all']
-    else:
-        svtypes_str = svtypes
+
     if save_pickle:
         val_dict_path = (
             sample["sample_dir"] / "sv_calling" / "svensemble2" /
-            f"{sample_name}.{model_name}.{'-'.join(svtypes_str)}.{svlens[0]}:{svlens[1]}.val_dict.pkl"
+            f"{sample_name}.{model_name}.{svtypes_str}.{svlens_str}.val_dict.pkl"
         )
         with open(val_dict_path, "wb") as f:
             pickle.dump(dict(sample_val_dict), f)

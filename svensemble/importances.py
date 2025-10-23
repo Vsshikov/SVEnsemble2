@@ -30,7 +30,7 @@ if WORKDIR not in sys.path:
 import svensemble.matched_breakpoints as matchedbps  # noqa: E402
 
 
-def load_svensemble2_val_Xy_from_pickles(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, verbose=False):
+def load_svensemble2_val_Xy_from_samples_val_pickles(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, verbose=False):
     samples = pickle.load(open(samples_pkl_path, 'rb'))
     val_dict = pickle.load(open(val_dict_pkl_path, 'rb'))
 
@@ -40,6 +40,25 @@ def load_svensemble2_val_Xy_from_pickles(samples_pkl_path, val_dict_pkl_path, sa
     preprocessed_matched_bps = matchedbps.preprocess_matchedbps_for_pu(
         joint_bp_df=matched_bps,
         sample_config=samples[sample_name],
+        match_sample_name='val',
+        training_set_name=training_set_name,
+        add_match_ids_to_index=False,
+        verbose=verbose
+    )
+
+    return matchedbps.get_X_y_from_training_df(preprocessed_matched_bps, match_col='ref_match')
+
+
+def load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_path, val_dict_pkl_path, training_set_name, verbose=False):
+    sample = pickle.load(open(sample_pkl_path, 'rb'))
+    val_dict = pickle.load(open(val_dict_pkl_path, 'rb'))
+
+    matched_bps = sample['matched_bps'][training_set_name].copy()
+    matched_bps.loc[:, 'val_INFO_EVENT'] = np.where(val_dict[f'svensemble2_{training_set_name}']['is_in_val'], True, np.nan)
+
+    preprocessed_matched_bps = matchedbps.preprocess_matchedbps_for_pu(
+        joint_bp_df=matched_bps,
+        sample_config=sample,
         match_sample_name='val',
         training_set_name=training_set_name,
         add_match_ids_to_index=False,
@@ -134,7 +153,7 @@ def svensemble2_feature_importance(samples_pkl_path, val_dict_pkl_path, sample_n
         importances_stds = importances_df['stds']
 
     else:
-        X, y = load_svensemble2_val_Xy_from_pickles(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, verbose=verbose)
+        X, y = load_svensemble2_val_Xy_from_samples_val_pickles(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, verbose=verbose)
 
         # Load the trained model + predictions
         svensemble2_model = pickle.load(open(samples_pkl_path, 'rb'))[sample_name]['pred_dicts'][training_set_name]['RF_fit']

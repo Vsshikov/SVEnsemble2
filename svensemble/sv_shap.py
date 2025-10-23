@@ -6,8 +6,6 @@
 #SBATCH --time=10:00:00
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=64G
-#SBATCH --partition=gpuq
-#SBATCH --gres=gpu:P100:4
 
 """
 WIP script to compute SHAP values for SVEnsemble2 models. Uses fixed files/variables for now
@@ -26,24 +24,40 @@ if WORKDIR not in sys.path:
 
 import svensemble.importances as importances # noqa: E402
 
+
+training_sets = {
+    'gridss': ['gridss'],
+    'manta_candidate': ['manta_candidate'],
+    'manta_diploid': ['manta_diploid'],
+    'delly': ['delly'],
+    'gridss+manta_candidate': ['gridss', 'manta_candidate'],
+    'gridss+manta_diploid': ['gridss', 'manta_diploid'],
+    'gridss+manta_candidate+delly': ['gridss', 'manta_candidate', 'delly'],
+    'gridss+manta_diploid+delly': ['gridss', 'manta_diploid', 'delly'],
+    'delly+manta_candidate': ['delly', 'manta_candidate'],
+    'delly+manta_diploid': ['delly', 'manta_diploid']
+}
+
 # Shap stuff
 sample_name = 'NA12878_30x'
-training_set_name = 'gridss+manta_diploid'
+training_set_name = 'delly+manta_candidate'
 model_name = 'unbiased'
 
-samples_pkl_path = '/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/model/saved/samples.pkl'
-val_dict_pkl_path = '/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/model/saved/val_dict.pkl'
+sample_pkl_path = f'/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/{sample_name}/sv_calling/svensemble2/{sample_name}.{model_name}.pkl'
+val_dict_pkl_path = f'/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/{sample_name}/sv_calling/svensemble2/{sample_name}.{model_name}.[\'all\'].all_lens.val_dict.pkl'
 
 
-X, y = importances.load_svensemble2_val_Xy_from_pickles(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, verbose=True)
+X, y = importances.load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_path, val_dict_pkl_path, training_set_name, verbose=True)
 
 
-samples = pickle.load(open(samples_pkl_path, 'rb'))
-model = samples[sample_name]['pred_dicts'][training_set_name]['RF_fit']
+sample = pickle.load(open(sample_pkl_path, 'rb'))
+model = sample['pred_dicts'][training_set_name]['RF_fit']
 
 
 # build a Permutation explainer and explain the model predictions on the given dataset
 explainer = shap.explainers.TreeExplainer(model, X)
 shap_values = explainer(X)
 
-pickle.dump(shap_values, open('/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/model/temp/shap_values.pkl', 'wb'))
+os.mkdir(f'/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/{sample_name}/sv_calling/svensemble2/shap_values', exist_ok=True)
+
+pickle.dump(shap_values, open(f'/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/{sample_name}/sv_calling/svensemble2/shap_values/{sample_name}.{model_name}.{training_set_name}.[\'all\'].all_lens.shap_values.pkl', 'wb'))
