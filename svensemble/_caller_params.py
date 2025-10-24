@@ -186,23 +186,27 @@ gnomad_params = default_params | {
 }
 
 manta_candidate_params = default_params | {
+    'base_cols': base_cols + ['INFO_END'],
     'filter_cols': ['PASS'],
     'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'POS2', 'CIPOS', 'CIEND', 'MATEID', 'EVENT'],
     'info_cols_pred': ['IMPRECISE', 'HOMLEN', 'BND_DEPTH', 'SVLEN', 'PAIR_COUNT', 'UPSTREAM_PAIR_COUNT', 'DOWNSTREAM_PAIR_COUNT', 'BND_PAIR_COUNT'],
     'parse_format': False,
     'svlen_source': 'svlen',
     'bps_path': 'sv_calling/manta/svensemble2/manta_candidate_bps.csv',
-    'qual_metric': 'INFO_TOTAL_PAIR_COUNT'
+    'qual_metric': 'INFO_TOTAL_PAIR_COUNT',
+    'bnd2_pos': 'end'
 }
 
 manta_diploid_params = default_params | {
+    'base_cols': base_cols + ['INFO_END'],
     'filter_cols': ['PASS'],
     'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'POS2', 'CIPOS', 'CIEND', 'MATEID', 'EVENT'],
     'info_cols_pred': ['IMPRECISE', 'HOMLEN', 'BND_DEPTH', 'SVLEN'],
     'parse_format': True,
     'format_cols': ['FT', 'GQ', 'PR', 'SR'],
     'svlen_source': 'svlen',
-    'bps_path': 'sv_calling/manta/svensemble2/manta_diploid_bps.csv'
+    'bps_path': 'sv_calling/manta/svensemble2/manta_diploid_bps.csv',
+    'bnd2_pos': 'end'
 }
 
 delly_params = default_params | {
