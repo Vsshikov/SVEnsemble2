@@ -17,7 +17,7 @@ import numpy as np
 default_reference_set = 'gnomad'
 
 default_sv_types = ['DEL', 'INS', 'DUP', 'INV', 'TRA', 'OTHER']
-default_sv_lens = (50, np.inf)
+default_sv_lens = (0, np.inf)
 
 svtype_cols = ['INFO_SVTYPE', 'INFO_INFERRED_SVTYPE']
 

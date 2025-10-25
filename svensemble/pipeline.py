@@ -18,6 +18,7 @@ import sys
 import pickle
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import sklearn.model_selection as skm
 from pysam import VariantFile
@@ -173,8 +174,7 @@ def parse_preprocess_gridss(
         # For now we drop those breakpoints
         if 'QUAL' not in gridss_bp_df.columns:
             try:
-                gridss_bp_df = gridss_bp_df[gridss_bp_df['QUAL_bnd1'] == gridss_bp_df['QUAL_bnd2']]
-                gridss_bp_df.loc[:, 'QUAL'] = gridss_bp_df['QUAL_bnd1']
+                gridss_bp_df.loc[:, 'QUAL'] = np.min([gridss_bp_df['QUAL_bnd1'], gridss_bp_df['QUAL_bnd2']], axis=0)
             except KeyError:
                 raise KeyError('No QUAL column found in GRIDSS breakpoints')
 
@@ -497,7 +497,7 @@ def match_sample_breakpoints(
 ) -> None:
     """
     For a given sample, load available breakpoint DataFrames from supported callsets,
-    add the reference sample breakpoints, perform outer join matching for each training_set sprecified for sample, and save results.
+    add the reference sample breakpoints, perform outer join matching for each training_set specified for sample, and save results.
     """
     if verbose:
         print("Matching breakpoints for sample...")
@@ -653,7 +653,7 @@ def pu_train_predict_sample(
         pickle.dump(unbiased_dict, f)
 
 
-def svensemble2(sample_names: list[str], ground_truth_sample_name: str, ref_path: Path, verbose: bool = False, preprocess: bool = True, match: bool = True, train: bool = True) -> dict:
+def svensemble2(sample_names: list[str], ground_truth_sample_name: str, ref_path: Path, verbose: bool = False, preprocess: bool = True, match: bool = True, train: bool = True, use_cached_preprocessed_truth: bool = False) -> dict:
     """
     Accepts a list of sample names and a data directory.
     For each name, reads the outputs of supported callers from the specified directory,
@@ -668,7 +668,10 @@ def svensemble2(sample_names: list[str], ground_truth_sample_name: str, ref_path
         sample_names: list of sample names to process
         ground_truth_sample_name: name of the ground truth sample
         ref_path: path to the reference genome
-        data_dir: path to the data directory
+        preprocess: if True, preprocess the samples
+        match: if True, match the breakpoints for each sample
+        train: if True, train the PU model for each sample
+        use_cached_preprocessed_truth: if True, use the cached preprocessed truth breakpoints instead of reprocessing them
         verbose: if True, print progress messages
     """
     # Create a config dict for the samples using the sample_names
@@ -678,10 +681,19 @@ def svensemble2(sample_names: list[str], ground_truth_sample_name: str, ref_path
     # Also create a config dict for the ground truth sample
     samples.update(sv_utils.create_config_dict(ground_truth_sample_name, ref_path=ref_path, is_ground_truth=True))
 
+    preprpocess_truth = True
+    if use_cached_preprocessed_truth:
+        # Check if a preprocessed truth sample exists in the correct location
+        if not (samples[ground_truth_sample_name]['callsets'][ground_truth_sample_name]['svensemble_dir'] / f'{ground_truth_sample_name}_bps.csv').exists():
+            raise FileNotFoundError(f"Preprocessed truth breakpoints not found for {ground_truth_sample_name}")
+        else:
+            preprpocess_truth = False
+
     if preprocess:
         # Parse and preprocess the samples
         for sample_name, sample_config in samples.items():
-            parse_preprocess_sample(sample_name, sample_config, verbose)
+            if (sample_name != ground_truth_sample_name) or ((sample_name == ground_truth_sample_name) and preprpocess_truth):
+                parse_preprocess_sample(sample_name, sample_config, verbose)
 
     if match:
         # Match the breakpoints for each sample
@@ -744,6 +756,12 @@ if __name__ == '__main__':
         default=False,
         help="If set, train the PU model."
     )
+    parser.add_argument(
+        '--use_cached_preprocessed_truth',
+        action='store_true',
+        default=False,
+        help="If set, use the cached preprocessed truth breakpoints instead of preprocessing them anew."
+    )
     args = parser.parse_args()
 
     # Run the main SVEnsemble2 pipeline with the provided arguments
@@ -754,5 +772,6 @@ if __name__ == '__main__':
         verbose=args.verbose,
         preprocess=args.preprocess,
         match=args.match,
-        train=args.train
+        train=args.train,
+        use_cached_preprocessed_truth=args.use_cached_preprocessed_truth
     )
