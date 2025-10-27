@@ -1,3 +1,13 @@
+#! /usr/bin/env python3
+
+#SBATCH --job-name=svensemble2_benchmark
+#SBATCH --output=svensemble2_benchmark.out
+#SBATCH --error=svensemble2_benchmark.err
+#SBATCH --time=10:00:00
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=64G
+
+
 from matplotlib import pyplot as plt
 import pandas as pd
 from sklearn.metrics import roc_curve
@@ -7,18 +17,39 @@ import pickle
 from typing import Dict, Any, List, Tuple
 from collections import defaultdict
 from copy import deepcopy
-
-from . import breakends as bnds
-from . import events as evts
-from . import utils as sv_utils
-from . import _caller_params as caller_params
-from . import _sample_params as sample_params
-from . import vcfparse as vcfp
-from . import chunk_match as chunk_match
-from . import breakpoints as bps
-from . import matched_breakpoints as matchedbps
 from pathlib import Path
+import os
+import sys
+
+
+
 import pysam
+
+if __name__ == '__main__':
+    # Set working directory and sys.path for local svensemble module
+    WORKDIR = "/vast/ai_projects/Papenfuss_SVEnsemble2"
+    os.chdir(WORKDIR)
+    if WORKDIR not in sys.path:
+        sys.path.insert(0, WORKDIR)
+    import svensemble.breakends as bnds
+    import svensemble.events as evts
+    import svensemble.utils as sv_utils
+    import svensemble._caller_params as caller_params
+    import svensemble._sample_params as sample_params
+    import svensemble.vcfparse as vcfp
+    import svensemble.chunk_match as chunk_match
+    import svensemble.breakpoints as bps
+    import svensemble.matched_breakpoints as matchedbps
+else:
+    from . import breakends as bnds
+    from . import events as evts
+    from . import utils as sv_utils
+    from . import _caller_params as caller_params
+    from . import _sample_params as sample_params
+    from . import vcfparse as vcfp
+    from . import chunk_match as chunk_match
+    from . import breakpoints as bps
+    from . import matched_breakpoints as matchedbps
 
 def load_truth_variants(ref_path):
     """Load reference variants from Kosugi study from BED file
@@ -496,7 +527,7 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
         ignore_size=True
     )
     callset_bps_.loc[:, 'is_in_val'] = callset_bps_['INFO_EVENT'].isin(matched_ids[f'{callset_name}_INFO_EVENT'])
-    cols_to_keep = ['INFO_EVENT', f'{sample_config['callsets'][callset_name]['params']['qual_metric']}', 'is_in_val']
+    cols_to_keep = ['INFO_EVENT', f"{sample_config['callsets'][callset_name]['params']['qual_metric']}", 'is_in_val']
     if 'FILTER_PASS' in callset_bps_.columns:
         cols_to_keep.append('FILTER_PASS')
     if 'INFO_INFERRED_SVTYPE' in callset_bps_.columns:
@@ -532,7 +563,8 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, tr
 def preprocess_sample_for_benchmark(
     sample_name: str,
     model_name: str,
-    save_pickle: bool = True
+    save_pickle: bool = True,
+    verbose: bool = False
 ) -> Dict[str, Any]:
     """
     Preprocess a sample for benchmarking with a specified SVEnsemble2 model.
@@ -727,19 +759,21 @@ def benchmark_sample(
         None. Writes a pickled nested dict with validation results to sample dir.
     """
     # Check that there are no svtypes/svlens specified if skip_filtering is True
-    if skip_filtering and (svtypes is not None or svlens is not None):
-        raise ValueError("Cannot specify svtypes/svlens if set to skip filtering")
+    # if skip_filtering and (svtypes is not None or svlens is not None):
+    #     raise ValueError("Cannot specify svtypes/svlens if set to skip filtering")
 
     if training_sets is None:
         training_sets = caller_params.training_set_presets['default']
-    if isinstance(training_sets, str):
+    elif isinstance(training_sets, str):
         training_sets = caller_params.training_set_presets[training_sets]
 
     if skip_filtering:
-        svtypes_str = ['all']
+        svtypes = None
+        svtypes_str = 'all'
     else:
         svtypes_str = '-'.join(svtypes)
     if skip_filtering:
+        svlens = None
         svlens_str = 'all_lens'
     else:
         svlens_str = f'{svlens[0]}:{svlens[1]}'
@@ -776,7 +810,7 @@ def benchmark_sample(
         val_set, sample["val_set"]["name"], svtypes=svtypes, svlens=svlens
     )
     if val_set.shape[0] == 0:
-        raise ValueError(f"No {sample['val_set']['name']} calls found for {sample_name} after filtering")
+        raise ValueError(f"No {sample['val_set']['name']} calls found for {sample_name} after filtering for {svtypes_str} and {svlens_str}")
 
     # Validate original callsets (non-ensemble predictions)
     for callset_name in sample["callsets"].keys():
@@ -836,3 +870,66 @@ def benchmark_sample(
 
     return sample_val_dict
 
+
+if __name__ == "__main__":
+    from argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument('--sample_name', type=str, required=True)
+    parser.add_argument('--model_name', type=str, required=True)
+    parser.add_argument('--svtypes', type=str, default=None)
+    parser.add_argument('--svlen_lower', type=int, default=caller_params.default_sv_lens[0])
+    parser.add_argument('--svlen_upper', type=int, default=caller_params.default_sv_lens[1])
+    parser.add_argument('--training_sets', type=str, default=None)
+    parser.add_argument('--val_match_margin', type=int, default=500)
+    parser.add_argument('--skip_filtering', action='store_true', default=False)
+    parser.add_argument('--save_pickle', action='store_true', default=True)
+    parser.add_argument('--perform_steps', type=str, default=None)
+    parser.add_argument('--verbose', action='store_true', default=False)
+    args = parser.parse_args()
+    # Benchmarking requires 2 steps:
+    # 1. Preprocess the sample using the name, list of training sets from csv files and prediction pickles into a single dict
+    #    which will be saved as a pickle file
+    # 2. Benchmark itself
+    if args.perform_steps is not None:
+        perform_steps = args.perform_steps.split(sep=',')
+        for step in perform_steps:
+            if step not in ['preprocess', 'benchmark']:
+                raise ValueError(f"Unknown step: {step}. The steps must be 'preprocess' or 'benchmark'")
+
+    svtypes = args.svtypes
+    if svtypes is not None:
+        svtypes = svtypes.split(sep=',')
+        # Check that there are only supported svtypes in the string
+        for svtype in svtypes:
+            if svtype not in caller_params.default_sv_types:
+                raise ValueError(f"Unsupported svtype: {svtype}")
+
+    if args.skip_filtering:
+        svlens = None
+    else:
+        svlens = (args.svlen_lower, args.svlen_upper)
+
+    if 'preprocess' in perform_steps:
+        preprocess_sample_for_benchmark(
+            sample_name=args.sample_name,
+            model_name=args.model_name,
+            save_pickle=args.save_pickle,
+            verbose=args.verbose
+        )
+
+    if 'benchmark' in perform_steps:
+        benchmark_sample(
+            sample_name=args.sample_name,
+            model_name=args.model_name,
+            svtypes=svtypes,
+            svlens=(args.svlen_lower, args.svlen_upper),
+            training_sets=args.training_sets,
+            val_match_margin=args.val_match_margin,
+            skip_filtering=args.skip_filtering,
+            save_pickle=args.save_pickle,
+            verbose=args.verbose
+        )
+
+
+# for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name unbiased --skip_filtering --perform_steps preprocess --verbose; done
+#for svtype in DEL INS DUP INV OTHER; do for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name unbiased --svtypes $svtype --perform_steps benchmark --verbose; done; done

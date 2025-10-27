@@ -273,6 +273,9 @@ def event_to_bnd(vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.DataFrame:
     # Convert each type
     bnd_dfs = []
     for svtype, svtype_df in svtype_dict.items():
+        if svtype not in svtype_dispatch:
+            print(f'{svtype} found in INFO_SVTYPE but not in svtype_dispatch, skipping')
+            continue
         if len(svtype_df) > 0:
             bnd_dfs.append(svtype_dispatch[svtype](svtype_df, bnd2_pos))
 

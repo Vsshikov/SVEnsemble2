@@ -242,7 +242,7 @@ def parse_preprocess_manta_candidate(
         )
         if verbose:
             print("Converting Manta event-only variants to breakends")
-        manta_candidate_evt_bnd_df = evts.event_to_bnd(manta_candidate_evt_only_df)
+        manta_candidate_evt_bnd_df = evts.event_to_bnd(manta_candidate_evt_only_df, bnd2_pos=caller_params.manta_diploid_params['bnd2_pos'])
         manta_candidate_df = pd.concat([manta_candidate_bnd_only_df, manta_candidate_evt_bnd_df], axis=0)
         if verbose:
             print("Converting Manta breakends to breakpoints")
@@ -317,7 +317,7 @@ def parse_preprocess_manta_diploid(
         )
         if verbose:
             print("Converting Manta diploid event-only variants to breakends")
-        manta_evt_bnd_df = evts.event_to_bnd(manta_evt_only_df)
+        manta_evt_bnd_df = evts.event_to_bnd(manta_evt_only_df, bnd2_pos=caller_params.manta_diploid_params['bnd2_pos'])
         manta_diploid_df = pd.concat([manta_bnd_only_df, manta_evt_bnd_df], axis=0)
         if verbose:
             print("Converting Manta diploid breakends to breakpoints")
