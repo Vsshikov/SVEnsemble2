@@ -770,8 +770,13 @@ def benchmark_sample(
     if skip_filtering:
         svtypes = None
         svtypes_str = 'all'
-    else:
+    elif isinstance(svtypes, str):
+        svtypes_str = svtypes
+    elif isinstance(svtypes, list):
         svtypes_str = '-'.join(svtypes)
+    else:
+        raise TypeError(f"Invalid type for svtypes: {type(svtypes)}")
+
     if skip_filtering:
         svlens = None
         svlens_str = 'all_lens'

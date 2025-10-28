@@ -45,23 +45,23 @@ def convert_del_to_bnd(del_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.
     """
     # Create first breakend
     bp1 = del_vcf_df.copy()
-    bp1.loc[:, 'ID'] = bp1['ID'] + '_bp1'
-    bp1.loc[:, 'CHROM'] = bp1['CHROM']
-    bp1.loc[:, 'POS'] = bp1['POS'] - 1
-    bp1.loc[:, 'INFO_MATEID'] = bp1['INFO_EVENT'] + '_bp2'
-    bp1.loc[:, 'ALT'] = 'N[' + bp1['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(bp1, bnd2_pos)).astype(str) + '['
-    bp1.loc[:, 'INFO_CIPOS_l'] = bp1.loc[:, 'INFO_CIEND_l']
-    bp1.loc[:, 'INFO_CIPOS_r'] = bp1.loc[:, 'INFO_CIEND_r']
+    bp1.loc[:, 'ID'] = del_vcf_df['ID'] + '_bp1'
+    bp1.loc[:, 'CHROM'] = del_vcf_df['CHROM']
+    bp1.loc[:, 'POS'] = del_vcf_df['POS'] - 1
+    bp1.loc[:, 'INFO_MATEID'] = del_vcf_df['INFO_EVENT'] + '_bp2'
+    bp1.loc[:, 'ALT'] = 'N[' + del_vcf_df['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(del_vcf_df, bnd2_pos)).astype(str) + '['
+    bp1.loc[:, 'INFO_CIPOS_l'] = del_vcf_df.loc[:, 'INFO_CIEND_l']
+    bp1.loc[:, 'INFO_CIPOS_r'] = del_vcf_df.loc[:, 'INFO_CIEND_r']
     bp1 = bp1.drop(columns=drop_cols)
     # Create second breakend
     bp2 = del_vcf_df.copy()
-    bp2.loc[:, 'ID'] = bp2['ID'] + '_bp2'
-    bp2.loc[:, 'CHROM'] = bp2['INFO_CHR2']
-    bp2.loc[:, 'POS'] = _get_bnd2_pos(bp2, bnd2_pos)
-    bp2.loc[:, 'INFO_MATEID'] = bp2['INFO_EVENT'] + '_bp1'
-    bp2.loc[:, 'ALT'] = ']' + bp2['CHROM'].astype(str) + ':' + (bp2['POS'].astype(int) - 1).astype(str) + ']N'
-    bp2.loc[:, 'INFO_CIPOS_l'] = bp2.loc[:, 'INFO_CIEND_l']
-    bp2.loc[:, 'INFO_CIPOS_r'] = bp2.loc[:, 'INFO_CIEND_r']
+    bp2.loc[:, 'ID'] = del_vcf_df['ID'] + '_bp2'
+    bp2.loc[:, 'CHROM'] = del_vcf_df['INFO_CHR2']
+    bp2.loc[:, 'POS'] = _get_bnd2_pos(del_vcf_df, bnd2_pos)
+    bp2.loc[:, 'INFO_MATEID'] = del_vcf_df['INFO_EVENT'] + '_bp1'
+    bp2.loc[:, 'ALT'] = ']' + del_vcf_df['CHROM'].astype(str) + ':' + (del_vcf_df['POS'].astype(int) - 1).astype(str) + ']N'
+    bp2.loc[:, 'INFO_CIPOS_l'] = del_vcf_df.loc[:, 'INFO_CIEND_l']
+    bp2.loc[:, 'INFO_CIPOS_r'] = del_vcf_df.loc[:, 'INFO_CIEND_r']
     bp2 = bp2.drop(columns=drop_cols)
     return pd.concat([bp1, bp2], axis=0)
 
@@ -86,48 +86,48 @@ def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.
     """
     # Create first breakend
     bp1 = inv_vcf_df.copy()
-    bp1.loc[:, 'ID'] = bp1['ID'] + '_bp1'
-    bp1.loc[:, 'CHROM'] = bp1['CHROM']
-    bp1.loc[:, 'POS'] = bp1['POS']
-    bp1.loc[:, 'INFO_EVENT'] = bp1['INFO_EVENT'] + '_e1'
-    bp1.loc[:, 'INFO_MATEID'] = bp1['INFO_EVENT'] + '_bp3'
-    bp1.loc[:, 'ALT'] = 'N]' + bp1['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(bp1, bnd2_pos) - 1).astype(str) + ']'
-    bp1.loc[:, 'INFO_CIPOS_l'] = bp1.loc[:, 'INFO_CIEND_l']
-    bp1.loc[:, 'INFO_CIPOS_r'] = bp1.loc[:, 'INFO_CIEND_r']
+    bp1.loc[:, 'ID'] = inv_vcf_df['ID'] + '_bp1'
+    bp1.loc[:, 'CHROM'] = inv_vcf_df['CHROM']
+    bp1.loc[:, 'POS'] = inv_vcf_df['POS']
+    bp1.loc[:, 'INFO_EVENT'] = inv_vcf_df['INFO_EVENT'] + '_e1'
+    bp1.loc[:, 'INFO_MATEID'] = inv_vcf_df['INFO_EVENT'] + '_bp3'
+    bp1.loc[:, 'ALT'] = 'N]' + inv_vcf_df['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(inv_vcf_df, bnd2_pos) - 1).astype(str) + ']'
+    bp1.loc[:, 'INFO_CIPOS_l'] = inv_vcf_df.loc[:, 'INFO_CIEND_l']
+    bp1.loc[:, 'INFO_CIPOS_r'] = inv_vcf_df.loc[:, 'INFO_CIEND_r']
     bp1 = bp1.drop(columns=drop_cols)
 
     # Create second breakend
     bp2 = inv_vcf_df.copy()
-    bp2.loc[:, 'ID'] = bp2['ID'] + '_bp2'
-    bp2.loc[:, 'CHROM'] = bp2['CHROM']
-    bp2.loc[:, 'POS'] = bp2['POS'] + 1
-    bp2.loc[:, 'INFO_EVENT'] = bp2['INFO_EVENT'] + '_e2'
-    bp2.loc[:, 'INFO_MATEID'] = bp2['INFO_EVENT'] + '_bp4'
-    bp2.loc[:, 'ALT'] = '[' + bp2['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(bp2, bnd2_pos)).astype(str) + '[N'
-    bp2.loc[:, 'INFO_CIPOS_l'] = bp2.loc[:, 'INFO_CIEND_l']
-    bp2.loc[:, 'INFO_CIPOS_r'] = bp2.loc[:, 'INFO_CIEND_r']
+    bp2.loc[:, 'ID'] = inv_vcf_df['ID'] + '_bp2'
+    bp2.loc[:, 'CHROM'] = inv_vcf_df['CHROM']
+    bp2.loc[:, 'POS'] = inv_vcf_df['POS'] + 1
+    bp2.loc[:, 'INFO_EVENT'] = inv_vcf_df['INFO_EVENT'] + '_e2'
+    bp2.loc[:, 'INFO_MATEID'] = inv_vcf_df['INFO_EVENT'] + '_bp4'
+    bp2.loc[:, 'ALT'] = '[' + inv_vcf_df['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(inv_vcf_df, bnd2_pos)).astype(str) + '[N'
+    bp2.loc[:, 'INFO_CIPOS_l'] = inv_vcf_df.loc[:, 'INFO_CIEND_l']
+    bp2.loc[:, 'INFO_CIPOS_r'] = inv_vcf_df.loc[:, 'INFO_CIEND_r']
     bp2 = bp2.drop(columns=drop_cols)
     # Create third breakend
     bp3 = inv_vcf_df.copy()
-    bp3.loc[:, 'ID'] = bp3['ID'] + '_bp3'
-    bp3.loc[:, 'CHROM'] = bp3['INFO_CHR2']
-    bp3.loc[:, 'POS'] = _get_bnd2_pos(bp3, bnd2_pos) - 1
-    bp3.loc[:, 'INFO_EVENT'] = bp3['INFO_EVENT'] + '_e1'
-    bp3.loc[:, 'INFO_MATEID'] = bp3['INFO_EVENT'] + '_bp1'
-    bp3.loc[:, 'ALT'] = 'N]' + bp3['CHROM'].astype(str) + ':' + (bp3['POS'].astype(int)).astype(str) + ']'
-    bp3.loc[:, 'INFO_CIPOS_l'] = bp3.loc[:, 'INFO_CIEND_l']
-    bp3.loc[:, 'INFO_CIPOS_r'] = bp3.loc[:, 'INFO_CIEND_r']
+    bp3.loc[:, 'ID'] = inv_vcf_df['ID'] + '_bp3'
+    bp3.loc[:, 'CHROM'] = inv_vcf_df['INFO_CHR2']
+    bp3.loc[:, 'POS'] = _get_bnd2_pos(inv_vcf_df, bnd2_pos) - 1
+    bp3.loc[:, 'INFO_EVENT'] = inv_vcf_df['INFO_EVENT'] + '_e1'
+    bp3.loc[:, 'INFO_MATEID'] = inv_vcf_df['INFO_EVENT'] + '_bp1'
+    bp3.loc[:, 'ALT'] = 'N]' + inv_vcf_df['CHROM'].astype(str) + ':' + (inv_vcf_df['POS'].astype(int)).astype(str) + ']'
+    bp3.loc[:, 'INFO_CIPOS_l'] = inv_vcf_df.loc[:, 'INFO_CIEND_l']
+    bp3.loc[:, 'INFO_CIPOS_r'] = inv_vcf_df.loc[:, 'INFO_CIEND_r']
     bp3 = bp3.drop(columns=drop_cols)
     # Create fourth breakend
     bp4 = inv_vcf_df.copy()
-    bp4.loc[:, 'ID'] = bp4['ID'] + '_bp4'
-    bp4.loc[:, 'CHROM'] = bp4['INFO_CHR2']
-    bp4.loc[:, 'POS'] = _get_bnd2_pos(bp4, bnd2_pos)
-    bp4.loc[:, 'INFO_EVENT'] = bp4['INFO_EVENT'] + '_e2'
-    bp4.loc[:, 'INFO_MATEID'] = bp4['INFO_EVENT'] + '_bp2'
-    bp4.loc[:, 'ALT'] = '[' + bp4['CHROM'].astype(str) + ':' + (bp4['POS'].astype(int) + 1).astype(str) + '[N'
-    bp4.loc[:, 'INFO_CIPOS_l'] = bp4.loc[:, 'INFO_CIEND_l']
-    bp4.loc[:, 'INFO_CIPOS_r'] = bp4.loc[:, 'INFO_CIEND_r']
+    bp4.loc[:, 'ID'] = inv_vcf_df['ID'] + '_bp4'
+    bp4.loc[:, 'CHROM'] = inv_vcf_df['INFO_CHR2']
+    bp4.loc[:, 'POS'] = _get_bnd2_pos(inv_vcf_df, bnd2_pos)
+    bp4.loc[:, 'INFO_EVENT'] = inv_vcf_df['INFO_EVENT'] + '_e2'
+    bp4.loc[:, 'INFO_MATEID'] = inv_vcf_df['INFO_EVENT'] + '_bp2'
+    bp4.loc[:, 'ALT'] = '[' + inv_vcf_df['CHROM'].astype(str) + ':' + (inv_vcf_df['POS'].astype(int) + 1).astype(str) + '[N'
+    bp4.loc[:, 'INFO_CIPOS_l'] = inv_vcf_df.loc[:, 'INFO_CIEND_l']
+    bp4.loc[:, 'INFO_CIPOS_r'] = inv_vcf_df.loc[:, 'INFO_CIEND_r']
     bp4 = bp4.drop(columns=drop_cols)
 
     return pd.concat([bp1, bp2, bp3, bp4], axis=0)
@@ -150,24 +150,24 @@ def convert_dup_to_bnd(dup_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.
     """
     # Create first breakend
     bp1 = dup_vcf_df.copy()
-    bp1.loc[:, 'ID'] = bp1['ID'] + '_bp1'
-    bp1.loc[:, 'CHROM'] = bp1['INFO_CHR2']
-    bp1.loc[:, 'POS'] = _get_bnd2_pos(bp1, bnd2_pos)
-    bp1.loc[:, 'INFO_MATEID'] = bp1['INFO_EVENT'] + '_bp2'
-    bp1.loc[:, 'ALT'] = 'N[' + bp1['CHROM'].astype(str) + ':' + bp1['POS'].astype(str) + '['
-    bp1.loc[:, 'INFO_CIPOS_l'] = bp1.loc[:, 'INFO_CIEND_l']
-    bp1.loc[:, 'INFO_CIPOS_r'] = bp1.loc[:, 'INFO_CIEND_r']
+    bp1.loc[:, 'ID'] = dup_vcf_df['ID'] + '_bp1'
+    bp1.loc[:, 'CHROM'] = dup_vcf_df['INFO_CHR2']
+    bp1.loc[:, 'POS'] = _get_bnd2_pos(dup_vcf_df, bnd2_pos)
+    bp1.loc[:, 'INFO_MATEID'] = dup_vcf_df['INFO_EVENT'] + '_bp2'
+    bp1.loc[:, 'ALT'] = 'N[' + dup_vcf_df['CHROM'].astype(str) + ':' + dup_vcf_df['POS'].astype(str) + '['
+    bp1.loc[:, 'INFO_CIPOS_l'] = dup_vcf_df.loc[:, 'INFO_CIEND_l']
+    bp1.loc[:, 'INFO_CIPOS_r'] = dup_vcf_df.loc[:, 'INFO_CIEND_r']
     bp1 = bp1.drop(columns=drop_cols)
 
     # Create second breakend
     bp2 = dup_vcf_df.copy()
-    bp2.loc[:, 'ID'] = bp2['ID'] + '_bp2'
-    bp2.loc[:, 'CHROM'] = bp2['CHROM']
-    bp2.loc[:, 'POS'] = bp2['POS']
-    bp2.loc[:, 'INFO_MATEID'] = bp2['INFO_EVENT'] + '_bp1'
-    bp2.loc[:, 'ALT'] = ']' + bp2['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(bp2, bnd2_pos)).astype(str) + ']N'
-    bp2.loc[:, 'INFO_CIPOS_l'] = bp2.loc[:, 'INFO_CIEND_l']
-    bp2.loc[:, 'INFO_CIPOS_r'] = bp2.loc[:, 'INFO_CIEND_r']
+    bp2.loc[:, 'ID'] = dup_vcf_df['ID'] + '_bp2'
+    bp2.loc[:, 'CHROM'] = dup_vcf_df['CHROM']
+    bp2.loc[:, 'POS'] = dup_vcf_df['POS']
+    bp2.loc[:, 'INFO_MATEID'] = dup_vcf_df['INFO_EVENT'] + '_bp1'
+    bp2.loc[:, 'ALT'] = ']' + dup_vcf_df['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(dup_vcf_df, bnd2_pos)).astype(str) + ']N'
+    bp2.loc[:, 'INFO_CIPOS_l'] = dup_vcf_df.loc[:, 'INFO_CIEND_l']
+    bp2.loc[:, 'INFO_CIPOS_r'] = dup_vcf_df.loc[:, 'INFO_CIEND_r']
     bp2 = bp2.drop(columns=drop_cols)
 
     return pd.concat([bp1, bp2], axis=0)
@@ -190,24 +190,24 @@ def convert_ins_to_bnd(ins_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.
     """
     # Create first breakend
     bp1 = ins_vcf_df.copy()
-    bp1.loc[:, 'ID'] = bp1['ID'] + '_bp1'
-    bp1.loc[:, 'CHROM'] = bp1['CHROM']
-    bp1.loc[:, 'POS'] = bp1['POS']
-    bp1.loc[:, 'INFO_MATEID'] = bp1['INFO_EVENT'] + '_bp2'
-    bp1.loc[:, 'ALT'] = 'N[' + bp1['CHROM'].astype(str) + ':' + _get_bnd2_pos(bp1, bnd2_pos).astype(str) + '['
-    bp1.loc[:, 'INFO_CIPOS_l'] = bp1.loc[:, 'INFO_CIEND_l']
-    bp1.loc[:, 'INFO_CIPOS_r'] = bp1.loc[:, 'INFO_CIEND_r']
+    bp1.loc[:, 'ID'] = ins_vcf_df['ID'] + '_bp1'
+    bp1.loc[:, 'CHROM'] = ins_vcf_df['CHROM']
+    bp1.loc[:, 'POS'] = ins_vcf_df['POS']
+    bp1.loc[:, 'INFO_MATEID'] = ins_vcf_df['INFO_EVENT'] + '_bp2'
+    bp1.loc[:, 'ALT'] = 'N[' + ins_vcf_df['CHROM'].astype(str) + ':' + (ins_vcf_df['POS'] + 1).astype(int).astype(str) + '['
+    bp1.loc[:, 'INFO_CIPOS_l'] = ins_vcf_df.loc[:, 'INFO_CIEND_l']
+    bp1.loc[:, 'INFO_CIPOS_r'] = ins_vcf_df.loc[:, 'INFO_CIEND_r']
     bp1 = bp1.drop(columns=drop_cols)
 
     # Create second breakend
     bp2 = ins_vcf_df.copy()
-    bp2.loc[:, 'ID'] = bp2['ID'] + '_bp2'
-    bp2.loc[:, 'CHROM'] = bp2['CHROM']
-    bp2.loc[:, 'POS'] = _get_bnd2_pos(bp2, bnd2_pos)
-    bp2.loc[:, 'INFO_MATEID'] = bp2['INFO_EVENT'] + '_bp1'
-    bp2.loc[:, 'ALT'] = ']' + bp2['CHROM'].astype(str) + ':' + (bp2['POS'].astype(int)).astype(str) + ']N'
-    bp2.loc[:, 'INFO_CIPOS_l'] = bp2.loc[:, 'INFO_CIEND_l']
-    bp2.loc[:, 'INFO_CIPOS_r'] = bp2.loc[:, 'INFO_CIEND_r']
+    bp2.loc[:, 'ID'] = ins_vcf_df['ID'] + '_bp2'
+    bp2.loc[:, 'CHROM'] = ins_vcf_df['CHROM']
+    bp2.loc[:, 'POS'] = ins_vcf_df['POS'] + 1
+    bp2.loc[:, 'INFO_MATEID'] = ins_vcf_df['INFO_EVENT'] + '_bp1'
+    bp2.loc[:, 'ALT'] = ']' + ins_vcf_df['CHROM'].astype(str) + ':' + (ins_vcf_df['POS'].astype(int)).astype(str) + ']N'
+    bp2.loc[:, 'INFO_CIPOS_l'] = ins_vcf_df.loc[:, 'INFO_CIEND_l']
+    bp2.loc[:, 'INFO_CIPOS_r'] = ins_vcf_df.loc[:, 'INFO_CIEND_r']
     bp2 = bp2.drop(columns=drop_cols)
 
     return pd.concat([bp1, bp2], axis=0)
