@@ -3,6 +3,8 @@ Functions for handling breakpoint dataframes
 Includes functions for working within format + converting from format
 """
 
+from collections import defaultdict
+
 import numpy as np
 import pandas as pd
 import pyranges as pr
@@ -11,6 +13,35 @@ from . import breakends as bnds
 from . import events as evts
 from . import utils
 from . import _caller_params as caller_params
+
+def _get_annotated_svtypes(bp_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
+    """
+    Get annotated SV types for the breakpoint dataframe.
+    """
+    bp_df_ = bp_df.copy()
+
+    return annotate_svtypes(bp_df_, caller_params['source'])
+
+
+_custom_col_dispatch = {
+    'CUSTOM_SVTYPE': _get_annotated_svtypes
+}
+
+def common_bps_preprocess(bp_df, caller_params: dict|None = None) -> pd.DataFrame:
+    """
+    Common preprocessing steps run after caller-specific preprocessing for all breakpoint dataframes.
+    Requires a breakpoints dataframe and runs preprocessing steps according to config of the caller
+    """
+
+    bp_df_ = bp_df.copy()
+
+    # Adding custom prediction columns
+    for custom_col_name in caller_params['custom_cols_pred']:
+        if custom_col_name not in _custom_col_dispatch.keys():
+            raise KeyError(f"Column {custom_col_name} specified in callset parameters but not supported.")
+        bp_df_.loc[:, custom_col_name] = _custom_col_dispatch[custom_col_name](bp_df_, caller_params=caller_params)
+
+    return bp_df_
 
 def get_insert_seq_len_from_svensemble2_len_col(bp_df: pd.DataFrame) -> pd.Series:
     """
@@ -317,6 +348,22 @@ def get_bps_insert_size(bps_df: pd.DataFrame) -> pd.Series:
     bps_df_ = bps_df.copy()
     return bps_df_['POS_bnd2'] - bps_df_['POS_bnd1']
 
+def get_dup_size(bps_df: pd.DataFrame, *args) -> pd.Series:
+    """
+    Calculates duplication size from POS values in bps_df
+    """
+    bps_df_ = bps_df.copy()
+    dup_size = abs(bps_df_['POS_bnd1'] - bps_df_['POS_bnd2'])
+    dup_size = dup_size.astype(int)
+    return dup_size
+
+def get_default_size(bps_df: pd.DataFrame, *args) -> pd.Series:
+    """
+    Function that is called for SV types that are not DEL, DUP or INS when asked to get the size of the SV
+    Simply returns a vector of 1s
+    """
+    return pd.Series(index=bps_df.index, data=1)
+
 def get_sv_sizes(bps_df: pd.DataFrame, source: str | None = None) -> pd.Series:
 
     bps_df_ = bps_df.copy()
@@ -330,6 +377,7 @@ def get_sv_sizes(bps_df: pd.DataFrame, source: str | None = None) -> pd.Series:
     sv_size_dispatch = {
         'DEL': get_del_size,
         'INS': get_insert_size,
+        'DUP': get_dup_size,
     }
 
     sv_sizes = pd.Series(index=bps_df_.index)
@@ -337,7 +385,7 @@ def get_sv_sizes(bps_df: pd.DataFrame, source: str | None = None) -> pd.Series:
         if svtype in sv_size_dispatch:
             sv_sizes.loc[inferred_svtypes == svtype] = sv_size_dispatch[svtype](bps_df_[inferred_svtypes == svtype], source)
         else:
-            sv_sizes.loc[inferred_svtypes == svtype] = np.nan
+            sv_sizes.loc[inferred_svtypes == svtype] = get_default_size(bps_df_[inferred_svtypes == svtype], source)
 
 
     return sv_sizes

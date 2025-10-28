@@ -12,6 +12,7 @@
 A top-level script to run the SVEnsemble pipeline.
 This module provides preprocessing and matching utilities for SV callsets.
 """
+#for s in NA12878 NA12878_30x HG002 CHM13; do sbatch svensemble/pipeline.py --sample_name $s --ground_truth_sample_name gnomad --ref_path /home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/hg38.no_decoys.fa --preprocess --match --train --verbose --use_cached_preprocessed_truth; done
 
 import os
 import sys
@@ -31,6 +32,7 @@ if WORKDIR not in sys.path:
 
 import svensemble.vcfparse as vcfp  # noqa: E402
 import svensemble.breakends as bnds  # noqa: E402
+import svensemble.breakpoints as bps  # noqa: E402
 import svensemble.events as evts  # noqa: E402
 import svensemble.caller_specific as caller_specific  # noqa: E402
 import svensemble.utils as sv_utils  # noqa: E402
@@ -48,7 +50,7 @@ def parse_preprocess_gnomad(
     sample_name: str,
     sample_config: dict,
     verbose: bool = False
-) -> None:
+) -> pd.DataFrame:
     """
     Read and preprocess the gnomAD dataset for a reference sample.
 
@@ -115,25 +117,25 @@ def parse_preprocess_gnomad(
         force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
     )
 
-    output_dir = sample_config['sample_dir'] / 'svensemble2'
-    output_path = output_dir / 'gnomad_bps.csv'
+    # output_dir = sample_config['sample_dir'] / 'svensemble2'
+    # output_path = output_dir / 'gnomad_bps.csv'
 
-    if verbose:
-        print(f"Saving breakpoints in {output_path}")
+    # if verbose:
+    #     print(f"Saving breakpoints in {output_path}")
 
-    if not output_dir.exists():
-        output_dir.mkdir(parents=True, exist_ok=True)
+    # if not output_dir.exists():
+    #     output_dir.mkdir(parents=True, exist_ok=True)
 
-    gnomad_bp_df.to_csv(output_path)
+    return gnomad_bp_df
 
-    if verbose:
-        print(f"Saved breakpoints in {output_path}")
+    # if verbose:
+    #     print(f"Saved breakpoints in {output_path}")
 
 def parse_preprocess_gridss(
     sample_name: str,
     sample_config: dict,
     verbose: bool = False
-) -> None:
+) -> pd.DataFrame:
     """
     Read and preprocess the gridss dataset for a sample.
 
@@ -142,7 +144,7 @@ def parse_preprocess_gridss(
         sample_config (dict): Configuration dictionary for the sample.
         verbose (bool): If True, print progress messages.
     """
-    def _process_gridss_callset(callset: dict, output_dir: Path, verbose: bool = False) -> None:
+    def _process_gridss_callset(callset: dict, verbose: bool = False) -> pd.DataFrame:
         """
         Internal function to process a gridss callset and save breakpoints.
 
@@ -178,20 +180,20 @@ def parse_preprocess_gridss(
             except KeyError:
                 raise KeyError('No QUAL column found in GRIDSS breakpoints')
 
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / 'gridss_bps.csv'
-        if verbose:
-            print(f"Saving breakpoints to {output_path}")
-        gridss_bp_df.to_csv(output_path)
-        if verbose:
-            print(f"Saved breakpoints in {output_path}")
+        # output_dir.mkdir(parents=True, exist_ok=True)
+        # output_path = output_dir / 'gridss_bps.csv'
+        # if verbose:
+        #     print(f"Saving breakpoints to {output_path}")
+        # gridss_bp_df.to_csv(output_path)
+        # if verbose:
+        #     print(f"Saved breakpoints in {output_path}")
+        return gridss_bp_df
 
 
     if 'gridss' in sample_config.get('callsets', {}):
-        output_dir = sample_config['callsets']['gridss']['svensemble_dir']
-        _process_gridss_callset(
+        # output_dir = sample_config['callsets']['gridss']['svensemble_dir']
+        return _process_gridss_callset(
             callset=sample_config['callsets']['gridss'],
-            output_dir=output_dir,
             verbose=verbose
         )
 
@@ -199,7 +201,7 @@ def parse_preprocess_manta_candidate(
     sample_name: str,
     sample_config: dict,
     verbose: bool = False
-) -> None:
+) -> pd.DataFrame:
     """
     Read and preprocess the manta candidate dataset for a sample.
 
@@ -208,7 +210,7 @@ def parse_preprocess_manta_candidate(
         sample_config (dict): Configuration dictionary for the sample.
         verbose (bool): If True, print progress messages.
     """
-    def _process_manta_candidate_callset(callset: dict, output_dir: Path, verbose: bool = False) -> None:
+    def _process_manta_candidate_callset(callset: dict, verbose: bool = False) -> pd.DataFrame:
         """
         Internal function to process a manta candidate callset and save breakpoints.
 
@@ -250,19 +252,19 @@ def parse_preprocess_manta_candidate(
             manta_candidate_df,
             force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
         )
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / 'manta_candidate_bps.csv'
-        if verbose:
-            print(f"Saving breakpoints to {output_path}")
-        manta_candidate_bp_df.to_csv(output_path)
-        if verbose:
-            print(f"Saved breakpoints in {output_path}")
+        # output_dir.mkdir(parents=True, exist_ok=True)
+        # output_path = output_dir / 'manta_candidate_bps.csv'
+        # if verbose:
+        #     print(f"Saving breakpoints to {output_path}")
+        # manta_candidate_bp_df.to_csv(output_path)
+        # if verbose:
+        #     print(f"Saved breakpoints in {output_path}")
+        return manta_candidate_bp_df
 
     if 'manta_candidate' in sample_config.get('callsets', {}):
-        output_dir = sample_config['callsets']['manta_candidate']['svensemble_dir']
-        _process_manta_candidate_callset(
+        # output_dir = sample_config['callsets']['manta_candidate']['svensemble_dir']
+        return _process_manta_candidate_callset(
             callset=sample_config['callsets']['manta_candidate'],
-            output_dir=output_dir,
             verbose=verbose
         )
 
@@ -281,9 +283,8 @@ def parse_preprocess_manta_diploid(
     """
     def _process_manta_diploid_callset(
         callset: dict,
-        output_dir,
         verbose: bool = False
-    ) -> None:
+    ) -> pd.DataFrame:
         """
         Internal function to process a manta diploid callset and save breakpoints.
 
@@ -325,19 +326,19 @@ def parse_preprocess_manta_diploid(
             manta_diploid_df,
             force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
         )
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / 'manta_diploid_bps.csv'
-        if verbose:
-            print(f"Saving breakpoints to {output_path}")
-        manta_diploid_bp_df.to_csv(output_path)
-        if verbose:
-            print(f"Saved breakpoints in {output_path}")
+        # output_dir.mkdir(parents=True, exist_ok=True)
+        # output_path = output_dir / 'manta_diploid_bps.csv'
+        # if verbose:
+        #     print(f"Saving breakpoints to {output_path}")
+        # manta_diploid_bp_df.to_csv(output_path)
+        # if verbose:
+        #     print(f"Saved breakpoints in {output_path}")
+        return manta_diploid_bp_df
 
     if 'manta_diploid' in sample_config.get('callsets', {}):
-        output_dir = sample_config['callsets']['manta_diploid']['svensemble_dir']
-        _process_manta_diploid_callset(
+        # output_dir = sample_config['callsets']['manta_diploid']['svensemble_dir']
+        return _process_manta_diploid_callset(
             callset=sample_config['callsets']['manta_diploid'],
-            output_dir=output_dir,
             verbose=verbose
         )
 
@@ -350,25 +351,25 @@ def parse_preprocess_delly(
     Read and preprocess the delly dataset for a sample.
     """
 
-    def _process_delly_callset(callset: dict, ref_path: Path, output_dir: Path, verbose: bool = False) -> None:
+    def _process_delly_callset(callset: dict, ref_path: Path, verbose: bool = False) -> pd.DataFrame:
         """
         Internal function to process a delly callset and save breakpoints.
         """
         if verbose:
-            print(f"Creating breakpoints from DELLY BND/TRA calls and saving to {output_dir / 'delly_bps.csv'}")
+            print(f"Creating breakpoints from DELLY BND/TRA calls and saving to {callset['svensemble_dir'] / 'delly_bps.csv'}")
 
-        if not (output_dir / 'delly_bnd.vcf').exists():
-            output_dir.mkdir(parents=True, exist_ok=True)
+        if not (callset['svensemble_dir'] / 'delly_bnd.vcf').exists():
+            callset['svensemble_dir'].mkdir(parents=True, exist_ok=True)
 
         delly2bnd.delly2bnd_noargparse(
             vcf=callset['path'],
             ref=ref_path,
-            out=output_dir / 'delly_bnd.vcf'
+            out=callset['svensemble_dir'] / 'delly_bnd.vcf'
         )
 
         if verbose:
             print(f"Loading DELLY VCF from {callset['path']}")
-        delly_bnd_only_vcf = VariantFile(output_dir / 'delly_bnd.vcf')
+        delly_bnd_only_vcf = VariantFile(callset['svensemble_dir'] / 'delly_bnd.vcf')
         delly_bnd_only_df, delly_bnd_only_meta = vcfp.parse_vcf_to_df(
             vcf_file=delly_bnd_only_vcf,
             caller_params=callset['params']
@@ -389,25 +390,23 @@ def parse_preprocess_delly(
 
         delly_bp_df = bnds.bnd_to_bp(delly_bnd_df, force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r'])
 
-        output_path = output_dir / 'delly_bps.csv'
-        if verbose:
-            print(f"Saving breakpoints to {output_path}")
-        delly_bp_df.to_csv(output_path)
-        if verbose:
-            print(f"Saved breakpoints in {output_path}")
+        # output_path = output_dir / 'delly_bps.csv'
+        # if verbose:
+        #     print(f"Saving breakpoints to {output_path}")
+        # delly_bp_df.to_csv(output_path)
+        # if verbose:
+        #     print(f"Saved breakpoints in {output_path}")
+        return delly_bp_df
 
     if 'delly' in sample_config.get('callsets', {}):
         if 'ref_path' not in sample_config:
             raise ValueError("Reference path not found in sample config")
-        output_dir = sample_config['callsets']['delly']['svensemble_dir']
-        _process_delly_callset(
+        # output_dir = sample_config['callsets']['delly']['svensemble_dir']
+        return _process_delly_callset(
             callset=sample_config['callsets']['delly'],
             ref_path=sample_config['ref_path'],
-            output_dir=output_dir,
             verbose=verbose
         )
-
-
 
 
 def parse_preprocess_sample(
@@ -433,9 +432,12 @@ def parse_preprocess_sample(
 
     for callset_name in sample_config["callsets"].keys():
         if callset_name in caller_dispatch.keys():
-            caller_dispatch[callset_name](sample_name, sample_config, verbose)
+            bp_df = caller_dispatch[callset_name](sample_name, sample_config, verbose)
+            bp_df = bps.common_bps_preprocess(bp_df, sample_config['callsets'][callset_name]['params'])
+            bp_df.to_csv(sample_config['callsets'][callset_name]['svensemble_dir'] / f'{callset_name}_bps.csv', index=False)
         else:
             raise ValueError(f"Callset {callset_name} not supported")
+
 
 
 def load_gridss_breakpoints(sample_config: dict) -> pd.DataFrame | None:

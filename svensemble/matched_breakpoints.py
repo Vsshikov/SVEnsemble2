@@ -221,6 +221,10 @@ def preprocess_matchedbps_for_pu(
             f'{callset}_SAMPLE_{col}'
             for col in caller_params.caller_param_dict[callset]['format_cols']
         )
+        training_cols.extend(
+            f'{callset}_CUSTOM_{col}'
+            for col in caller_params.caller_param_dict[callset]['custom_cols_pred']
+        )
         # Quality metric column may not be included in the training_cols list, so add it if it exists and is not already in training_cols
         if (caller_params.caller_param_dict[callset]['qual_metric'] not in training_cols) and (caller_params.caller_param_dict[callset]['qual_metric'] is not None):
             training_cols.append(caller_params.caller_param_dict[callset]['qual_metric'])

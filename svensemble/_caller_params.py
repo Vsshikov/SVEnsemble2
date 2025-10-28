@@ -45,11 +45,13 @@ default_filter_cols = []
 default_info_mandatory_cols = []
 default_info_pred_cols = []
 default_format_cols = []
+default_custom_cols_pred = []
 default_params = {
     'base_cols': base_cols,
     'filter_cols': default_filter_cols,
     'info_cols_mandatory': default_info_mandatory_cols,
     'info_cols_pred': default_info_pred_cols,
+    'custom_cols_pred': default_custom_cols_pred,
     'parse_format': False,
     'format_cols': default_format_cols,
     'is_reference': False,
@@ -160,6 +162,7 @@ gridss_info_pred_cols = [
 
 # Parameters for GRIDSS
 gridss_params = default_params | {
+    'source': 'gridss',
     'filter_cols': gridss_filters,
     'info_cols_mandatory': gridss_info_mandatory_cols,
     'info_cols_pred': gridss_info_pred_cols,
@@ -170,6 +173,7 @@ gridss_params = default_params | {
 }
 
 gnomad_params = default_params | {
+    'source': 'gnomad',
     'filter_cols': ['PASS'],
     'info_cols_mandatory': ['EVIDENCE', 'SVTYPE', 'CHR2', 'POS2', 'END', 'END2', 'CPX_INTERVALS', 'SVLEN'],
     'info_cols_pred': [],
@@ -186,6 +190,7 @@ gnomad_params = default_params | {
 }
 
 manta_candidate_params = default_params | {
+    'source': 'manta_candidate',
     'base_cols': base_cols + ['INFO_END'],
     'filter_cols': ['PASS'],
     'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'POS2', 'CIPOS', 'CIEND', 'MATEID', 'EVENT'],
@@ -198,6 +203,7 @@ manta_candidate_params = default_params | {
 }
 
 manta_diploid_params = default_params | {
+    'source': 'manta_diploid',
     'base_cols': base_cols + ['INFO_END'],
     'filter_cols': ['PASS'],
     'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'POS2', 'CIPOS', 'CIEND', 'MATEID', 'EVENT'],
@@ -210,6 +216,7 @@ manta_diploid_params = default_params | {
 }
 
 delly_params = default_params | {
+    'source': 'delly',
     'base_cols': base_cols + ['INFO_END'],
     'filter_cols': ['PASS', 'LowQual'],
     'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'CHR2', 'POS2', 'CIPOS', 'CIEND'],
