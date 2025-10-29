@@ -823,10 +823,10 @@ def benchmark_sample(
         callset_bps = sample['callsets'][callset_name]['bps']
 
         val_df = validate_basic_callset(
-            callset_bps,
-            val_set,
-            sample,
-            callset_name,
+            callset_bps=callset_bps,
+            val_set=val_set,
+            sample_config=sample,
+            callset_name=callset_name,
             val_match_margin=val_match_margin,
             verbose=verbose
         )
@@ -844,11 +844,11 @@ def benchmark_sample(
     for training_set_name in sample["training_sets"].keys():
         svensemble_preds = sample["svensemble2_calls"][training_set_name]
         val_df = validate_svensemble2_predictions(
-            svensemble_preds,
-            val_set,
-            sample,
-            training_set_name,
-            model_name,
+            svensemble2_bps=svensemble_preds,
+            val_set=val_set,
+            sample_config=sample,
+            training_set_name=training_set_name,
+            model_name=model_name,
             val_match_margin=val_match_margin,
             verbose=verbose
         )

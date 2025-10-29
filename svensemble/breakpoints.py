@@ -395,7 +395,7 @@ def _get_svlen_svtype_filter_mask(
     bps_df: pd.DataFrame,
     source: str,
     svlens: tuple[int, int] | None = None,
-    svtypes: list[str] | None = None
+    svtypes: list[str] | str | None = None
 ) -> pd.Series:
     """
     Get mask of breakpoint DataFrame for given SVLEN and SVTYPE ranges.
@@ -417,6 +417,12 @@ def _get_svlen_svtype_filter_mask(
 
     if svtypes is None:
         svtypes = caller_params.default_sv_types
+    elif isinstance(svtypes, str):
+        svtypes = [svtypes]
+    elif isinstance(svtypes, list):
+        svtypes = svtypes
+    else:
+        raise ValueError(f'Invalid type for svtypes: {type(svtypes)}')
 
 
     svtype_mask = annotate_svtypes(bps_df, source).isin(svtypes)

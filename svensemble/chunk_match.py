@@ -23,6 +23,8 @@ def concat_bp_dfs(bp_df_dict: dict[str, pd.DataFrame]):
     """
     bp_df_dict_ = {source: bp_df.copy() for source, bp_df in bp_df_dict.items()}
     for name, bp_df in bp_df_dict_.items():
+        if bp_df.empty:
+            continue
         bp_df.loc[:, 'source'] = name
     bp_df = pd.concat(bp_df_dict_.values())
     bp_df = bp_df.sort_values(
