@@ -123,13 +123,13 @@ def dist_matrix_ref(ref_bp_df: pd.DataFrame, bp_df: pd.DataFrame, which_bnd: str
     # Calculate distances between interval boundaries
     # Distance from left edge of ref interval to right edge of other interval
     bnd_dist_v1 = np.subtract.outer(
-        ref_bnd_pos - ref_bnd_cipos_l,
+        ref_bnd_pos + ref_bnd_cipos_l,
         bnd_pos + bnd_cipos_r
     )
 
     # Distance from left edge of other interval to right edge of ref interval
     bnd_dist_v2 = np.subtract.outer(
-        bnd_pos - bnd_cipos_l,
+        bnd_pos + bnd_cipos_l,
         ref_bnd_pos + ref_bnd_cipos_r
     ).T
 
@@ -328,7 +328,7 @@ def get_pairwise_matches(
         # Calculate insert size similarity
         insert_matrix = (
             rel_insert_size_matrix_ref(chunk_df, chunk_df, ignore_size=ignore_size)
-            > insert_size_threshold
+            >= insert_size_threshold
         )
 
         # Use cached triangular matrix
