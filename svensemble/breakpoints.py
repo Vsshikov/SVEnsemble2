@@ -239,7 +239,7 @@ def trim_cipos(bp_df: pd.DataFrame, by: int | None | tuple[int, int] = None, up_
     for bnd in ['bnd1', 'bnd2']:
         bp_df_.loc[:, f'INFO_CIPOS_l_{bnd}'] = np.clip(bp_df_[f'INFO_CIPOS_l_{bnd}'] + by[0], -up_to[0], 0)
         bp_df_.loc[:, f'INFO_CIPOS_r_{bnd}'] = np.clip(bp_df_[f'INFO_CIPOS_r_{bnd}'] - by[1], 0, up_to[1])
-    return bp_df
+    return bp_df_
 
 def get_insert_size(bp_df: pd.DataFrame, source: str | None = None) -> pd.Series:
     """
