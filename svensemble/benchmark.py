@@ -521,7 +521,7 @@ def preprocess_huddleston_val_set(sample, vcf_path, force_rerun=False):
         huddleston_bp_df.to_csv(out_path, index=False)
 
 
-def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, val_match_margin=1000, verbose=True):
+def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, val_match_margin=1000, additional_cols: None | List[str] = None, verbose=True):
     """
     Given dataframes of a callset and a validation set, match them and return a dataframe with the following columns:
     INFO_EVENT, {qual_metric}, is_in_val, INFO_INFERRED_SVTYPE, {FILTER_PASS}
@@ -554,11 +554,13 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
         cols_to_keep.append('FILTER_PASS')
     if 'INFO_INFERRED_SVTYPE' in callset_bps_.columns:
         cols_to_keep.append('INFO_INFERRED_SVTYPE')
+    if isinstance(additional_cols, list):
+        cols_to_keep.extend([col for col in additional_cols if ((col not in cols_to_keep) and (col in callset_bps_.columns))])
 
     return callset_bps_.loc[callset_bps_['INFO_EVENT'].notna(), cols_to_keep]
 
 
-def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name, model_name, val_match_margin=1000, verbose=True):
+def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name, model_name, val_match_margin=1000, additional_cols: None | List[str] = None, verbose=True):
     svens_calls_ = svensemble2_bps.copy()
     val_set_ = val_set.copy()
 
@@ -576,7 +578,8 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, tr
     cols_to_keep = ['INFO_EVENT', f'{training_set_name}_{model_name}_pred', 'is_in_val']
     if 'INFO_INFERRED_SVTYPE' in svens_calls_.columns:
         cols_to_keep.append('INFO_INFERRED_SVTYPE')
-
+    if isinstance(additional_cols, list):
+        cols_to_keep.extend([col for col in additional_cols if ((col not in cols_to_keep) and (col in svens_calls_.columns))])
     val_df = svens_calls_[cols_to_keep]
     val_df = val_df[val_df[f'{training_set_name}_{model_name}_pred'].notna()]
 
@@ -691,6 +694,8 @@ def preprocess_sample_for_benchmark(
             sample['matched_bps'][training_set],
             sample['pred_dicts'][training_set]['y']
         )
+        if sample['svensemble2_calls'][training_set].shape[0] != sample['matched_bps'][training_set].shape[0]:
+            raise ValueError(f"Number of SVEnsemble2 calls ({sample['svensemble2_calls'][training_set].shape[0]}) does not match number of matched breakpoints ({sample['matched_bps'][training_set].shape[0]}) for {training_set}")
 
     # Save processed sample as pickle if requested
     if save_pickle:
@@ -762,6 +767,7 @@ def benchmark_sample(
     training_sets: List[str] | str | None = None,
     val_match_margin: int = 1000,
     skip_filtering: bool = False,
+    additional_cols: None | List[str] = None,
     save_pickle=True,
     verbose=False
 ):
@@ -774,6 +780,7 @@ def benchmark_sample(
         svtypes (list or tuple): Structural variant types to consider.
         svlens (tuple): SV length range (min, max).
         training_sets (list or str): Training sets to consider.
+        additional_cols (list or str): Additional columns to keep in the validation result dataframe.
         save_pickle (bool, optional): Whether to save results or return results as a dict. Default: True.
         verbose (bool, optional): Whether to print processing info. Default: True.
 
@@ -850,6 +857,7 @@ def benchmark_sample(
             sample_config=sample,
             callset_name=callset_name,
             val_match_margin=val_match_margin,
+            additional_cols=additional_cols,
             verbose=verbose
         )
         # Store result under this callset name
@@ -872,6 +880,7 @@ def benchmark_sample(
             training_set_name=training_set_name,
             model_name=model_name,
             val_match_margin=val_match_margin,
+            additional_cols=additional_cols,
             verbose=verbose
         )
         dict_key = f"svensemble2_{training_set_name}"
@@ -909,6 +918,7 @@ if __name__ == "__main__":
     parser.add_argument('--training_sets', type=str, default=None)
     parser.add_argument('--val_match_margin', type=int, default=500)
     parser.add_argument('--skip_filtering', action='store_true', default=False)
+    parser.add_argument('--additional_cols', type=str, default=None)
     parser.add_argument('--save_pickle', action='store_true', default=True)
     parser.add_argument('--perform_steps', type=str, default=None)
     parser.add_argument('--verbose', action='store_true', default=False)
@@ -936,6 +946,9 @@ if __name__ == "__main__":
     else:
         svlens = (args.svlen_lower, args.svlen_upper)
 
+    if args.additional_cols is not None:
+        additional_cols = args.additional_cols.split(sep=',')
+
     if 'preprocess' in perform_steps:
         preprocess_sample_for_benchmark(
             sample_name=args.sample_name,
@@ -953,6 +966,7 @@ if __name__ == "__main__":
             training_sets=args.training_sets,
             val_match_margin=args.val_match_margin,
             skip_filtering=args.skip_filtering,
+            additional_cols=additional_cols,
             save_pickle=args.save_pickle,
             verbose=args.verbose
         )
