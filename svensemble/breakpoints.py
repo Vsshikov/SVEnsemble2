@@ -332,7 +332,7 @@ def get_del_size(bps_df: pd.DataFrame, *args) -> pd.Series:
     """
     bps_df_ = bps_df.copy()
 
-    del_size = bps_df_[bps_df_['INFO_INFERRED_SVTYPE'] == 'DEL']['POS_bnd2'] - bps_df_[bps_df_['INFO_INFERRED_SVTYPE'] == 'DEL']['POS_bnd1']
+    del_size = bps_df_[bps_df_['INFO_INFERRED_SVTYPE'] == 'DEL']['POS_bnd2'] - bps_df_[bps_df_['INFO_INFERRED_SVTYPE'] == 'DEL']['POS_bnd1'] - 1
 
     del_size.loc[del_size.isna()] = 0
     del_size.loc[del_size < 0] = 0

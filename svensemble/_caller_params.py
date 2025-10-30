@@ -57,7 +57,8 @@ default_params = {
     'is_reference': False,
     'qual_metric': 'QUAL',
     'svlen_source': 'svlen',
-    'bnd2_pos': 'svlen'
+    'bnd2_pos': 'svlen',
+    'svlens': default_sv_lens
 }
 
 training_set_presets = {
@@ -233,7 +234,8 @@ svensemble2_params = default_params | {
 }
 
 kosugi_params = default_params | {
-    'svlen_source': 'svlen'
+    'svlen_source': 'svlen',
+    'svlens': (50, np.inf)
 }
 
 chm13_params = default_params | {
@@ -246,6 +248,18 @@ hg002_params = default_params | {
     'svlen_source': 'svlen'
 }
 
+huddleston_params = default_params | {
+    'base_cols': base_cols + ['INFO_END'],
+    'info_cols_mandatory': ['SVTYPE', 'SVLEN'],
+    'svlen_source': 'svlen',
+    'svlens': (50, np.inf),
+    'svtype_mapping': {
+        'deletion': 'DEL',
+        'insertion': 'INS',
+        'inversion': 'INV'
+    }
+}
+
 caller_param_dict = {
     'gnomad': gnomad_params,
     'gridss': gridss_params,
@@ -255,7 +269,8 @@ caller_param_dict = {
     'svensemble2': svensemble2_params,
     'kosugi': kosugi_params,
     'chm13_val': chm13_params,
-    'hg002_val': hg002_params
+    'hg002_val': hg002_params,
+    'huddleston': huddleston_params
 }
 
 caller_alt_priority = [

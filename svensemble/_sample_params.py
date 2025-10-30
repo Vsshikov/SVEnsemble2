@@ -14,9 +14,13 @@ sample_val_sets = {
         'name': 'kosugi',
         'path': Path(f'data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bps.csv')
     },
+    # 'CHM13': {
+    #     'name': 'chm13_val',
+    #     'path': Path(f'data/CHM13_validation/supporting_variants_for_nstd137.bps.csv')
+    # },
     'CHM13': {
-        'name': 'chm13_val',
-        'path': Path(f'data/CHM13_validation/supporting_variants_for_nstd137.bps.csv')
+        'name': 'huddleston',
+        'path': Path(f'data/CHM13_validation/CHM13_SVs.annotated.bps.csv')
     },
     'HG002': {
         'name': 'hg002_val',

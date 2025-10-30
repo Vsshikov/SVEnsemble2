@@ -344,7 +344,7 @@ def plot_precision_recall_curves(sample_val_dict, ax=None, use_counts=True):
     return ax
 
 
-def preprocess_hg002_val_set(sample, vcf_path, force_rerun=False, long_val=True):
+def preprocess_hg002_val_set(sample, vcf_path, force_rerun=False, long_val=False):
     """
     Preprocess the HG002 validation VCF file for benchmarking by parsing, annotating,
     and converting SV events to breakpoints. Results are stored as a CSV.
@@ -396,7 +396,7 @@ def preprocess_hg002_val_set(sample, vcf_path, force_rerun=False, long_val=True)
         hg002_val_vcf_df_bps.to_csv(sample['val_set']['path'], index=False)
 
 
-def preprocess_kosugi_val_set(sample, vcf_path, force_rerun=False, long_val=True):
+def preprocess_kosugi_val_set(sample, vcf_path, force_rerun=False, long_val=False):
     """
     Preprocess the Kosugi validation set, converting to VCF-like breakpoints and saving as CSV.
 
@@ -497,6 +497,28 @@ def preprocess_chm13_val_set(sample, vcf_path, force_rerun=False):
         result_bps = bnds.bnd_to_bp(evts.event_to_bnd(chm_val_vcf_df, bnd2_pos='end'))
 
         result_bps.to_csv(out_path, index=False)
+
+
+def preprocess_huddleston_val_set(sample, vcf_path, force_rerun=False):
+    """
+    Preprocess the Huddleston CHM13 validation set, converting to VCF-like breakpoints and saving as CSV.
+    """
+    out_path = Path(sample['val_set']['path'])
+
+    if not out_path.exists() or force_rerun:
+        huddleston_vcf_df, huddleston_vcf_df_meta  = vcfp.parse_vcf_to_df(pysam.VariantFile('/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/CHM13_validation/CHM13_SVs.annotated.vcf'), caller_params=caller_params.huddleston_params, sample_name='huddleston')
+        huddleston_vcf_df.loc[:, 'INFO_SVLEN'] = huddleston_vcf_df['INFO_SVLEN'].str[0]
+        # Replace all strings in INFO_SVTYPE using the mapping dictionary from caller_params.huddleston_params
+        mapping = caller_params.huddleston_params['svtype_mapping']
+        huddleston_vcf_df.loc[:, 'INFO_SVTYPE'] = huddleston_vcf_df['INFO_SVTYPE'].map(mapping).fillna(huddleston_vcf_df['INFO_SVTYPE'])
+        huddleston_vcf_df.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r', 'INFO_CIEND_l', 'INFO_CIEND_r']] = (-10, 10, -10, 10)
+        huddleston_vcf_df.loc[:, 'ID'] = 'huddleston' + huddleston_vcf_df.index.astype(str)
+        huddleston_vcf_df.loc[:, 'INFO_EVENT'] = 'huddleston' + huddleston_vcf_df.index.astype(str)
+        huddleston_vcf_df.loc[:, 'INFO_CHR2'] = huddleston_vcf_df['CHROM']
+        huddleston_bnd_df = evts.event_to_bnd(huddleston_vcf_df, bnd2_pos='end')
+        huddleston_bp_df = bnds.bnd_to_bp(bnd_df=huddleston_bnd_df)
+
+        huddleston_bp_df.to_csv(out_path, index=False)
 
 
 def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, val_match_margin=1000, verbose=True):
