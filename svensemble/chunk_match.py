@@ -78,9 +78,9 @@ def chunker(bp_df: pd.DataFrame, chunk_size: int = 10000):
                 current_chunk.append(breakpoint_row)
             else:
                 n_chunks += 1
-                # Yield completed chunk and start a new one
+                # Yield completed chunk and start a new one with the current breakpoint added
                 yield current_chunk
-                current_chunk = []
+                current_chunk = [breakpoint_row]
         # Yield the last chunk if it exists
         if len(current_chunk) > 0:
             n_chunks += 1
