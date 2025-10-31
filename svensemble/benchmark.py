@@ -973,4 +973,4 @@ if __name__ == "__main__":
 
 
 # for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name unbiased --skip_filtering --perform_steps preprocess --verbose; done
-#for svtype in DEL INS DUP INV OTHER; do for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name unbiased --svtypes $svtype --perform_steps benchmark --verbose; done; done
+# for svtype in DEL INS DUP INV OTHER; do for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name unbiased --svtypes $svtype --perform_steps benchmark --verbose; done; done
