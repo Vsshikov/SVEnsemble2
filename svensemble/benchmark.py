@@ -136,7 +136,7 @@ def get_plot_colors(n_callsets):
         colors = [None] * n_callsets  # Use default color cycle
     return colors
 
-def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pass=False, title=None, svtype=None):
+def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None):
     """
     Plot ROC curves for multiple prediction arrays against corresponding truth series
 
@@ -161,19 +161,6 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, filter_pass=False
     for idx, callset in enumerate(callsets):
         callset_val_df = sample_val_dict[callset].dropna().copy()
 
-        if filter_pass and 'FILTER_PASS' in sample_val_dict[callset].columns:
-            sample_mask = callset_val_df['FILTER_PASS'].astype(bool)
-        elif filter_pass:
-            print(f'{callset} does not have a FILTER_PASS column, ignoring filter_pass argument')
-            sample_mask = np.ones(len(callset_val_df), dtype=bool)
-        else:
-            sample_mask = np.ones(len(callset_val_df), dtype=bool)
-
-        if svtype is not None:
-            sample_mask = sample_mask & (callset_val_df['INFO_INFERRED_SVTYPE'] == svtype)
-
-        # Remove rows with NaNs and apply sample mask
-        callset_val_df = callset_val_df.loc[sample_mask, :]
         truth_series = callset_val_df['is_in_val']
         if sum(truth_series) == 0:
             print(f'{callset} has no true positives, skipping')
@@ -506,7 +493,7 @@ def preprocess_huddleston_val_set(sample, vcf_path, force_rerun=False):
     out_path = Path(sample['val_set']['path'])
 
     if not out_path.exists() or force_rerun:
-        huddleston_vcf_df, huddleston_vcf_df_meta  = vcfp.parse_vcf_to_df(pysam.VariantFile('/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/CHM13_validation/CHM13_SVs.annotated.vcf'), caller_params=caller_params.huddleston_params, sample_name='huddleston')
+        huddleston_vcf_df, huddleston_vcf_df_meta  = vcfp.parse_vcf_to_df(pysam.VariantFile(vcf_path), caller_params=caller_params.huddleston_params, sample_name='huddleston')
         huddleston_vcf_df.loc[:, 'INFO_SVLEN'] = huddleston_vcf_df['INFO_SVLEN'].str[0]
         # Replace all strings in INFO_SVTYPE using the mapping dictionary from caller_params.huddleston_params
         mapping = caller_params.huddleston_params['svtype_mapping']

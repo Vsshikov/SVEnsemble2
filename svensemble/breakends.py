@@ -19,7 +19,7 @@ def check_sv_format(vcf_df: pd.DataFrame) -> str | None:
     bnd_reqs = ['CHROM', 'POS', 'ALT', 'INFO_EVENT', 'INFO_MATEID']
     bnd_reqs_missing = []
     bnd_alt_regex = re.compile(r'(^[ATGCNatgcn\.]+[\[\]]$)|(^[\[\]][ATGCNatgcn\.]+$)')
-    
+
     bp_reqs = ['CHROM_bnd1', 'POS_bnd1', 'ALT_bnd1', 'CHROM_bnd2', 'POS_bnd2', 'ALT_bnd2']
     bp_reqs_missing = []
 
@@ -33,19 +33,19 @@ def check_sv_format(vcf_df: pd.DataFrame) -> str | None:
     if len(bnd_reqs_missing) == 0:
         if vcf_df['ALT'].str.contains(bnd_alt_regex).all():
             return 'bnd'
-    
+
     for bp_req in bp_reqs:
         if bp_req not in vcf_df.columns:
             bp_reqs_missing.append(bp_req)
     if len(bp_reqs_missing) == 0:
         return 'bp'
-    
+
     for event_req in event_reqs:
         if event_req not in vcf_df.columns:
             event_reqs_missing.append(event_req)
     if len(event_reqs_missing) == 0:
         return 'event'
-    
+
     raise ValueError(f"VCF DataFrame does not contain following required columns for breakend or breakpoint notation:\
                      \nFor bnd: {bnd_reqs_missing}\nFor bp: {bp_reqs_missing}\nFor event: {event_reqs_missing}")
 
@@ -56,20 +56,20 @@ def bnd_to_bp(
 ) -> pd.DataFrame:
     """
     Convert breakend notation to breakpoint notation.
-    
+
     Takes a DataFrame with breakend records and converts them to breakpoint format
     by combining corresponding breakends and renaming columns appropriately.
-    
+
     Args:
         bnd_df: DataFrame containing breakend records. Must have columns:
             - CHROM: Chromosome name
             - POS: Position
             - INFO_EVENT: Event ID linking breakend pairs
             - Other columns will be preserved and renamed with _bnd1/_bnd2 suffixes
-        force_diff_cols: Optional list of column names to treat as different between 
+        force_diff_cols: Optional list of column names to treat as different between
             breakend pairs, even if values are identical. These columns will always
             get _bnd1/_bnd2 suffixes regardless of whether their values match.
-        
+
     Returns:
         pd.DataFrame: DataFrame in breakpoint notation with:
             - Original columns split into _bnd1/_bnd2 variants if values differ
@@ -89,13 +89,13 @@ def bnd_to_bp(
     # Split into first/second breakends
     grsizes = bnd_df.groupby('INFO_EVENT').transform('size')
     sorted_bnds = (bnd_df.copy()[grsizes == 2]
-                   .sort_values(['INFO_EVENT', 'CHROM', 'POS'], 
+                   .sort_values(['INFO_EVENT', 'CHROM', 'POS'],
                               key=lambda x: utils.get_chrom_keys(x, chrom_keys=chrom_key_dict))
                    .reset_index(drop=True))
-    
+
     bnd1 = sorted_bnds.iloc[::2].reset_index(drop=True)
     bnd2 = sorted_bnds.iloc[1::2].reset_index(drop=True)
-    
+
     # Identify columns that are same/different between pairs
     same_cols_mask = (bnd1 == bnd2).all()
 
@@ -105,33 +105,33 @@ def bnd_to_bp(
 
     same_cols = bnd1.columns[same_cols_mask]
     diff_cols = bnd1.columns[~same_cols_mask]
-    
+
     # Rename columns to indicate which breakend they came from
     bnd1_col_rename = {
-        col: f'{col}_bnd1' for col in bnd1.columns 
+        col: f'{col}_bnd1' for col in bnd1.columns
         if (col not in same_cols) and (not col.endswith('_bnd1'))
     }
     bnd2_col_rename = {
         col: f'{col}_bnd2' for col in bnd2.columns
         if (col not in same_cols) and (not col.endswith('_bnd2'))
     }
-    
+
     bnd1 = bnd1.rename(columns=bnd1_col_rename)
     bnd2 = bnd2.rename(columns=bnd2_col_rename)
-    
+
     diff_cols_bnd2 = [f'{col}_bnd2' for col in diff_cols]
-    
+
     # Combine into breakpoint records
     breakpoints = pd.concat([bnd1, bnd2.loc[:, diff_cols_bnd2]], axis=1)
-    
+
     return breakpoints
 
 def sort_bnd_df(bnd_df: pd.DataFrame, chrom_keys: dict) -> pd.DataFrame:
     """
     Sorts a breakend DataFrame by chromosome and position.
 
-    This function takes a DataFrame containing breakend records and sorts them first by 
-    chromosome (using the provided chromosome key mapping) and then by position within 
+    This function takes a DataFrame containing breakend records and sorts them first by
+    chromosome (using the provided chromosome key mapping) and then by position within
     each chromosome. The chromosome keys allow proper sorting of chromosome names that
     may not sort naturally (e.g. chr1, chr2, chr10).
 
@@ -151,18 +151,18 @@ def sort_bnd_df(bnd_df: pd.DataFrame, chrom_keys: dict) -> pd.DataFrame:
 
 def process_breakend_alt(alt_series: pd.Series) -> pd.DataFrame:
     """Process breakend ALT field from VCF into structured format.
-    
+
     Takes a series of ALT fields from a VCF file containing breakend records and parses them
     into a structured DataFrame with breakend orientation and mate information.
-    
+
     Args:
         alt_series: Series containing ALT field values from VCF breakend records
-        
+
     Returns:
         DataFrame with parsed breakend information containing columns:
         - orientation (str): Breakend orientation ([ or ])
         - mate_chr (str): Chromosome of mate breakend
-        - mate_pos (int): Position of mate breakend  
+        - mate_pos (int): Position of mate breakend
         - relative_pos (str): Position relative to breakend (L/R)
         - insert_seq (str): Any inserted sequence at breakpoint
         - no_mate (bool): Whether breakend has a mate
@@ -170,7 +170,7 @@ def process_breakend_alt(alt_series: pd.Series) -> pd.DataFrame:
     # Regex pattern to parse breakend ALT field format
     bnd_pattern = (
         r'(?P<inserted_seq1>[ACGTN]+)?'  # Optional inserted sequence before breakend
-        r'(?P<orientation1>\]|\[)?'       # Breakend orientation (] or [) 
+        r'(?P<orientation1>\]|\[)?'       # Breakend orientation (] or [)
         r'(?P<chr>[^:]+)?'               # Mate chromosome
         r'(?P<sep>:|\.)+'                # Separator (: for mate, . for no mate)
         r'(?P<pos>\d+)?'                 # Mate position
@@ -180,19 +180,19 @@ def process_breakend_alt(alt_series: pd.Series) -> pd.DataFrame:
 
     # Extract components using regex
     processed_alt = alt_series.str.extract(bnd_pattern)
-    
+
     # Determine relative position of the partner breakend
 
-    
+
     # Combine inserted sequences
     processed_alt.loc[:, 'insert_seq'] = (
-        processed_alt['inserted_seq1'].fillna('').str[1:] + 
+        processed_alt['inserted_seq1'].fillna('').str[1:] +
         processed_alt['inserted_seq2'].fillna('').str[:-1]
     )
-    
+
     # Mark records with no mate
     processed_alt.loc[:, 'no_mate'] = processed_alt['sep'] == '.'
-    
+
     # Clean up and rename columns
     processed_alt = processed_alt.rename(
         columns={
@@ -203,7 +203,7 @@ def process_breakend_alt(alt_series: pd.Series) -> pd.DataFrame:
     )
 
     processed_alt.loc[:, 'relative_pos'] = np.where(
-        processed_alt['inserted_seq1'].isna(), 
+        processed_alt['inserted_seq1'].isna(),
         processed_alt['orientation'] + 'N',  # Left if no leading sequence
         'N' + processed_alt['orientation']  # Right if has leading sequence
     )
@@ -211,7 +211,7 @@ def process_breakend_alt(alt_series: pd.Series) -> pd.DataFrame:
     processed_alt = processed_alt.drop(
         columns=['orientation', 'inserted_seq1', 'inserted_seq2', 'orientation2', 'sep']
     )
-    
+
     return processed_alt
 
 def get_insert_seq_len_from_alt(bp_df: pd.DataFrame):

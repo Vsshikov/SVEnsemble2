@@ -336,7 +336,7 @@ def manta_preprocess_common(manta_df: pd.DataFrame, caller_params: dict|None = N
     manta_df_.loc[:, 'INFO_CHR2'] = manta_df_.loc[:, 'CHROM']
 
     # Drop INFO_POS2 as it does not contain information
-    manta_df_.loc[:, 'INFO_POS2'] = manta_df_.loc[:, 'INFO_POS2'].drop(columns=['INFO_POS2'])
+    manta_df_ = manta_df_.drop(columns=['INFO_POS2'])
 
     if caller_params['parse_format']:
         # SAMPLE_SR and SAMPLE_PE are both columns of tuples with 2 values
