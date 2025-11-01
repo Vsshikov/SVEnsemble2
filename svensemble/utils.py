@@ -6,7 +6,8 @@ import pandas as pd
 from pathlib import Path
 from collections import defaultdict
 from ._caller_params import caller_param_dict, training_set_presets, default_reference_set
-from ._sample_params import sample_val_sets, sample_val_set_template
+from ._sample_params import sample_val_sets, sample_val_set_template, default_model_name
+from ._model_configs import model_configs
 from typing import Dict, Any
 
 human_chroms = [f'chr{i}' for i in range(1, 23)] + ['chrX', 'chrY', 'chrM']
@@ -72,7 +73,7 @@ def _get_caller_callset_dict(sample_name: str, caller_name: str) -> dict:
 
     return caller_dispatch[caller_name](sample_name)
 
-def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground_truth: bool = False, training_sets: str | dict[str, list[str]] = 'default', val_set: None | str | dict[str, Any] = None):
+def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground_truth: bool = False, training_sets: str | dict[str, list[str]] = 'default', val_set: None | str | dict[str, Any] = None, model_name: str = None):
     """
     Based on _caller_params, create a config dictionary for the sample.
     """
@@ -109,6 +110,12 @@ def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground
     else:
         raise ValueError(f'Invalid validation set: {val_set}')
 
+    if model_name is None:
+        model_name = default_model_name
+    if model_name not in model_configs.keys():
+        raise ValueError(f'Invalid model name: {model_name}')
+
+
     if is_ground_truth:
         config_dict = {
             sample_name: {
@@ -131,9 +138,15 @@ def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground
             },
             'training_sets': _training_sets,
             'ref_path': ref_path,
-            'val_set': val_set
+            'val_set': val_set,
+            'model': model_configs[model_name]
         }
     }
+
+    # If there are custom columns specified in the model config, add them to the config dict of each caller.
+    if 'custom_cols' in config_dict[sample_name]['model'].keys():
+        for callset_name in callset_names:
+            config_dict[sample_name]['callsets'][callset_name]['params']['custom_cols_pred'] = config_dict[sample_name]['model']['custom_cols']
 
     if not config_dict:
         raise ValueError(f"No config dictionary created for sample {sample_name}")

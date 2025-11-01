@@ -1,5 +1,7 @@
 from pathlib import Path
 
+default_model_name = 'unbiased'
+
 sample_val_set_template = {
     'name': '',
     'path': Path('')

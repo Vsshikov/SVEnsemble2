@@ -434,7 +434,8 @@ def parse_preprocess_sample(
         if callset_name in caller_dispatch.keys():
             bp_df = caller_dispatch[callset_name](sample_name, sample_config, verbose)
             bp_df = bps.common_bps_preprocess(bp_df, sample_config['callsets'][callset_name]['params'])
-            bp_df.to_csv(sample_config['callsets'][callset_name]['svensemble_dir'] / f'{callset_name}_bps.csv', index=False)
+            model_name = sample_config['model']['name']
+            bp_df.to_csv(sample_config['callsets'][callset_name]['svensemble_dir'] / f'{callset_name}.{model_name}.bps.csv', index=False)
         else:
             raise ValueError(f"Callset {callset_name} not supported")
 
@@ -445,7 +446,7 @@ def load_gridss_breakpoints(sample_config: dict) -> pd.DataFrame | None:
     if 'gridss' in sample_config.get('callsets', {}):
         gridss_bp_path = (
             sample_config['sample_dir'] /
-            'sv_calling' / 'gridss' / 'svensemble2' / 'gridss_bps.csv'
+            'sv_calling' / 'gridss' / 'svensemble2' / f'gridss.{sample_config['model']['name']}.bps.csv'
         )
         return pd.read_csv(gridss_bp_path)
     return None
@@ -456,7 +457,7 @@ def load_manta_candidate_breakpoints(sample_config: dict) -> pd.DataFrame | None
     if 'manta_candidate' in sample_config.get('callsets', {}):
         manta_candidate_bp_path = (
             sample_config['sample_dir'] /
-            'sv_calling' / 'manta' / 'svensemble2' / 'manta_candidate_bps.csv'
+            'sv_calling' / 'manta' / 'svensemble2' / f'manta_candidate.{sample_config['model']['name']}.bps.csv'
         )
         return pd.read_csv(manta_candidate_bp_path)
     return None
@@ -467,7 +468,7 @@ def load_manta_diploid_breakpoints(sample_config: dict) -> pd.DataFrame | None:
     if 'manta_diploid' in sample_config.get('callsets', {}):
         manta_diploid_bp_path = (
             sample_config['sample_dir'] /
-            'sv_calling' / 'manta' / 'svensemble2' / 'manta_diploid_bps.csv'
+            'sv_calling' / 'manta' / 'svensemble2' / f'manta_diploid.{sample_config['model']['name']}.bps.csv'
         )
         return pd.read_csv(manta_diploid_bp_path)
     return None
@@ -478,23 +479,24 @@ def load_delly_breakpoints(sample_config: dict) -> pd.DataFrame | None:
     if 'delly' in sample_config.get('callsets', {}):
         delly_bp_path = (
             sample_config['sample_dir'] /
-            'sv_calling' / 'delly' / 'svensemble2' / 'delly_bps.csv'
+            'sv_calling' / 'delly' / 'svensemble2' / f'delly.{sample_config['model']['name']}.bps.csv'
         )
         return pd.read_csv(delly_bp_path)
     return None
 
-def load_gnomad_breakpoints(reference_sample_config: dict) -> pd.DataFrame:
+def load_gnomad_breakpoints(ground_truth_sample_config: dict) -> pd.DataFrame:
     """Always load gnomAD reference breakpoints."""
     gnomad_bp_path = (
-        reference_sample_config['sample_dir'] /
-        'svensemble2' / 'gnomad_bps.csv'
+        ground_truth_sample_config['sample_dir'] /
+        'svensemble2' / 'gnomad.bps.csv'
     )
     return pd.read_csv(gnomad_bp_path)
 
 
 def match_sample_breakpoints(
+    sample_name: str,
     sample_config: dict,
-    reference_sample_config: dict,
+    ground_truth_sample_config: dict,
     verbose: bool = False
 ) -> None:
     """
@@ -510,7 +512,7 @@ def match_sample_breakpoints(
     for callset_name, callset_config in sample_config['callsets'].items():
         if verbose:
             print(f"Loading breakpoints for callset '{callset_name}'...")
-        bp_df = pd.read_csv(callset_config['svensemble_dir'] / f'{callset_name}_bps.csv', low_memory=False)
+        bp_df = pd.read_csv(callset_config['svensemble_dir'] / f'{callset_name}.{sample_config['model']['name']}.bps.csv', low_memory=False)
         if verbose:
             print(f"Loaded {len(bp_df)} breakpoints for '{callset_name}'.")
 
@@ -519,13 +521,13 @@ def match_sample_breakpoints(
     # Always add reference breakpoints
     # The reference at the moment should always have a single callset
     # Check if true
-    if len(reference_sample_config['callsets']) > 1:
+    if len(ground_truth_sample_config['callsets']) > 1:
         raise ValueError("Reference sample should have a single callset")
 
-    reference_callset_name = list(reference_sample_config['callsets'].keys())[0]
+    reference_callset_name = list(ground_truth_sample_config['callsets'].keys())[0]
     if verbose:
         print(f"Loading reference breakpoints for callset '{reference_callset_name}'...")
-    ref_bp_df = pd.read_csv(reference_sample_config['callsets'][reference_callset_name]['svensemble_dir'] / f'{reference_callset_name}_bps.csv', low_memory=False)
+    ref_bp_df = pd.read_csv(ground_truth_sample_config['callsets'][reference_callset_name]['svensemble_dir'] / f'{reference_callset_name}.bps.csv', low_memory=False)
 
     if verbose:
         if ref_bp_df is not None:
@@ -558,7 +560,7 @@ def match_sample_breakpoints(
         if verbose:
             print(f"Matching complete. Matched breakpoints: {len(matched_bp_df)}")
         # Save matched breakpoints to CSV
-        output_csv_path = output_dir / f'matched_bps_{training_set_name}.csv'
+        output_csv_path = output_dir / f'{sample_name}.matched_bps.{training_set_name}.{sample_config['model']['name']}.csv'
         if verbose:
             print(f"Saving matched breakpoints to: {output_csv_path}")
         matched_bp_df.to_csv(output_csv_path, index=False)
@@ -594,7 +596,7 @@ def pu_train_predict_sample(
             sample_config['sample_dir'] /
             'sv_calling' /
             'svensemble2' /
-            f'matched_bps_{training_set_name}.csv'
+            f'{sample_name}.matched_bps.{training_set_name}.{sample_config['model']['name']}.csv'
         )
         if verbose:
             print(f"Loading joint breakpoints from: {joint_bp_path}")
@@ -647,7 +649,7 @@ def pu_train_predict_sample(
         sample_config['sample_dir'] /
         'sv_calling' /
         'svensemble2' /
-        'unbiased_dict.pkl'
+        f'{sample_name}.unbiased_dict.{sample_config['model']['name']}.pkl'
     )
     if verbose:
         print(f"Saving PU model results to: {output_path}")
@@ -655,7 +657,7 @@ def pu_train_predict_sample(
         pickle.dump(unbiased_dict, f)
 
 
-def svensemble2(sample_names: list[str], ground_truth_sample_name: str, ref_path: Path, verbose: bool = False, preprocess: bool = True, match: bool = True, train: bool = True, use_cached_preprocessed_truth: bool = False) -> dict:
+def svensemble2(sample_names: list[str], ground_truth_sample_name: str, ref_path: Path, model_name: str | None = None, verbose: bool = False, preprocess: bool = True, match: bool = True, train: bool = True, use_cached_preprocessed_truth: bool = False) -> dict:
     """
     Accepts a list of sample names and a data directory.
     For each name, reads the outputs of supported callers from the specified directory,
@@ -670,6 +672,7 @@ def svensemble2(sample_names: list[str], ground_truth_sample_name: str, ref_path
         sample_names: list of sample names to process
         ground_truth_sample_name: name of the ground truth sample
         ref_path: path to the reference genome
+        model_name: name of the PU learning model to use
         preprocess: if True, preprocess the samples
         match: if True, match the breakpoints for each sample
         train: if True, train the PU model for each sample
@@ -679,14 +682,14 @@ def svensemble2(sample_names: list[str], ground_truth_sample_name: str, ref_path
     # Create a config dict for the samples using the sample_names
     samples = {}
     for sample_name in sample_names:
-        samples.update(sv_utils.create_config_dict(sample_name, ref_path=ref_path, is_ground_truth=False))
+        samples.update(sv_utils.create_config_dict(sample_name, ref_path=ref_path, model_name=model_name, is_ground_truth=False))
     # Also create a config dict for the ground truth sample
     samples.update(sv_utils.create_config_dict(ground_truth_sample_name, ref_path=ref_path, is_ground_truth=True))
 
     preprpocess_truth = True
     if use_cached_preprocessed_truth:
         # Check if a preprocessed truth sample exists in the correct location
-        if not (samples[ground_truth_sample_name]['callsets'][ground_truth_sample_name]['svensemble_dir'] / f'{ground_truth_sample_name}_bps.csv').exists():
+        if not (samples[ground_truth_sample_name]['callsets'][ground_truth_sample_name]['svensemble_dir'] / f'{ground_truth_sample_name}.bps.csv').exists():
             raise FileNotFoundError(f"Preprocessed truth breakpoints not found for {ground_truth_sample_name}")
         else:
             preprpocess_truth = False
@@ -701,7 +704,7 @@ def svensemble2(sample_names: list[str], ground_truth_sample_name: str, ref_path
         # Match the breakpoints for each sample
         for sample_name, sample_config in samples.items():
             if sample_name != ground_truth_sample_name:
-                match_sample_breakpoints(sample_config, samples[ground_truth_sample_name], verbose)
+                match_sample_breakpoints(sample_name, sample_config, samples[ground_truth_sample_name], verbose)
 
     if train:
         # Train the PU models for each sample
@@ -728,6 +731,13 @@ if __name__ == '__main__':
         type=str,
         required=True,
         help="Name of the reference sample."
+    )
+    parser.add_argument(
+        '--model_name',
+        type=str,
+        required=False,
+        default=None,
+        help="Name of the PU learning model to use. If not provided, will use the default model."
     )
     parser.add_argument(
         '--ref_path',
@@ -771,9 +781,13 @@ if __name__ == '__main__':
         sample_names=[args.sample_name],
         ground_truth_sample_name=args.ground_truth_sample_name,
         ref_path=args.ref_path,
+        model_name=args.model_name,
         verbose=args.verbose,
         preprocess=args.preprocess,
         match=args.match,
         train=args.train,
         use_cached_preprocessed_truth=args.use_cached_preprocessed_truth
     )
+
+
+# for s in NA12878 NA12878_30x HG002 CHM13; do sbatch svensemble/pipeline.py --sample_name $s --ground_truth_sample_name gnomad --ref_path /home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/hg38.no_decoys.fa --preprocess --match --train --verbose --model_name unbiased_GT --use_cached_preprocessed_truth; done
