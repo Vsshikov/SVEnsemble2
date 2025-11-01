@@ -935,6 +935,8 @@ if __name__ == "__main__":
 
     if args.additional_cols is not None:
         additional_cols = args.additional_cols.split(sep=',')
+    else:
+        additional_cols = None
 
     if 'preprocess' in perform_steps:
         preprocess_sample_for_benchmark(
