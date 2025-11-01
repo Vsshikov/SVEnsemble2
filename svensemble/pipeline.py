@@ -446,7 +446,7 @@ def load_gridss_breakpoints(sample_config: dict) -> pd.DataFrame | None:
     if 'gridss' in sample_config.get('callsets', {}):
         gridss_bp_path = (
             sample_config['sample_dir'] /
-            'sv_calling' / 'gridss' / 'svensemble2' / f'gridss.{sample_config['model']['name']}.bps.csv'
+            'sv_calling' / 'gridss' / 'svensemble2' / f'gridss.{sample_config["model"]["name"]}.bps.csv'
         )
         return pd.read_csv(gridss_bp_path)
     return None
@@ -457,7 +457,7 @@ def load_manta_candidate_breakpoints(sample_config: dict) -> pd.DataFrame | None
     if 'manta_candidate' in sample_config.get('callsets', {}):
         manta_candidate_bp_path = (
             sample_config['sample_dir'] /
-            'sv_calling' / 'manta' / 'svensemble2' / f'manta_candidate.{sample_config['model']['name']}.bps.csv'
+            'sv_calling' / 'manta' / 'svensemble2' / f'manta_candidate.{sample_config["model"]["name"]}.bps.csv'
         )
         return pd.read_csv(manta_candidate_bp_path)
     return None
@@ -468,7 +468,7 @@ def load_manta_diploid_breakpoints(sample_config: dict) -> pd.DataFrame | None:
     if 'manta_diploid' in sample_config.get('callsets', {}):
         manta_diploid_bp_path = (
             sample_config['sample_dir'] /
-            'sv_calling' / 'manta' / 'svensemble2' / f'manta_diploid.{sample_config['model']['name']}.bps.csv'
+            'sv_calling' / 'manta' / 'svensemble2' / f'manta_diploid.{sample_config["model"]["name"]}.bps.csv'
         )
         return pd.read_csv(manta_diploid_bp_path)
     return None
@@ -479,7 +479,7 @@ def load_delly_breakpoints(sample_config: dict) -> pd.DataFrame | None:
     if 'delly' in sample_config.get('callsets', {}):
         delly_bp_path = (
             sample_config['sample_dir'] /
-            'sv_calling' / 'delly' / 'svensemble2' / f'delly.{sample_config['model']['name']}.bps.csv'
+            'sv_calling' / 'delly' / 'svensemble2' / f'delly.{sample_config["model"]["name"]}.bps.csv'
         )
         return pd.read_csv(delly_bp_path)
     return None
@@ -512,7 +512,7 @@ def match_sample_breakpoints(
     for callset_name, callset_config in sample_config['callsets'].items():
         if verbose:
             print(f"Loading breakpoints for callset '{callset_name}'...")
-        bp_df = pd.read_csv(callset_config['svensemble_dir'] / f'{callset_name}.{sample_config['model']['name']}.bps.csv', low_memory=False)
+        bp_df = pd.read_csv(callset_config['svensemble_dir'] / f'{callset_name}.{sample_config["model"]["name"]}.bps.csv', low_memory=False)
         if verbose:
             print(f"Loaded {len(bp_df)} breakpoints for '{callset_name}'.")
 
@@ -560,7 +560,7 @@ def match_sample_breakpoints(
         if verbose:
             print(f"Matching complete. Matched breakpoints: {len(matched_bp_df)}")
         # Save matched breakpoints to CSV
-        output_csv_path = output_dir / f'{sample_name}.matched_bps.{training_set_name}.{sample_config['model']['name']}.csv'
+        output_csv_path = output_dir / f'{sample_name}.matched_bps.{training_set_name}.{sample_config["model"]["name"]}.csv'
         if verbose:
             print(f"Saving matched breakpoints to: {output_csv_path}")
         matched_bp_df.to_csv(output_csv_path, index=False)
@@ -596,7 +596,7 @@ def pu_train_predict_sample(
             sample_config['sample_dir'] /
             'sv_calling' /
             'svensemble2' /
-            f'{sample_name}.matched_bps.{training_set_name}.{sample_config['model']['name']}.csv'
+            f'{sample_name}.matched_bps.{training_set_name}.{sample_config["model"]["name"]}.csv'
         )
         if verbose:
             print(f"Loading joint breakpoints from: {joint_bp_path}")
@@ -649,7 +649,7 @@ def pu_train_predict_sample(
         sample_config['sample_dir'] /
         'sv_calling' /
         'svensemble2' /
-        f'{sample_name}.unbiased_dict.{sample_config['model']['name']}.pkl'
+        f'{sample_name}.unbiased_dict.{sample_config["model"]["name"]}.pkl'
     )
     if verbose:
         print(f"Saving PU model results to: {output_path}")
@@ -657,7 +657,17 @@ def pu_train_predict_sample(
         pickle.dump(unbiased_dict, f)
 
 
-def svensemble2(sample_names: list[str], ground_truth_sample_name: str, ref_path: Path, model_name: str | None = None, verbose: bool = False, preprocess: bool = True, match: bool = True, train: bool = True, use_cached_preprocessed_truth: bool = False) -> dict:
+def svensemble2(
+    sample_names: list[str],
+    ground_truth_sample_name: str,
+    ref_path: Path,
+    model_name: str | None = None,
+    verbose: bool = False,
+    preprocess: bool = True,
+    match: bool = True,
+    train: bool = True,
+    use_cached_preprocessed_truth: bool = False,
+) -> dict:
     """
     Accepts a list of sample names and a data directory.
     For each name, reads the outputs of supported callers from the specified directory,

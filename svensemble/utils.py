@@ -144,7 +144,9 @@ def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground
     }
 
     # If there are custom columns specified in the model config, add them to the config dict of each caller.
-    if 'custom_cols' in config_dict[sample_name]['model'].keys():
+    if 'custom_cols' in config_dict[sample_name]['model']['training_params'].keys():
+        print(f"Adding custom columns to the config dict for sample {sample_name}")
+        print(f"Custom columns: {config_dict[sample_name]['model']['training_params']['custom_cols']}")
         for callset_name in callset_names:
             config_dict[sample_name]['callsets'][callset_name]['params']['custom_cols_pred'] = config_dict[sample_name]['model']['training_params']['custom_cols']
 
