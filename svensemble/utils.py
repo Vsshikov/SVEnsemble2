@@ -146,7 +146,7 @@ def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground
     # If there are custom columns specified in the model config, add them to the config dict of each caller.
     if 'custom_cols' in config_dict[sample_name]['model'].keys():
         for callset_name in callset_names:
-            config_dict[sample_name]['callsets'][callset_name]['params']['custom_cols_pred'] = config_dict[sample_name]['model']['custom_cols']
+            config_dict[sample_name]['callsets'][callset_name]['params']['custom_cols_pred'] = config_dict[sample_name]['model']['training_params']['custom_cols']
 
     if not config_dict:
         raise ValueError(f"No config dictionary created for sample {sample_name}")
