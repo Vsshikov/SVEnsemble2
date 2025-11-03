@@ -649,7 +649,7 @@ def pu_train_predict_sample(
         sample_config['sample_dir'] /
         'sv_calling' /
         'svensemble2' /
-        f'{sample_name}.unbiased_dict.{sample_config["model"]["name"]}.pkl'
+        f'{sample_name}.{sample_config["model"]["name"]}.model_dict.pkl'
     )
     if verbose:
         print(f"Saving PU model results to: {output_path}")
