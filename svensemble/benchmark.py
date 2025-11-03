@@ -155,6 +155,7 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None):
         ax.set_title(title)
 
     callsets = list(sample_val_dict.keys())
+    callsets.sort()
     n_callsets = len(callsets)
     colors = get_plot_colors(n_callsets)
 
@@ -226,6 +227,7 @@ def plot_reverse_roc_curves(sample_val_dict, svtype=None, ax=None, use_counts=Tr
     ax.set_yscale('log')
 
     callsets = list(sample_val_dict.keys())
+    callsets.sort()
     n_callsets = len(callsets)
     colors = get_plot_colors(n_callsets)
 
@@ -612,7 +614,7 @@ def preprocess_sample_for_benchmark(
     for callset_name in sample['callsets']:
         callset_bps_path = (
             sample["callsets"][callset_name]["svensemble_dir"] /
-            f"{callset_name}_bps.csv"
+            f"{callset_name}.{model_name}.bps.csv"
         )
         sample['callsets'][callset_name]['bps'] = pd.read_csv(callset_bps_path, low_memory=False)
 
@@ -622,7 +624,7 @@ def preprocess_sample_for_benchmark(
             sample['sample_dir']
             / 'sv_calling'
             / 'svensemble2'
-            / f'matched_bps_{training_set_name}.csv'
+            / f'{sample_name}.matched_bps.{training_set_name}.{model_name}.csv'
         )
         # Read CSV into DataFrame
         sample['matched_bps'][training_set_name] = pd.read_csv(
@@ -634,7 +636,7 @@ def preprocess_sample_for_benchmark(
         sample['sample_dir']
         / 'sv_calling'
         / 'svensemble2'
-        / 'unbiased_dict.pkl'
+        / f'{sample_name}.{model_name}.model_dict.pkl'
     )
     with open(unbiased_dict_path, 'rb') as f:
         sample['pred_dicts'] = pickle.load(f)
@@ -687,7 +689,7 @@ def preprocess_sample_for_benchmark(
     # Save processed sample as pickle if requested
     if save_pickle:
         out_filename = (
-            f"{sample_name}.{model_name}.pkl"
+            f"{sample_name}.{model_name}.bench_preprocessed.pkl"
         )
         out_path = (
             sample['sample_dir']
@@ -786,6 +788,9 @@ def benchmark_sample(
     if skip_filtering:
         svtypes = None
         svtypes_str = 'all'
+
+    if svtypes is None:
+        svtypes_str = 'all'
     elif isinstance(svtypes, str):
         svtypes_str = svtypes
     elif isinstance(svtypes, list):
@@ -804,13 +809,14 @@ def benchmark_sample(
     sample_dict = sv_utils.create_config_dict(
         sample_name,
         training_sets=training_sets,
-        val_set="use_name"
+        val_set="use_name",
+        model_name=model_name
     )[sample_name]
 
     # Load filtered sample .pkl with SVEnsemble2 runs in the `svensemble2_calls` dictionary, etc.
     sample_path = (
         sample_dict["sample_dir"] / "sv_calling" / "svensemble2" /
-        f"{sample_name}.{model_name}.pkl"
+        f"{sample_name}.{model_name}.bench_preprocessed.pkl"
     )
     with open(sample_path, "rb") as f:
         sample = pickle.load(f)
