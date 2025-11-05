@@ -799,5 +799,8 @@ if __name__ == '__main__':
         use_cached_preprocessed_truth=args.use_cached_preprocessed_truth
     )
 
-
+# Unbiased  GT preset
 # for s in NA12878 NA12878_30x HG002 CHM13; do sbatch svensemble/pipeline.py --sample_name $s --ground_truth_sample_name gnomad --ref_path /home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/hg38.no_decoys.fa --preprocess --match --train --verbose --model_name unbiased_GT --use_cached_preprocessed_truth; done
+
+# Unbiased preset
+# for s in NA12878 NA12878_30x HG002 CHM13; do sbatch svensemble/pipeline.py --sample_name $s --ground_truth_sample_name gnomad --ref_path /home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/hg38.no_decoys.fa --preprocess --match --train --verbose --model_name unbiased --use_cached_preprocessed_truth; done

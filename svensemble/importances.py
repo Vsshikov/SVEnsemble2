@@ -49,12 +49,16 @@ def load_svensemble2_val_Xy_from_samples_val_pickles(samples_pkl_path, val_dict_
     return matchedbps.get_X_y_from_training_df(preprocessed_matched_bps, match_col='ref_match')
 
 
-def load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_path, val_dict_pkl_path, training_set_name, verbose=False):
+def load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_path, val_dict_pkl_path, training_set_name, all_matches=False, verbose=False):
+
     sample = pickle.load(open(sample_pkl_path, 'rb'))
     val_dict = pickle.load(open(val_dict_pkl_path, 'rb'))
 
     matched_bps = sample['matched_bps'][training_set_name].copy()
-    matched_bps.loc[:, 'val_INFO_EVENT'] = np.where(val_dict[f'svensemble2_{training_set_name}']['is_in_val'], True, np.nan)
+    if all_matches:
+        matched_bps.loc[:, 'val_INFO_EVENT'] = True
+    else:
+        matched_bps.loc[:, 'val_INFO_EVENT'] = np.where(val_dict[f'svensemble2_{training_set_name}']['is_in_val'], True, np.nan)
 
     preprocessed_matched_bps = matchedbps.preprocess_matchedbps_for_pu(
         joint_bp_df=matched_bps,
@@ -62,6 +66,7 @@ def load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_path, val_dict_pk
         match_sample_name='val',
         training_set_name=training_set_name,
         add_match_ids_to_index=False,
+        ignore_match_errors=all_matches, # ignore match errors if all matches are used
         verbose=verbose
     )
 

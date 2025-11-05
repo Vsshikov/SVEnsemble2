@@ -182,6 +182,7 @@ def preprocess_matchedbps_for_pu(
     match_sample_name: str,
     training_set_name: str,
     add_match_ids_to_index: bool = True,
+    ignore_match_errors: bool = False,
     verbose: bool = False
 ) -> pd.DataFrame:
     """
@@ -208,26 +209,27 @@ def preprocess_matchedbps_for_pu(
 
     # Collect all relevant columns for this training set
     for callset in sample_config['training_sets'][training_set_name]:
+        callset_params = sample_config['callsets'][callset]['params']
         training_cols.append(f'{callset}_INFO_EVENT')
         training_cols.extend(
             f'{callset}_FILTER_{col}'
-            for col in caller_params.caller_param_dict[callset]['filter_cols']
+            for col in callset_params['filter_cols']
         )
         training_cols.extend(
             f'{callset}_INFO_{col}'
-            for col in caller_params.caller_param_dict[callset]['info_cols_pred']
+            for col in callset_params['info_cols_pred']
         )
         training_cols.extend(
             f'{callset}_SAMPLE_{col}'
-            for col in caller_params.caller_param_dict[callset]['format_cols']
+            for col in callset_params['format_cols']
         )
         training_cols.extend(
             f'{callset}_CUSTOM_{col}'
-            for col in caller_params.caller_param_dict[callset]['custom_cols_pred']
+            for col in callset_params['custom_cols_pred']
         )
         # Quality metric column may not be included in the training_cols list, so add it if it exists and is not already in training_cols
-        if (caller_params.caller_param_dict[callset]['qual_metric'] not in training_cols) and (caller_params.caller_param_dict[callset]['qual_metric'] is not None):
-            training_cols.append(caller_params.caller_param_dict[callset]['qual_metric'])
+        if (callset_params['qual_metric'] not in training_cols) and (callset_params['qual_metric'] is not None):
+            training_cols.append(callset_params['qual_metric'])
 
     # Find all columns in joint_bp_df that start with any of the training_col names
     for col in training_cols:
@@ -285,15 +287,17 @@ def preprocess_matchedbps_for_pu(
 
     # Check if 'ref_match' is constant
     n_unique = training_df['ref_match'].nunique()
-    if n_unique == 1:
+    if (n_unique == 1) and not ignore_match_errors:
         if training_df['ref_match'].iloc[0]:
             raise ValueError("All calls are matched to reference; not a valid training set.")
         else:
             raise ValueError("No calls are matched to reference; not a valid training set.")
 
-    # Drop columns with only 1 unique value
     nunique = training_df.nunique()
     constant_cols = nunique[nunique == 1].index.tolist()
+    # Never drop the match column even if it's constant
+    if 'ref_match' in constant_cols:
+        constant_cols.remove('ref_match')
     if constant_cols and verbose:
         print(f"Dropping {len(constant_cols)} constant columns: {constant_cols}")
     training_df = training_df.drop(columns=constant_cols)
