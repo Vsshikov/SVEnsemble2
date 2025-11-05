@@ -295,17 +295,27 @@ def annotate_svtypes(bps_df, source):
         ((bnd1["relative_pos"] == "N]") & (bnd2["relative_pos"] == "N]"))
         | ((bnd1["relative_pos"] == "[N") & (bnd2["relative_pos"] == "[N"))
     )
-    pos2_gt_pos1_plus_ins_mask = (
-        (bps_df["POS_bnd2"] - bps_df["POS_bnd1"]) > ins_lens
+    pos_diff = bps_df["POS_bnd2"] - bps_df["POS_bnd1"]
+    # Len of a deletion is pos_diff - 1, compare it to the insert length to separate dels and inss
+    pos2_gt_pos1_del_ins_mask = (
+        pos_diff - 1 > ins_lens
+    )
+    # Len of a duplication is pos_diff + 1 (as a duplication of a single nucleotide/DUP with len 1 will have pos of both breakends at the same coordinates), so create a mask to separate them from insertions this way
+    pos2_gt_pos1_dup_ins_mask = (
+        pos_diff + 1 > ins_lens
     )
 
     del_mask = (
-        same_chrom_mask & del_ins_bnds_mask & pos2_gt_pos1_plus_ins_mask
+        same_chrom_mask & del_ins_bnds_mask & pos2_gt_pos1_del_ins_mask
     )
+    # 2 cases for insertions:
+    # either it has bnd orientations like deletions and the deletion is smaller/same size than the insert
+    # or it has bnd orientations like duplications and the distance between bnds in the "amplified" region is smaller than the insert
     ins_mask = (
-        same_chrom_mask & del_ins_bnds_mask & ~pos2_gt_pos1_plus_ins_mask
+        (same_chrom_mask & del_ins_bnds_mask & ~pos2_gt_pos1_del_ins_mask) | \
+        (same_chrom_mask & dup_bnds_mask & ~pos2_gt_pos1_dup_ins_mask)
     )
-    dup_mask = same_chrom_mask & dup_bnds_mask
+    dup_mask = same_chrom_mask & dup_bnds_mask & pos2_gt_pos1_dup_ins_mask
     inv_mask = same_chrom_mask & inv_bnds_mask
 
     svtypes = np.full(len(bps_df), np.nan, dtype=object)
@@ -325,14 +335,15 @@ def annotate_svtypes(bps_df, source):
 
     return svtypes
 
-def get_del_size(bps_df: pd.DataFrame, *args) -> pd.Series:
+def get_del_size(bps_df: pd.DataFrame, *args, **kwargs) -> pd.Series:
     """
     Calculates deletion size from POS values in bps_df
     Reuqires INFO_INFERRED_SVTYPE, to be present in the dataframe in addition to normal bps_df columns
     """
     bps_df_ = bps_df.copy()
 
-    del_size = bps_df_[bps_df_['INFO_INFERRED_SVTYPE'] == 'DEL']['POS_bnd2'] - bps_df_[bps_df_['INFO_INFERRED_SVTYPE'] == 'DEL']['POS_bnd1'] - 1
+    ins_sizes = get_insert_size(bps_df_, source=kwargs['source'])
+    del_size = bps_df_[bps_df_['INFO_INFERRED_SVTYPE'] == 'DEL']['POS_bnd2'] - bps_df_[bps_df_['INFO_INFERRED_SVTYPE'] == 'DEL']['POS_bnd1'] - 1 - ins_sizes
 
     del_size.loc[del_size.isna()] = 0
     del_size.loc[del_size < 0] = 0
@@ -340,15 +351,7 @@ def get_del_size(bps_df: pd.DataFrame, *args) -> pd.Series:
 
     return del_size
 
-def get_bps_insert_size(bps_df: pd.DataFrame) -> pd.Series:
-    """
-    Calculates insert size from POS values in bps_df
-    Reuqires INFO_INFERRED_SVTYPE, to be present in the dataframe in addition to normal bps_df columns
-    """
-    bps_df_ = bps_df.copy()
-    return bps_df_['POS_bnd2'] - bps_df_['POS_bnd1']
-
-def get_dup_size(bps_df: pd.DataFrame, *args) -> pd.Series:
+def get_dup_size(bps_df: pd.DataFrame, *args, **kwargs) -> pd.Series:
     """
     Calculates duplication size from POS values in bps_df
     """
@@ -357,7 +360,7 @@ def get_dup_size(bps_df: pd.DataFrame, *args) -> pd.Series:
     dup_size = dup_size.astype(int)
     return dup_size
 
-def get_default_size(bps_df: pd.DataFrame, *args) -> pd.Series:
+def get_default_size(bps_df: pd.DataFrame, *args, **kwargs) -> pd.Series:
     """
     Function that is called for SV types that are not DEL, DUP or INS when asked to get the size of the SV
     Simply returns a vector of 1s
@@ -383,9 +386,9 @@ def get_sv_sizes(bps_df: pd.DataFrame, source: str | None = None) -> pd.Series:
     sv_sizes = pd.Series(index=bps_df_.index)
     for svtype in np.unique(inferred_svtypes):
         if svtype in sv_size_dispatch:
-            sv_sizes.loc[inferred_svtypes == svtype] = sv_size_dispatch[svtype](bps_df_[inferred_svtypes == svtype], source)
+            sv_sizes.loc[inferred_svtypes == svtype] = sv_size_dispatch[svtype](bps_df_[inferred_svtypes == svtype], source=source)
         else:
-            sv_sizes.loc[inferred_svtypes == svtype] = get_default_size(bps_df_[inferred_svtypes == svtype], source)
+            sv_sizes.loc[inferred_svtypes == svtype] = get_default_size(bps_df_[inferred_svtypes == svtype], source=source)
 
 
     return sv_sizes
