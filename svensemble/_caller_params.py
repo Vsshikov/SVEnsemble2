@@ -17,7 +17,7 @@ import numpy as np
 default_reference_set = 'gnomad'
 
 default_sv_types = ['DEL', 'INS', 'DUP', 'INV', 'TRA', 'OTHER']
-default_sv_lens = (0, np.inf)
+default_sv_lens = (50, np.inf)
 
 svtype_cols = ['INFO_SVTYPE', 'INFO_INFERRED_SVTYPE']
 
@@ -59,6 +59,11 @@ default_params = {
     'svlen_source': 'svlen',
     'bnd2_pos': 'svlen',
     'svlens': default_sv_lens
+}
+# Default params for evnet notation in VCF
+default_event_params = default_params | {
+    'base_cols': base_cols + ['INFO_END'],
+    'info_cols_mandatory': ['CIEND', 'CIPOS', 'CHR2', 'SVLEN', 'SVTYPE']
 }
 
 training_set_presets = {
@@ -229,6 +234,12 @@ delly_params = default_params | {
     'bnd2_pos': 'end'
 }
 
+survivor_params = default_event_params | {
+    'source': 'survivor',
+    'bps_path': 'sv_calling/survivor/svensemble2/survivor_bps.csv',
+    'bnd2_pos': 'end'
+}
+
 svensemble2_params = default_params | {
     'svlen_source': 'svensemble2_col'
 }
@@ -270,7 +281,8 @@ caller_param_dict = {
     'kosugi': kosugi_params,
     'chm13_val': chm13_params,
     'hg002_val': hg002_params,
-    'huddleston': huddleston_params
+    'huddleston': huddleston_params,
+    'survivor': survivor_params
 }
 
 caller_alt_priority = [
