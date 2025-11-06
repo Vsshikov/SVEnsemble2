@@ -3,7 +3,7 @@
 #SBATCH --job-name=svensemble2
 #SBATCH --output=svensemble2.out
 #SBATCH --error=svensemble2.err
-#SBATCH --time=10:00:00
+#SBATCH --time=24:00:00
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=32G
 
