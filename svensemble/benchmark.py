@@ -577,6 +577,7 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, tr
 def preprocess_sample_for_benchmark(
     sample_name: str,
     model_name: str,
+    additional_callsets: None | List[str] = None,
     save_pickle: bool = True,
     verbose: bool = False
 ) -> Dict[str, Any]:
@@ -601,7 +602,8 @@ def preprocess_sample_for_benchmark(
     sample = sv_utils.create_config_dict(
         sample_name,
         training_sets=training_sets,
-        val_set='use_name'
+        val_set='use_name',
+        additional_callsets=additional_callsets
     )[sample_name]
 
     # Prepare a blank matched_bps dict per training set
@@ -757,6 +759,7 @@ def benchmark_sample(
     val_match_margin: int = 1000,
     skip_filtering: bool = False,
     additional_cols: None | List[str] = None,
+    additional_callsets: None | List[str] = None,
     save_pickle=True,
     verbose=False
 ):
@@ -770,6 +773,7 @@ def benchmark_sample(
         svlens (tuple): SV length range (min, max).
         training_sets (list or str): Training sets to consider.
         additional_cols (list or str): Additional columns to keep in the validation result dataframe.
+        additional_callsets (list or str): Names of additional callsets to include in the benchmark.
         save_pickle (bool, optional): Whether to save results or return results as a dict. Default: True.
         verbose (bool, optional): Whether to print processing info. Default: True.
 
@@ -810,7 +814,8 @@ def benchmark_sample(
         sample_name,
         training_sets=training_sets,
         val_set="use_name",
-        model_name=model_name
+        model_name=model_name,
+        additional_callsets=additional_callsets
     )[sample_name]
 
     # Load filtered sample .pkl with SVEnsemble2 runs in the `svensemble2_calls` dictionary, etc.
@@ -820,6 +825,7 @@ def benchmark_sample(
     )
     with open(sample_path, "rb") as f:
         sample = pickle.load(f)
+
 
     if not skip_filtering:
         sample = filter_sample_by_type_len(sample, svtypes=svtypes, svlens=svlens)
@@ -914,6 +920,7 @@ if __name__ == "__main__":
     parser.add_argument('--additional_cols', type=str, default=None)
     parser.add_argument('--save_pickle', action='store_true', default=True)
     parser.add_argument('--perform_steps', type=str, default=None)
+    parser.add_argument('--additional_callsets', type=str, default=None)
     parser.add_argument('--verbose', action='store_true', default=False)
     args = parser.parse_args()
     # Benchmarking requires 2 steps:
@@ -934,6 +941,11 @@ if __name__ == "__main__":
             if svtype not in caller_params.default_sv_types:
                 raise ValueError(f"Unsupported svtype: {svtype}")
 
+    if args.additional_callsets is not None:
+        additional_callsets = args.additional_callsets.split(sep=',')
+    else:
+        additional_callsets = None
+
     if args.skip_filtering:
         svlens = None
     else:
@@ -949,6 +961,7 @@ if __name__ == "__main__":
             sample_name=args.sample_name,
             model_name=args.model_name,
             save_pickle=args.save_pickle,
+            additional_callsets=additional_callsets,
             verbose=args.verbose
         )
 
@@ -967,5 +980,7 @@ if __name__ == "__main__":
         )
 
 
-# for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name unbiased --skip_filtering --perform_steps preprocess --verbose; done
+# for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name unbiased --skip_filtering --perform_steps preprocess --additional_callsets survivor --verbose; done
 # for svtype in DEL INS DUP INV OTHER; do for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name unbiased --svtypes $svtype --perform_steps benchmark --verbose; done; done
+#
+# for svtype in DEL INS DUP INV OTHER; do for sample_name in NA12878_30x; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name unbiased --svtypes $svtype --perform_steps benchmark --additional_callsets survivor --verbose; done; done

@@ -62,18 +62,37 @@ def _get_delly_callset_dict(sample_name: str) -> dict:
         }
     )
 
+def _get_survivor_callset_dict(sample_name: str) -> dict:
+    return defaultdict(str,
+        {
+            'source': 'survivor',
+            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/survivor/svensemble2'),
+            'path': Path(f'data/{sample_name}/sv_calling/survivor/{sample_name}.survivor.vcf'),
+            'params': caller_param_dict['survivor']
+        }
+    )
+
 def _get_caller_callset_dict(sample_name: str, caller_name: str) -> dict:
     caller_dispatch = {
         'gnomad': _get_gnomad_callset_dict,
         'gridss': _get_gridss_callset_dict,
         'manta_candidate': _get_manta_candidate_callset_dict,
         'manta_diploid': _get_manta_diploid_callset_dict,
-        'delly': _get_delly_callset_dict
+        'delly': _get_delly_callset_dict,
+        'survivor': _get_survivor_callset_dict
     }
 
     return caller_dispatch[caller_name](sample_name)
 
-def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground_truth: bool = False, training_sets: str | dict[str, list[str]] = 'default', val_set: None | str | dict[str, Any] = None, model_name: str = None):
+def create_config_dict(
+    sample_name: str,
+    ref_path: Path | None = None,
+    is_ground_truth: bool = False,
+    training_sets: str | dict[str, list[str]] = 'default',
+    val_set: None | str | dict[str, Any] = None,
+    model_name: str = None,
+    additional_callsets: list[str] | None = None
+):
     """
     Based on _caller_params, create a config dictionary for the sample.
     """
@@ -94,6 +113,10 @@ def create_config_dict(sample_name: str, ref_path: Path | None = None, is_ground
         for callset_name in training_set:
             callset_names.add(callset_name)
     callset_names = list(callset_names)
+    if isinstance(additional_callsets, list):
+        if any(callset_name not in caller_param_dict.keys() for callset_name in additional_callsets):
+            raise ValueError(f'Invalid extra callsets: {additional_callsets}')
+        callset_names.extend(additional_callsets)
 
     # If a validation set exists for the sample, add it to the config dict.
     if val_set == 'use_name':
