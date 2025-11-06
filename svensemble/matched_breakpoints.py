@@ -208,28 +208,28 @@ def preprocess_matchedbps_for_pu(
     cols_to_retain: list[str] = []
 
     # Collect all relevant columns for this training set
-    for callset in sample_config['training_sets'][training_set_name]:
-        callset_params = sample_config['callsets'][callset]['params']
-        training_cols.append(f'{callset}_INFO_EVENT')
+    for callset_name in sample_config['training_sets'][training_set_name]:
+        callset_params = sample_config['callsets'][callset_name]['params']
+        training_cols.append(f'{callset_name}_INFO_EVENT')
         training_cols.extend(
-            f'{callset}_FILTER_{col}'
+            f'{callset_name}_FILTER_{col}'
             for col in callset_params['filter_cols']
         )
         training_cols.extend(
-            f'{callset}_INFO_{col}'
+            f'{callset_name}_INFO_{col}'
             for col in callset_params['info_cols_pred']
         )
         training_cols.extend(
-            f'{callset}_SAMPLE_{col}'
+            f'{callset_name}_SAMPLE_{col}'
             for col in callset_params['format_cols']
         )
         training_cols.extend(
-            f'{callset}_CUSTOM_{col}'
+            f'{callset_name}_CUSTOM_{col}'
             for col in callset_params['custom_cols_pred']
         )
         # Quality metric column may not be included in the training_cols list, so add it if it exists and is not already in training_cols
         if (callset_params['qual_metric'] not in training_cols) and (callset_params['qual_metric'] is not None):
-            training_cols.append(callset_params['qual_metric'])
+            training_cols.append(f'{callset_name}_{callset_params["qual_metric"]}')
 
     # Find all columns in joint_bp_df that start with any of the training_col names
     for col in training_cols:

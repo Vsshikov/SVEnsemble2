@@ -11,7 +11,7 @@ model_configs = {
         'name': 'unbiased_GT',
         'training_params': {
             'function': 'unbiased',
-            'custom_cols': ['CUSTOM_SVTYPE']
+            'custom_cols': ['SVTYPE']
         },
         'description': 'Unbiased random forest model for SV call probability estimation with extra genotyping step for all input callsets.'
     }

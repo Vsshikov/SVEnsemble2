@@ -24,7 +24,7 @@ def _get_annotated_svtypes(bp_df: pd.DataFrame, caller_params: dict|None = None)
 
 
 _custom_col_dispatch = {
-    'CUSTOM_SVTYPE': _get_annotated_svtypes
+    'SVTYPE': _get_annotated_svtypes
 }
 
 def common_bps_preprocess(bp_df, caller_params: dict|None = None) -> pd.DataFrame:
@@ -38,8 +38,8 @@ def common_bps_preprocess(bp_df, caller_params: dict|None = None) -> pd.DataFram
     # Adding custom prediction columns
     for custom_col_name in caller_params['custom_cols_pred']:
         if custom_col_name not in _custom_col_dispatch.keys():
-            raise KeyError(f"Column {custom_col_name} specified in callset parameters but not supported.")
-        bp_df_.loc[:, custom_col_name] = _custom_col_dispatch[custom_col_name](bp_df_, caller_params=caller_params)
+            raise KeyError(f"Custom column {custom_col_name} specified in callset parameters but not supported.")
+        bp_df_.loc[:, f'CUSTOM_{custom_col_name}'] = _custom_col_dispatch[custom_col_name](bp_df_, caller_params=caller_params)
 
     return bp_df_
 
