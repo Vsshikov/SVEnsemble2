@@ -52,7 +52,12 @@ def load_svensemble2_val_Xy_from_samples_val_pickles(samples_pkl_path, val_dict_
 def load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_path, val_dict_pkl_path, training_set_name, all_matches=False, verbose=False):
 
     sample = pickle.load(open(sample_pkl_path, 'rb'))
-    val_dict = pickle.load(open(val_dict_pkl_path, 'rb'))
+    if val_dict_pkl_path is not None:
+        val_dict = pickle.load(open(val_dict_pkl_path, 'rb'))
+    elif all_matches:
+        val_dict = None # all matches are used, so no need for val_dict
+    else:
+        raise ValueError("val_dict_pkl_path is required if all_matches is False")
 
     matched_bps = sample['matched_bps'][training_set_name].copy()
     if all_matches:

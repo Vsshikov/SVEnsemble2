@@ -57,10 +57,10 @@ training_sets = {
 # model_name = 'unbiased'
 
 sample_pkl_path = f'/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/{sample_name}/sv_calling/svensemble2/{sample_name}.{model_name}.bench_preprocessed.pkl'
-val_dict_pkl_path = f'/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/{sample_name}/sv_calling/svensemble2/{sample_name}.{model_name}.all.50:inf.val_dict.pkl'
+# val_dict_pkl_path = f'/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/{sample_name}/sv_calling/svensemble2/{sample_name}.{model_name}.all.50:inf.val_dict.pkl'
 
 
-X, y = importances.load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_path, val_dict_pkl_path, training_set_name, all_matches=True, verbose=True)
+X, y = importances.load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_path=sample_pkl_path, val_dict_pkl_path=None, training_set_name=training_set_name, all_matches=True, verbose=True)
 
 
 sample = pickle.load(open(sample_pkl_path, 'rb'))
