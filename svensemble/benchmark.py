@@ -980,7 +980,18 @@ if __name__ == "__main__":
         )
 
 
-# for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name unbiased --skip_filtering --perform_steps preprocess --additional_callsets survivor --verbose; done
-# for svtype in DEL INS DUP INV OTHER; do for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name unbiased --svtypes $svtype --perform_steps benchmark --verbose; done; done
+# General preprocess with survivor calls
+# for model_name in unbiased unbiased_GT; do for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name $model_name --skip_filtering --perform_steps preprocess --additional_callsets survivor --verbose; done; done; done
 #
-# for svtype in DEL INS DUP INV OTHER; do for sample_name in NA12878_30x; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name unbiased --svtypes $svtype --perform_steps benchmark --additional_callsets survivor --verbose; done; done
+# Run benchmark on the processed samples with default parameters on all sv types separately
+# for model_name in unbiased unbiased_GT; do for svtype in DEL INS DUP INV OTHER; do for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name $model_name --svtypes $svtype --perform_steps benchmark --additional_callsets survivor --verbose; done; done; done
+#
+# Run benchmark for separate sv types with minimum svlen 0. The only val set with such lower length is HG002
+# for model_name in unbiased unbiased_GT; do for svtype in DEL INS DUP INV OTHER; do for sample_name in HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name $model_name --svtypes $svtype --perform_steps benchmark --svlen_lower 0 --additional_callsets survivor --verbose; done; done; done
+#
+# Run benchmark for each sample without svtype filtering
+# for model_name in unbiased unbiased_GT; do for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name $model_name --perform_steps benchmark --additional_callsets survivor --verbose; done; done
+#
+#
+# Test benchmark on smallest sample
+# for model_name in unbiased unbiased_GT; do for svtype in DEL INS DUP INV OTHER; do for sample_name in NA12878_30x; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name $model_name --svtypes $svtype --perform_steps benchmark --additional_callsets survivor --verbose; done; done; done

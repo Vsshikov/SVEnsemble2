@@ -497,6 +497,8 @@ def match_sample_breakpoints(
     sample_name: str,
     sample_config: dict,
     ground_truth_sample_config: dict,
+    max_dist: int = 200,
+    insert_size_threshold: float = 0.7,
     verbose: bool = False
 ) -> None:
     """
@@ -554,8 +556,8 @@ def match_sample_breakpoints(
                 callset_name: bp_df_dict[callset_name] for callset_name in training_set_callsets + [reference_callset_name]
             },
             ref_callset=reference_callset_name,
-            insert_size_threshold=0.7,
-            max_dist=200
+            insert_size_threshold=insert_size_threshold,
+            max_dist=max_dist
         )
         if verbose:
             print(f"Matching complete. Matched breakpoints: {len(matched_bp_df)}")
@@ -666,6 +668,8 @@ def svensemble2(
     preprocess: bool = True,
     match: bool = True,
     train: bool = True,
+    match_max_dist: int = 100,
+    match_insert_size_threshold: float = 0.7,
     use_cached_preprocessed_truth: bool = False,
 ) -> dict:
     """
@@ -708,19 +712,19 @@ def svensemble2(
         # Parse and preprocess the samples
         for sample_name, sample_config in samples.items():
             if (sample_name != ground_truth_sample_name) or ((sample_name == ground_truth_sample_name) and preprpocess_truth):
-                parse_preprocess_sample(sample_name, sample_config, verbose)
+                parse_preprocess_sample(sample_name=sample_name, sample_config=sample_config, verbose=verbose)
 
     if match:
         # Match the breakpoints for each sample
         for sample_name, sample_config in samples.items():
             if sample_name != ground_truth_sample_name:
-                match_sample_breakpoints(sample_name, sample_config, samples[ground_truth_sample_name], verbose)
+                match_sample_breakpoints(sample_name=sample_name, sample_config=sample_config, ground_truth_sample_config=samples[ground_truth_sample_name], max_dist=match_max_dist, insert_size_threshold=match_insert_size_threshold, verbose=verbose)
 
     if train:
         # Train the PU models for each sample
         for sample_name, sample_config in samples.items():
             if sample_name != ground_truth_sample_name:
-                pu_train_predict_sample(sample_name, sample_config, samples[ground_truth_sample_name], verbose)
+                pu_train_predict_sample(sample_name=sample_name, sample_config=sample_config, ground_truth_sample_config=samples[ground_truth_sample_name], verbose=verbose)
 
 
 if __name__ == '__main__':

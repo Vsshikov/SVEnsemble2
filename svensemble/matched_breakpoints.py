@@ -272,7 +272,7 @@ def preprocess_matchedbps_for_pu(
         if training_df[column].dtype == 'object':
             try:
                 # Check if column contains True/False strings
-                if training_df[column].astype(str).str.contains(r'^(True|False)$', na=False).any():
+                if training_df[column].astype(str).isin(['True', 'False']).any():
                     vals = (
                         training_df[column]
                         .map({'True': True, 'False': False})
