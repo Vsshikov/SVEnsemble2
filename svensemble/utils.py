@@ -4,11 +4,19 @@ Utility functions for SVEnsemble
 
 import pandas as pd
 from pathlib import Path
-from collections import defaultdict
+from collections import defaultdict, abc
 from ._caller_params import caller_param_dict, training_set_presets, default_reference_set
 from ._sample_params import sample_val_sets, sample_val_set_template, default_model_name
 from ._model_configs import model_configs
 from typing import Dict, Any
+
+def update(d, u):
+    for k, v in u.items():
+        if isinstance(v, abc.Mapping):
+            d[k] = update(d.get(k, {}), v)
+        else:
+            d[k] = v
+    return d
 
 human_chroms = [f'chr{i}' for i in range(1, 23)] + ['chrX', 'chrY', 'chrM']
 

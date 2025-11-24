@@ -58,7 +58,8 @@ default_params = {
     'qual_metric': 'QUAL',
     'svlen_source': 'svlen',
     'bnd2_pos': 'svlen',
-    'svlens': default_sv_lens
+    'svlens': default_sv_lens,
+    'override_bps_path': False
 }
 # Default params for evnet notation in VCF
 default_event_params = default_params | {
@@ -237,8 +238,9 @@ delly_params = default_params | {
 
 survivor_params = default_event_params | {
     'source': 'survivor',
-    'bps_path': 'sv_calling/survivor/svensemble2/survivor_bps.csv',
-    'bnd2_pos': 'end'
+    'bps_path': 'sv_calling/survivor/svensemble2/survivor.bps.csv',
+    'bnd2_pos': 'end',
+    'override_bps_path': True
 }
 
 svensemble2_params = default_params | {

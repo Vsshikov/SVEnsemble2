@@ -7,7 +7,8 @@ from sklearn.ensemble import RandomForestClassifier as RF
 
 
 def train_unbiased_rf_for_split(
-    training_set_train_test_split: dict
+    training_set_train_test_split: dict,
+    **model_kwargs
 ) -> tuple[RF, np.ndarray] | tuple[None, None]:
     """
     Train an unbiased random forest model for a single training set using the Duplessis method.
@@ -21,6 +22,14 @@ def train_unbiased_rf_for_split(
             - RF_duplessis_fit: Trained RandomForestClassifier model.
             - y_duplessis: Predicted probabilities for the full set X.
     """
+    # Set default model kwargs.
+    # Rewrite/update if model_kwargs are supplied
+    _model_kwargs = {
+        'n_estimators': 500,
+        'max_depth': None
+    }
+    _model_kwargs.update(model_kwargs)
+
     X = training_set_train_test_split['X']
     y = training_set_train_test_split['y']
     X_train = training_set_train_test_split['X_train']
@@ -38,7 +47,7 @@ def train_unbiased_rf_for_split(
     rf_nontrad = RF(
         max_features=int(np.sqrt(X.shape[1])),
         random_state=0,
-        n_estimators=500
+        **_model_kwargs
     )
     rf_nontrad_fit = rf_nontrad.fit(X_train, y_train)
     y_nontrad = rf_nontrad_fit.predict(X_val)
@@ -56,7 +65,7 @@ def train_unbiased_rf_for_split(
         max_features=int(np.sqrt(X.shape[1])),
         random_state=0,
         class_weight=weight_dict,
-        n_estimators=500
+        **_model_kwargs
     )
 
     rf_duplessis_fit = rf_duplessis.fit(X_train, y_train)

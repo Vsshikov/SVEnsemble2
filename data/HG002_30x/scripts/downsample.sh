@@ -4,7 +4,21 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
+#SBATCH --mem=16G
 
-module load gatk samtools
+modules="gatk samtools"
+module purge
+module load ${modules}
 
-gatk DownsampleByDuplicateSet --fraction-to-keep 0.5 -I ../HG002/aligned/HG002.GRCh38.60x.1.bam -O aligned/HG002.GRCh38.30x.1.bam
+INPUT_SAMPLE_NAME=$1
+OUT_SAMPLE_NAME=$2
+DOWNSAMPLE_FACTOR=$3
+
+IN_BAM_PATH="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/${INPUT_SAMPLE_NAME}/aligned/${INPUT_SAMPLE_NAME}.bam"
+OUT_DIR="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/${OUT_SAMPLE_NAME}/aligned"
+
+OUT_BAM_PATH="${OUT_DIR}/${OUT_SAMPLE_NAME}.bam"
+
+echo "Downsampling $IN_BAM_PATH to $OUT_BAM_PATH"
+
+gatk DownsampleSam -I "$IN_BAM_PATH" -O "$OUT_BAM_PATH" -P $DOWNSAMPLE_FACTOR

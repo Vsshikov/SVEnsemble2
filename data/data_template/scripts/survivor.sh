@@ -38,15 +38,17 @@ CALLSET_PATHS=(
 # First unzip the gzipped files. They may still be in BCF format after unzipping
 CALLSET_PATHS_UNZIPPED=()
 echo "Unzipping gzipped files"
+n_unzipped=0
 for CALLSET_PATH in "${CALLSET_PATHS[@]}"; do
     if [[ $CALLSET_PATH == *.gz ]]; then
         gunzip -c $CALLSET_PATH > ${TEMP_VCF_DIR}/$(basename $CALLSET_PATH .gz)
         CALLSET_PATHS_UNZIPPED+=("${TEMP_VCF_DIR}/$(basename $CALLSET_PATH .gz)")
+        n_unzipped=$((n_unzipped + 1))
     else
         CALLSET_PATHS_UNZIPPED+=($CALLSET_PATH)
     fi
 done
-echo "Unzipping complete, now ${#CALLSET_PATHS_UNZIPPED[@]} files in temp directory"
+echo "Unzipping complete, now ${n_unzipped} files in temp directory"
 # Now iterate over CALLSET_PATHS_UNZIPPED and check for BCFs. If found, convert them to VCF
 CALLSET_PATHS_VCFS=()
 echo "Converting BCFs to VCFs"
@@ -58,7 +60,7 @@ for CALLSET_PATH in "${CALLSET_PATHS_UNZIPPED[@]}"; do
         CALLSET_PATHS_VCFS+=($CALLSET_PATH)
     fi
 done
-echo "Conversion complete, now ${#CALLSET_PATHS_VCFS[@]} files in temp directory"
+echo "Conversion complete, ${#CALLSET_PATHS_VCFS[@]} files ready for running survivor"
 
 
 # Write the callset paths to a file in the output directory

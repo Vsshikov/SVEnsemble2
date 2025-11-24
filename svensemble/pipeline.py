@@ -434,7 +434,10 @@ def parse_preprocess_sample(
         if callset_name in caller_dispatch.keys():
             bp_df = caller_dispatch[callset_name](sample_name, sample_config, verbose)
             bp_df = bps.common_bps_preprocess(bp_df, sample_config['callsets'][callset_name]['params'])
-            model_name = sample_config['model']['name']
+            model_name = sample_config['model']['bps_suffix']
+            # Create the svensemble_dir if it doesn't exist
+            if not sample_config['callsets'][callset_name]['svensemble_dir'].exists():
+                sample_config['callsets'][callset_name]['svensemble_dir'].mkdir(parents=True, exist_ok=True)
             bp_df.to_csv(sample_config['callsets'][callset_name]['svensemble_dir'] / f'{callset_name}.{model_name}.bps.csv', index=False)
         else:
             raise ValueError(f"Callset {callset_name} not supported")
@@ -446,7 +449,7 @@ def load_gridss_breakpoints(sample_config: dict) -> pd.DataFrame | None:
     if 'gridss' in sample_config.get('callsets', {}):
         gridss_bp_path = (
             sample_config['sample_dir'] /
-            'sv_calling' / 'gridss' / 'svensemble2' / f'gridss.{sample_config["model"]["name"]}.bps.csv'
+            'sv_calling' / 'gridss' / 'svensemble2' / f'gridss.{sample_config["model"]["bps_suffix"]}.bps.csv'
         )
         return pd.read_csv(gridss_bp_path)
     return None
@@ -457,7 +460,7 @@ def load_manta_candidate_breakpoints(sample_config: dict) -> pd.DataFrame | None
     if 'manta_candidate' in sample_config.get('callsets', {}):
         manta_candidate_bp_path = (
             sample_config['sample_dir'] /
-            'sv_calling' / 'manta' / 'svensemble2' / f'manta_candidate.{sample_config["model"]["name"]}.bps.csv'
+            'sv_calling' / 'manta' / 'svensemble2' / f'manta_candidate.{sample_config["model"]["bps_suffix"]}.bps.csv'
         )
         return pd.read_csv(manta_candidate_bp_path)
     return None
@@ -468,7 +471,7 @@ def load_manta_diploid_breakpoints(sample_config: dict) -> pd.DataFrame | None:
     if 'manta_diploid' in sample_config.get('callsets', {}):
         manta_diploid_bp_path = (
             sample_config['sample_dir'] /
-            'sv_calling' / 'manta' / 'svensemble2' / f'manta_diploid.{sample_config["model"]["name"]}.bps.csv'
+            'sv_calling' / 'manta' / 'svensemble2' / f'manta_diploid.{sample_config["model"]["bps_suffix"]}.bps.csv'
         )
         return pd.read_csv(manta_diploid_bp_path)
     return None
@@ -479,7 +482,7 @@ def load_delly_breakpoints(sample_config: dict) -> pd.DataFrame | None:
     if 'delly' in sample_config.get('callsets', {}):
         delly_bp_path = (
             sample_config['sample_dir'] /
-            'sv_calling' / 'delly' / 'svensemble2' / f'delly.{sample_config["model"]["name"]}.bps.csv'
+            'sv_calling' / 'delly' / 'svensemble2' / f'delly.{sample_config["model"]["bps_suffix"]}.bps.csv'
         )
         return pd.read_csv(delly_bp_path)
     return None
@@ -514,7 +517,7 @@ def match_sample_breakpoints(
     for callset_name, callset_config in sample_config['callsets'].items():
         if verbose:
             print(f"Loading breakpoints for callset '{callset_name}'...")
-        bp_df = pd.read_csv(callset_config['svensemble_dir'] / f'{callset_name}.{sample_config["model"]["name"]}.bps.csv', low_memory=False)
+        bp_df = pd.read_csv(callset_config['svensemble_dir'] / f'{callset_name}.{sample_config["model"]["bps_suffix"]}.bps.csv', low_memory=False)
         if verbose:
             print(f"Loaded {len(bp_df)} breakpoints for '{callset_name}'.")
 
@@ -562,7 +565,7 @@ def match_sample_breakpoints(
         if verbose:
             print(f"Matching complete. Matched breakpoints: {len(matched_bp_df)}")
         # Save matched breakpoints to CSV
-        output_csv_path = output_dir / f'{sample_name}.matched_bps.{training_set_name}.{sample_config["model"]["name"]}.csv'
+        output_csv_path = output_dir / f'{sample_name}.matched_bps.{training_set_name}.{sample_config["model"]["bps_suffix"]}.csv'
         if verbose:
             print(f"Saving matched breakpoints to: {output_csv_path}")
         matched_bp_df.to_csv(output_csv_path, index=False)
@@ -598,7 +601,7 @@ def pu_train_predict_sample(
             sample_config['sample_dir'] /
             'sv_calling' /
             'svensemble2' /
-            f'{sample_name}.matched_bps.{training_set_name}.{sample_config["model"]["name"]}.csv'
+            f'{sample_name}.matched_bps.{training_set_name}.{sample_config["model"]["bps_suffix"]}.csv'
         )
         if verbose:
             print(f"Loading joint breakpoints from: {joint_bp_path}")
@@ -638,7 +641,8 @@ def pu_train_predict_sample(
 
         if verbose:
             print(f"Training PU model for training set: {training_set_name}")
-        rf_fit, y_pred = models.train_unbiased_rf_for_split(training_set_splits)
+        model_kwargs = sample_config['model']['training_params']['model_kwargs']
+        rf_fit, y_pred = models.train_unbiased_rf_for_split(training_set_splits, **model_kwargs)
         # Ensure predictions are indexed like the input
         y_pred = pd.DataFrame(y_pred, index=training_set_splits['X_idx'])
         unbiased_dict[training_set_name] = {

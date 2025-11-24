@@ -22,11 +22,13 @@ parser = argparse.ArgumentParser(description="Compute SHAP values for SVEnsemble
 parser.add_argument("--training_set_name", type=str, default="delly+manta_candidate", help="Name of the training set to use")
 parser.add_argument("--sample_name", type=str, default="NA12878_30x", help="Name of the sample to use")
 parser.add_argument("--model_name", type=str, default="unbiased", help="Name of the model to use")
+parser.add_argument("--use_gpu", action="store_true", default=False, help="Whether to use GPU for computation")
 args = parser.parse_args()
 
 training_set_name = args.training_set_name
 sample_name = args.sample_name
 model_name = args.model_name
+use_gpu = args.use_gpu
 
 
 # Set working directory and sys.path for local svensemble module
@@ -66,8 +68,10 @@ X, y = importances.load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_pa
 sample = pickle.load(open(sample_pkl_path, 'rb'))
 model = sample['pred_dicts'][training_set_name]['RF_fit']
 
-
-explainer = shap.explainers.TreeExplainer(model, X)
+if use_gpu:
+    explainer = shap.explainers.GPUTreeExplainer(model, X)
+else:
+    explainer = shap.explainers.TreeExplainer(model, X)
 shap_values = explainer(X)
 
 out_dir = Path(f'/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/{sample_name}/sv_calling/svensemble2/shap_values')

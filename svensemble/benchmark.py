@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=64G
 
-
+import matplotlib as mpl
 from matplotlib import pyplot as plt
 import pandas as pd
 from sklearn.metrics import roc_curve
@@ -20,6 +20,9 @@ from copy import deepcopy
 from pathlib import Path
 import os
 import sys
+
+mpl.rcParams['pdf.fonttype'] = 42
+mpl.rcParams['ps.fonttype'] = 42
 
 
 
@@ -136,6 +139,205 @@ def get_plot_colors(n_callsets):
         colors = [None] * n_callsets  # Use default color cycle
     return colors
 
+xgfs_fancy6 = [(86, 100, 26), (192, 175, 251), (230, 161, 118), (0, 103, 138), (152, 68, 100), (94, 204, 171), (205, 205, 205)]
+# Convert to RGB tuples with 0-1 floats
+xgfs_fancy6 = [tuple(color / 255 for color in color_tuple) for color_tuple in xgfs_fancy6]
+_style_mappings = {
+    'gridss': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'GRIDSS',
+        },
+        'text': {
+            'label': 'GR',
+        }
+    },
+    'gridss_H': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 1,
+            'dashes': (2, 2),
+            'label': 'GRIDSS (High Confidence Calls)',
+        },
+        'text': {
+            'label': 'GR_H',
+        }
+    },
+    'svensemble2_gridss': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (GRIDSS)',
+        },
+        'text': {
+            'label': 'GR',
+        }
+    },
+    'manta_diploid': {
+        'line': {
+            'color': xgfs_fancy6[3],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'Manta',
+        },
+        'text': {
+            'label': 'MA',
+        }
+    },
+    'svensemble2_manta_diploid': {
+        'line': {
+            'color': xgfs_fancy6[3],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (Manta)',
+        },
+        'text': {
+            'label': 'MA',
+        }
+    },
+    'delly': {
+        'line': {
+            'color': xgfs_fancy6[2],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'Delly',
+        },
+        'text': {
+            'label': 'DE',
+        }
+    },
+    'svensemble2_delly': {
+        'line': {
+            'color': xgfs_fancy6[2],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (Delly)',
+        },
+        'text': {
+            'label': 'DE',
+        }
+    },
+    'survivor': {
+        'line': {
+            'color': xgfs_fancy6[1],
+            'linewidth': 1.5,
+            'label': 'SURVIVOR 2 out of 3 Consensus',
+        },
+        'text': {
+            'label': 'SU',
+        }
+    },
+    'svensemble2_delly+manta_diploid': {
+        'line': {
+            'color': xgfs_fancy6[4],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (Delly + Manta)',
+        },
+        'text': {
+            'label': 'DE+MA',
+        }
+    },
+    'svensemble2_gridss+manta_diploid': {
+        'line': {
+            'color': xgfs_fancy6[5],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (GRIDSS + Manta)',
+        },
+        'text': {
+            'label': 'GR+MA',
+        }
+    },
+    'svensemble2_gridss+manta_diploid+delly': {
+        'line': {
+            'color': xgfs_fancy6[6],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (GRIDSS + Manta + Delly)',
+        },
+        'text': {
+            'label': 'GR+MA+DE',
+        }
+    }
+}
+
+default_style_mapping = {
+    'line': {
+        'linewidth': 1
+    },
+    'text': {
+        'fontfamily': 'monospace',
+        'fontsize': 10,
+        'color': 'white',
+        'ha': 'center',
+        'va': 'top',
+        'bbox': {
+            'boxstyle': 'round,pad=0.2'
+        }
+    }
+}
+
+def get_style_mapping(callset, default_style_mapping=default_style_mapping):
+    _default_style_mapping = deepcopy(default_style_mapping)
+    if callset in _style_mappings:
+        style_mapping = sv_utils.update(_default_style_mapping, _style_mappings[callset])
+        style_mapping['text']['bbox']['ec'] = style_mapping['line']['color']
+        style_mapping['text']['bbox']['fc'] = style_mapping['line']['color']
+    else:
+        style_mapping = _default_style_mapping
+    return style_mapping
+
+# Create ordering for callsets. svensemble2 calls should always follow corresponding original callsets.
+# Svensemble ensemble calls should be last, survivor calls should be just before them
+# At the moment the ordering is manual
+_callset_order = [
+    'gridss',
+    'gridss_H',
+    'svensemble2_gridss',
+    'manta_diploid',
+    'svensemble2_manta_diploid',
+    'delly',
+    'svensemble2_delly',
+    'survivor',
+    'svensemble2_delly+manta_diploid',
+    'svensemble2_gridss+manta_diploid',
+    'svensemble2_gridss+manta_diploid+delly',
+]
+# def order_legend(plt, callsets):
+#     """
+#     Rearrange legend items by callset order
+#     """
+#     handles, labels = plt.gca().get_legend_handles_labels()
+#     plt.legend([handle for handle in ])
+def _ordered_callset_enumerate(callsets, callset_order):
+    """
+    Enumerate callsets in the order specified by callset_order
+    Any callsets not in callset_order are yielded last in the order they are found in callsets
+    """
+    yielded_callsets = []
+    for idx, callset in enumerate(callset_order):
+        if callset in callsets:
+            yielded_callsets.append(callset)
+            yield idx, callset
+    leftover_callsets = [callset for callset in callsets if callset not in yielded_callsets]
+    for idx, callset in enumerate(leftover_callsets):
+        yield len(callset_order) + idx, callset
+
+
+def style_svensemble_lines(line, callset):
+    # If svensemble2 in in the callset name, plot the curve normally
+    # Otherwise, plot a dotted line instead
+    style_mapping = get_style_mapping(callset)['line']
+    # line.set_color(style_mapping['color'])
+    # line.set_linewidth(style_mapping['linewidth'])
+    # line.set_dashes(dashes)
+    # line.set_dash_capstyle('round')
+    line.set(**style_mapping)
+
+
+def style_text(text: mpl.text.Text, callset):
+    style_mapping = get_style_mapping(callset)['text']
+    text.set(**style_mapping)
+
+
 def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None):
     """
     Plot ROC curves for multiple prediction arrays against corresponding truth series
@@ -156,10 +358,10 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None):
 
     callsets = list(sample_val_dict.keys())
     callsets.sort()
-    n_callsets = len(callsets)
-    colors = get_plot_colors(n_callsets)
+    # n_callsets = len(callsets)
+    # colors = get_plot_colors(n_callsets)
 
-    for idx, callset in enumerate(callsets):
+    for idx, callset in _ordered_callset_enumerate(callsets, _callset_order):
         callset_val_df = sample_val_dict[callset].dropna().copy()
 
         truth_series = callset_val_df['is_in_val']
@@ -186,7 +388,7 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None):
             tpr = tpr * total_tp
             fpr = fpr * total_tn
 
-        ax.plot(fpr, tpr, label=callset, color=colors[idx])
+        ax.plot(fpr, tpr, **get_style_mapping(callset)['line'])
 
     # Add a dotted diagonal line from (0, 0) to (total_tn, total_tp) if use_counts, else from (0, 0) to (1, 1)
     # if use_counts:
@@ -194,7 +396,7 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None):
     # else:
     #     ax.plot([0, 1], [0, 1], linestyle='--', color='grey', linewidth=1, label='Random')
 
-    ax.legend(loc=(1.1, 0.5))
+    ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5), frameon=False)
 
     xlabel = 'False Positives' if use_counts else 'False Positive Rate'
     ylabel = 'True Positives' if use_counts else 'True Positive Rate'
@@ -228,10 +430,10 @@ def plot_reverse_roc_curves(sample_val_dict, svtype=None, ax=None, use_counts=Tr
 
     callsets = list(sample_val_dict.keys())
     callsets.sort()
-    n_callsets = len(callsets)
-    colors = get_plot_colors(n_callsets)
+    # n_callsets = len(callsets)
+    # colors = get_plot_colors(n_callsets)
 
-    for idx, callset in enumerate(callsets):
+    for idx, callset in _ordered_callset_enumerate(callsets, _callset_order):
         callset_val_df = sample_val_dict[callset].dropna().copy()
 
         if filter_pass and 'FILTER_PASS' in sample_val_dict[callset].columns:
@@ -278,9 +480,9 @@ def plot_reverse_roc_curves(sample_val_dict, svtype=None, ax=None, use_counts=Tr
             reverse_fp = 1/fp_no_zeros
             tp_fp = tp_no_zeros/fp_no_zeros
 
-            ax.plot(reverse_fp, tp_fp, label=callset, color=colors[idx])
+            ax.plot(reverse_fp, tp_fp, **get_style_mapping(callset)['line'])
         else:
-            ax.plot(fpr, tpr, label=callset, color=colors[idx])
+            ax.plot(fpr, tpr, **get_style_mapping(callset)['line'])
 
     # Add a dotted diagonal line from (0, 0) to (total_tn, total_tp) if use_counts, else from (0, 0) to (1, 1)
     # if use_counts:
@@ -288,7 +490,7 @@ def plot_reverse_roc_curves(sample_val_dict, svtype=None, ax=None, use_counts=Tr
     # else:
     #     ax.plot([0, 1], [0, 1], linestyle='--', color='grey', linewidth=1, label='Random')
 
-    ax.legend(loc=(1.1, 0.5))
+    ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5), frameon=False)
 
     xlabel = '1/FP'
     ylabel = 'TP/FP'
@@ -299,36 +501,78 @@ def plot_reverse_roc_curves(sample_val_dict, svtype=None, ax=None, use_counts=Tr
     return ax
 
 
-def plot_precision_recall_curves(sample_val_dict, ax=None, use_counts=True):
+def plot_precision_recall_curves(sample_val_dict, ax=None, use_counts=True, title=None, svensemble2_cutoff=None):
     """
     Plot precision-recall curves for multiple prediction arrays against corresponding truth series
 
     Args:
         sample_val_dict: Dictionary containing callset names as keys and dataframes with a prediction metric as 2nd column and a truth column as "is_in_val"
         ax: matplotlib axis to plot the precision-recall curves on
-        use_counts: Whether to plot the precision-recall curves as counts or rates
+        use_counts: Whether to plot curves as counts or rates
+        title: Title for the plot
 
     Returns:
         matplotlib axis with plotted precision-recall curves
     """
     if ax is None:
-        fig, ax = plt.subplots(figsize=(4,4))
+        fig, ax = plt.subplots(figsize=(8, 8))
 
-    for callset in sample_val_dict.keys():
-        callset_val_df = sample_val_dict[callset].dropna()
+    callsets = list(sample_val_dict.keys())
+    callsets.sort()
+    # n_callsets = len(callsets)
+    # colors = get_plot_colors(n_callsets)
+
+    for idx, callset in _ordered_callset_enumerate(callsets, _callset_order):
+        callset_val_df = sample_val_dict[callset].dropna().copy()
         truth_series = callset_val_df['is_in_val']
+        if sum(truth_series) == 0:
+            print(f'{callset} has no true positives, skipping')
+            continue
+        elif sum(truth_series) == len(truth_series):
+            print(f'{callset} has no true negatives, skipping')
+            continue
         pred_series = callset_val_df.iloc[:, 1]
+
         precision, recall, thresholds = precision_recall_curve(truth_series, pred_series, pos_label=True)
 
-        ax.scatter(recall, precision, label=callset, s=[3]*len(recall))
+        total_tp = sum(truth_series)
+        total_fn = len(truth_series) - total_tp
 
-    ax.legend(loc=(1.1, 0.5))
+        if use_counts:
+            tp = recall * total_tp
+            # fp = tp * (1 / precision - 1)
+            zeros_mask = (tp == 0)
+            tp_no_zeros = tp[~zeros_mask]
+            precision_no_zeros = precision[~zeros_mask]
+            # Plot: x = tp count, y = precision as count ratio (tp / (tp+fp))
+            tp_metric = tp_no_zeros
+            precision_metric = precision_no_zeros
+        else:
+            tp_metric = recall
+            precision_metric = precision
 
-    xlabel = 'Recall'
+        ax.plot(tp_metric, precision_metric, **get_style_mapping(callset)['line'])
+
+        text_label = callset if callset not in _style_mappings else _style_mappings[callset]['text']['label']
+        ax.text(tp_metric[0], precision_metric[0], text_label, **get_style_mapping(callset)['text'])
+
+        # If svensemble2_cutoff is present, add a point to the curve at the svensemble2_cutoff
+        if (svensemble2_cutoff is not None) and ('svensemble2' in callset):
+            # Get threshold index for svensemble2_cutoff
+            threshold_idx = np.argmin(np.abs(thresholds - svensemble2_cutoff))
+            # Add a point to the curve at the threshold index
+            ax.plot(tp_metric[threshold_idx], precision_metric[threshold_idx], 'o', color=get_style_mapping(callset)['line']['color'])
+
+
+    ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5), frameon=False)
+
+    xlabel = 'Recall' if not use_counts else 'TP count'
     ylabel = 'Precision'
 
     plt.xlabel(xlabel, size='large', weight=700)
     plt.ylabel(ylabel, size='large', weight=700)
+    if title:
+        plt.title(title, size='large', weight=700)
 
     return ax
 
@@ -603,8 +847,13 @@ def preprocess_sample_for_benchmark(
         sample_name,
         training_sets=training_sets,
         val_set='use_name',
+        model_name=model_name,
         additional_callsets=additional_callsets
     )[sample_name]
+
+    bps_suffix = sample['model']['bps_suffix']
+    matched_bps_suffix = sample['model']['matched_bps_suffix']
+    model_pkl_suffix = sample['model']['model_pkl_suffix']
 
     # Prepare a blank matched_bps dict per training set
     sample['matched_bps'] = {
@@ -614,10 +863,13 @@ def preprocess_sample_for_benchmark(
 
     # Load original callset breakpoints tables
     for callset_name in sample['callsets']:
-        callset_bps_path = (
-            sample["callsets"][callset_name]["svensemble_dir"] /
-            f"{callset_name}.{model_name}.bps.csv"
-        )
+        if sample['callsets'][callset_name]['params']['override_bps_path']:
+            callset_bps_path = sample['sample_dir'] / sample['callsets'][callset_name]['params']['bps_path']
+        else:
+            callset_bps_path = (
+                sample["callsets"][callset_name]["svensemble_dir"] /
+                f"{callset_name}.{bps_suffix}.bps.csv"
+            )
         sample['callsets'][callset_name]['bps'] = pd.read_csv(callset_bps_path, low_memory=False)
 
     # Load matched breakpoints tables for each training set
@@ -626,7 +878,7 @@ def preprocess_sample_for_benchmark(
             sample['sample_dir']
             / 'sv_calling'
             / 'svensemble2'
-            / f'{sample_name}.matched_bps.{training_set_name}.{model_name}.csv'
+            / f'{sample_name}.matched_bps.{training_set_name}.{matched_bps_suffix}.csv'
         )
         # Read CSV into DataFrame
         sample['matched_bps'][training_set_name] = pd.read_csv(
@@ -638,7 +890,7 @@ def preprocess_sample_for_benchmark(
         sample['sample_dir']
         / 'sv_calling'
         / 'svensemble2'
-        / f'{sample_name}.{model_name}.model_dict.pkl'
+        / f'{sample_name}.{model_pkl_suffix}.model_dict.pkl'
     )
     with open(unbiased_dict_path, 'rb') as f:
         sample['pred_dicts'] = pickle.load(f)
@@ -818,10 +1070,12 @@ def benchmark_sample(
         additional_callsets=additional_callsets
     )[sample_name]
 
+    bench_preprocessed_basename = f"{sample_name}.{model_name}.bench_preprocessed.pkl"
+
     # Load filtered sample .pkl with SVEnsemble2 runs in the `svensemble2_calls` dictionary, etc.
     sample_path = (
         sample_dict["sample_dir"] / "sv_calling" / "svensemble2" /
-        f"{sample_name}.{model_name}.bench_preprocessed.pkl"
+        bench_preprocessed_basename
     )
     with open(sample_path, "rb") as f:
         sample = pickle.load(f)
