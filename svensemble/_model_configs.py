@@ -38,6 +38,17 @@ model_configs = {
         'bps_suffix': 'unbiased_GT',
         'matched_bps_suffix': 'unbiased_GT',
         'description': 'Unbiased random forest model for SV call probability estimation with extra genotyping step for all input callsets. Model with max depth 31 so GPUTreeExplainer can be used.'
+    },
+    'unbiased_cross_train_NA12878': {
+        'name': 'unbiased_cross_train_NA12878',
+        'training_params': {
+            'function': 'unbiased',
+            'custom_cols': [],
+            'model_kwargs': {}
+        },
+        'bps_suffix': 'unbiased',
+        'matched_bps_suffix': 'unbiased_cross_train_NA12878',
+        'description': 'Unbiased random forest model for SV call probability estimation with cross-training on NA12878.'
     }
 }
 

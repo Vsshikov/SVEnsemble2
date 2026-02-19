@@ -12,11 +12,11 @@ sample_val_sets = {
         'name': 'kosugi',
         'path': Path(f'data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bps.csv')
     },
-    'NA12878_30x': {
+    'NA12878_5x': {
         'name': 'kosugi',
         'path': Path(f'data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bps.csv')
     },
-    'NA12878_50x': {
+    'NA12878_8x': {
         'name': 'kosugi',
         'path': Path(f'data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bps.csv')
     },
@@ -35,5 +35,9 @@ sample_val_sets = {
     'HG002_30x': {
         'name': 'hg002_val',
         'path': Path(f'data/HG002_validation/HG002_validation.bps.csv')
+    },
+    'HG00514': {
+        'name': 'hg00514_val',
+        'path': Path(f'data/HG00514_validation/HG00514_validation.bps.csv')
     }
 }

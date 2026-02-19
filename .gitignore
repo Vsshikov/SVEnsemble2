@@ -83,6 +83,7 @@ work/
 downloads/*
 !downloads/scripts/
 */data/
+data/
 */saved/
 */output/
 SVEnsemble.stornext/*
@@ -96,6 +97,9 @@ sv_calling/
 utils/bazam/
 utils/minimap/
 utils/shap-0.49.1/
+utils/shap-master/
+utils/envs/
+utils/apache-ant-1.10.15/
 
 # Specific files
 pkg/gridss-2.13.2.tar
@@ -104,3 +108,4 @@ pkg/gridss-2.13.2.tar
 data/HG002/wget-log
 data/HG002/data/wget-log
 UNKNOWN.egg-info/PKG-INFO
+sv_benchmark/funcs.R

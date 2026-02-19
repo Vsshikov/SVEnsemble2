@@ -1,21 +1,152 @@
-- change pipeline to create separate matched_bps files for each training set
-- change preprocess_sample_for_pu func to preprocess_training_set_for_pu which will
-  only return 1 item with full preprocessed set
-
-F1 scores???
-Justin suggestion: 1/FP vs TP/FP, play with scales
-
-Rewrite unbiased_dict to be saved with {model_name}_dict.pkl architecture + importances and other downstream scripts to accomodate
 
 
-delly preprocessing:
-BOTH:
-- ensure there are no iterable variables
-- create universal CHR2 variable, not just for cases where there are 2 chrs in an SV
-- check SAMPLE entries for weirdness
-EVTS:
-- split CIPOS/CIEND
-- ensure SVLEN is integer and there are no NaNs
-- create INFO_EVENT variable
-BNDS:
-- split CIPOS, drop CIEND
+Task marks:
+D: for discussion
+C: complete
+P: work in progress
+N: not started
+
+Complete tasks for discussion:
+- D! transposons - do we keep them in validation or not?
+
+
+
+TODO:
+
+Look at SVLENs. Possible explanations for SVLEN importance:
+- SVs that are too long/short classified as erroneous
+- SVs from different chroms (SVLEN=0) classified as erroneous
+- ??? something else ???
+
+Talked with Jinjin, interesting observations. Most likely some class effects/feature interactions. Should split the set in some ways, look how it is then.
+Also possible to set thresholds on feature values, not just use means, may help
+
+Best solution? pick random/pick lowest/mean
+For gridss add filter pass/fail indication, label all calls
+
+
+TONY MEETING 24 Oct 2025:
+
+Order shap vals by max, look. Try some feature engineering
+
+Read about mapq - what is it?
+
+Compare read qual metrics vs mapping qual metrics. May be differenty in importances
+
+Other thing to consider (later): what after calling filtering people do for somatic (maybe germline too) - find papers.
+
+We may create ground truth from consensus calls - use it for pu later. COHORTS!!!
+
+
+TODO from the meeting:
+PRIORITY:
+DEBUG GENOTYPING. WHY DOES IT INCORRECTLY CLASSIFY INS?
+ENSURE DELS ARE CORRECT - COMPARE INFERRED AND ORIGINAL SVTYPES
+SOLVED - WAS INCORRECT FOR MANTA CALLSETS ONLY DUE TO INCORRECT BND2 COORD ASSIGNMENTS. REVIEW AFTER CALCS TO SEE IF CORRECT.
+
+1. DONE Wrap up svensemble2 calling + bench into single script. Streamline var/file names, settle on convention. Consider following steps when doing so
+    - add cache parameter to prevent rerun of script parts that were not changed.
+    - create a separate bench script to accept a sample+model name and sv types to include + SV lens
+
+2. DONE GTyping + QUAL metric from GRIDSS - adjust parameters, rerun
+    PRIORITY:
+    - add a new class of training columns - CUSTOM_{col_name}. Should be associated with a function to calculate that col
+    - CUSTOM cols will be added during preprocessing step
+    Need a way to store data. Save with a different name from start or modify? - Saving from the start for now. Disc usage? Irrelevant for finished product + Milton is big enought for now.
+
+3. DONE Create data template, data template contents:
+    /data/{sample_name}/
+        scripts/
+            download.sh
+            minimap.sh
+            gridss.sh
+            manta.sh
+            delly.sh
+            survivor.sh
+            downsample.sh (uses and external file name as input, saves into raw/)
+            preprocess.sh (may string together several scripts. Moves files from download to raw if needed, sorts/merges multiple files if needed. If needed can revert a bam file to fastq)
+        logs/ (scripts are submitted to slurm from here)
+        downloads/ (buffer for the downloaded files)
+        raw/ (input for the preprocessing file here)
+        preprocessed/ (the output of the preprocess.sh is stored here)
+        aligned/ (the output of minimap.sh is stored here)
+        sv_calling/
+            sv caller dirs/
+            svensemble2/
+4. DONE Run SURVIVOR for each of the samples, integrate into pipeline.
+    SURVIVOR integration steps:
+    - look at what features to load from vcfs
+    - maybe feasible to train the model on some? not sure
+    - run the benchmarking, debug. should have another ROC curve. FIND QUAL metric. What to do if no QUAL/similar thing?
+5. Han cell line
+    - find the file for the line.
+        - check the coverage, record.
+    - create empty dir from template.
+    - follow steps from 3.
+    - run callers: gridss, manta, delly, survivor
+    - run svensemble2 calling + bench
+6. Features
+    - feature engineering: get list of candidates for merging.
+    - look at candidates for turning into binary features
+    - for next meeting can present only prelim results. Try at least SVLEN and MAPQ. Find some other interesting one. Read quality metric is a good candidate
+7. See how the match distance affects validation. Get plot with match distance vs num of matches - what form will it take? discuss.
+
+The bps file may be in the process of being saved by one of the scripts while another one is trying to read it. Leading to possibly reading an empty file. Need to fix but later.
+Put a patch on this for now.
+
+Need to create a procedure for adding new callers so I know what steps to take and have a list to go through when adding them.
+
+
+look at overlaps between manta diploid and gridss
+handle sv sizes as some val sets dont have small svs
+make a slide with my gtyping
+
+added option to save additional cols during benchmark into val_df
+
+Notes on val sets:
+Huddleston2016 for CHM13 (huddleston):
+    - >=50 SVLEN
+    - 20516 bps
+GIAB for HG002 (hg002_val):
+    - min len - 20bp
+    - 89995 bps
+Kosugi for NA12878 (kosugi):
+    - >50 SVLEN
+    - 24089 bps
+!!! In gnomAD the dataset only contains svs over 50 bp in length
+So, create a supplementary short SV update??? Will take some work.
+
+Create a toy callset with ~100 TPs of all types for each caller + 100 TNs of all types for each caller for sanity checks
+
+do 50x NA12878
+try log axes
+
+
+T2T reference - how it will interact with low depth thing. Also look at ...?
+
+Test model trained on 1 sample on another sample - will there be any difference? What if no difference?
+
+Introduce a per-callset tresholds to matching algorithm
+
+Goals for nex year:
+- For project: finalize germline within first ~2-3 months - add a meachanism for integrating cell lines/trios in benchmarking and analyze at least 3 cell lines with long read seq, move on to somatic
+- Write and publish a paper.
+- Find and participate in internship at biotech or tech company.
+- Get elected for WESA or another leadership position
+
+Jumar - incubator, look into it.
+Brain matrix startup - interesting.
+Deep learning for toxicity prediction???
+
+create a slide with differences
+
+778 cell line with short reads and long reads. Short reads are for only chr 12. Super messed up. Added chrs 22 and some others.
+Do decoys matter - ask
+
+LONG READS
+Goal - create pipeline which will accept short+long read fqs + ref genome, perform variant calling from both and then use long reads for benchmarking.
+In the future - merge long/short reads and/or improve either short/long reads standalone. Will require a bench set for this.
+
+Load LR fqs.
+Callers: Sniffles2, what else?
+Matching to short read data - different representation

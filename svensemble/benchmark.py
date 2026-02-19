@@ -387,6 +387,9 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None):
             # Convert rates to counts
             tpr = tpr * total_tp
             fpr = fpr * total_tn
+        else:
+            ax.set_ylim(0, 1)
+            ax.set_xlim(0, 1)
 
         ax.plot(fpr, tpr, **get_style_mapping(callset)['line'])
 
@@ -477,12 +480,13 @@ def plot_reverse_roc_curves(sample_val_dict, svtype=None, ax=None, use_counts=Tr
             tp_no_zeros = tp[~zeros_mask]
             fp_no_zeros = fp[~zeros_mask]
 
-            reverse_fp = 1/fp_no_zeros
-            tp_fp = tp_no_zeros/fp_no_zeros
-
-            ax.plot(reverse_fp, tp_fp, **get_style_mapping(callset)['line'])
+            fp_metric = 1/fp_no_zeros
+            tp_fp_metric = tp_no_zeros/fp_no_zeros
         else:
-            ax.plot(fpr, tpr, **get_style_mapping(callset)['line'])
+            fp_metric = fpr
+            tp_fp_metric = tpr
+
+        ax.plot(fp_metric, tp_fp_metric, **get_style_mapping(callset)['line'])
 
     # Add a dotted diagonal line from (0, 0) to (total_tn, total_tp) if use_counts, else from (0, 0) to (1, 1)
     # if use_counts:
@@ -547,9 +551,12 @@ def plot_precision_recall_curves(sample_val_dict, ax=None, use_counts=True, titl
             # Plot: x = tp count, y = precision as count ratio (tp / (tp+fp))
             tp_metric = tp_no_zeros
             precision_metric = precision_no_zeros
+            ax.set_ylim(0, 1)
         else:
             tp_metric = recall
             precision_metric = precision
+            ax.set_ylim(0, 1)
+            ax.set_xlim(0, 1)
 
         ax.plot(tp_metric, precision_metric, **get_style_mapping(callset)['line'])
 
@@ -732,6 +739,47 @@ def preprocess_chm13_val_set(sample, vcf_path, force_rerun=False):
         result_bps.to_csv(out_path, index=False)
 
 
+def preprocess_hg00514_val_set(sample, vcf_path, force_rerun=False):
+    """
+    Preprocess the HG00514 validation set, converting to VCF-like breakpoints and saving as CSV.
+    """
+    out_path = Path(sample['val_set']['path'])
+
+    if not out_path.exists() or force_rerun:
+        hg00514_vcf_df = pd.read_csv(vcf_path, low_memory=False)
+        hg00514_vcf_df = hg00514_vcf_df[hg00514_vcf_df['Variant Samples'] == 'HG00514']
+        hg00514_svtype_mapping = {
+            'insertion': 'INS',
+            'deletion': 'DEL',
+            'duplication': 'DUP',
+            'inversion': 'INV',
+            'translocation': 'TRA',
+            'complex': 'COMPLEX'
+        }
+
+        hg00514_vcf_df = hg00514_vcf_df[
+            (hg00514_vcf_df['Variant Samples'] == 'HG00514') &\
+            (hg00514_vcf_df['Assembly Name'] == 'GRCh38 (hg38)') &\
+            (hg00514_vcf_df['Method'].isin(['Sequencing', 'Merging'])) &\
+            (hg00514_vcf_df['Variant Call type'].isin(hg00514_svtype_mapping.keys()))
+        ]
+        hg00514_vcf_df.loc[:, 'CHROM'] = 'chr' + hg00514_vcf_df['Chromosome']
+        hg00514_vcf_df.loc[:, 'INFO_CHR2'] = 'chr' + hg00514_vcf_df['Chromosome']
+        hg00514_vcf_df.loc[:, 'POS'] = hg00514_vcf_df['Start']
+        hg00514_vcf_df.loc[:, 'END'] = hg00514_vcf_df['End']
+        hg00514_vcf_df.loc[:, 'INFO_CIPOS_l'] = hg00514_vcf_df['Outer Start'].fillna(hg00514_vcf_df['Start']).astype(int) - hg00514_vcf_df['Start']
+        hg00514_vcf_df.loc[:, 'INFO_CIPOS_r'] = hg00514_vcf_df['Inner Start'].fillna(hg00514_vcf_df['Start']).astype(int) - hg00514_vcf_df['Start']
+        hg00514_vcf_df.loc[:, 'INFO_CIEND_l'] = hg00514_vcf_df['Inner End'].fillna(hg00514_vcf_df['End']).astype(int) - hg00514_vcf_df['End']
+        hg00514_vcf_df.loc[:, 'INFO_CIEND_r'] = hg00514_vcf_df['Outer End'].fillna(hg00514_vcf_df['End']).astype(int) - hg00514_vcf_df['End']
+        hg00514_vcf_df.loc[:, 'INFO_EVENT'] = hg00514_vcf_df['Variant ID']
+        hg00514_vcf_df.loc[:, 'ID'] = hg00514_vcf_df['Variant ID']
+        hg00514_vcf_df.loc[:, 'INFO_SVLEN'] = np.abs(hg00514_vcf_df['End'] - hg00514_vcf_df['Start'])
+        hg00514_vcf_df.loc[:, 'INFO_SVTYPE'] = hg00514_vcf_df['Variant Call type'].map(hg00514_svtype_mapping)
+
+        hg00514_bp_df = bnds.bnd_to_bp(evts.event_to_bnd(hg00514_vcf_df))
+        hg00514_bp_df.to_csv(out_path, index=False)
+
+
 def preprocess_huddleston_val_set(sample, vcf_path, force_rerun=False):
     """
     Preprocess the Huddleston CHM13 validation set, converting to VCF-like breakpoints and saving as CSV.
@@ -791,6 +839,7 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
         cols_to_keep.extend([col for col in additional_cols if ((col not in cols_to_keep) and (col in callset_bps_.columns))])
 
     return callset_bps_.loc[callset_bps_['INFO_EVENT'].notna(), cols_to_keep]
+
 
 
 def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name, model_name, val_match_margin=1000, additional_cols: None | List[str] = None, verbose=True):

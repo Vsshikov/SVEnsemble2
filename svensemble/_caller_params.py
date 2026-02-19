@@ -92,6 +92,15 @@ training_set_presets = {
         'manta_diploid': ['manta_diploid'],
         'gridss+manta_candidate': ['gridss', 'manta_candidate'],
         'gridss+manta_diploid': ['gridss', 'manta_diploid']
+    },
+    'minimal': {
+        'gridss': ['gridss'],
+        'manta_diploid': ['manta_diploid'],
+        'delly': ['delly'],
+        'gridss+manta_diploid': ['gridss', 'manta_diploid'],
+        'gridss+delly': ['gridss', 'delly'],
+        'gridss+manta_diploid+delly': ['gridss', 'manta_diploid', 'delly'],
+        'delly+manta_diploid': ['delly', 'manta_diploid']
     }
 }
 
@@ -262,6 +271,11 @@ hg002_params = default_params | {
     'svlen_source': 'svlen'
 }
 
+hg00514_params = default_params | {
+    'info_cols_mandatory': ['SVTYPE', 'SVLEN'],
+    'svlen_source': 'svlen'
+}
+
 huddleston_params = default_params | {
     'base_cols': base_cols + ['INFO_END'],
     'info_cols_mandatory': ['SVTYPE', 'SVLEN'],
@@ -285,6 +299,7 @@ caller_param_dict = {
     'chm13_val': chm13_params,
     'hg002_val': hg002_params,
     'huddleston': huddleston_params,
+    'hg00514_val': hg00514_params,
     'survivor': survivor_params
 }
 
