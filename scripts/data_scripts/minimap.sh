@@ -23,8 +23,9 @@ module load ${modules}
 output_bam="$SAMPLE_DIR/aligned/${SAMPLE_NAME}.minimap.bam"
 
 $MINIMAP2_PATH -t 16 -ax sr $REF_FASTA $READS1_PATH $READS2_PATH | samtools sort -@16 -o $output_bam -
+samtools index $output_bam
 
-# Prevent job from finishing until the bam file can be found
-while [ ! -f "$output_bam" ]; do
+# Prevent job from finishing until the bam and index files can be found
+while [ ! -f "$output_bam" ] || [ ! -f "$output_bam.bai" ]; do
     sleep 5s
 done

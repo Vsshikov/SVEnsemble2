@@ -41,3 +41,9 @@ fi
 echo "Using minimap2 preset for long reads: $RESOLVED_PRESET"
 
 $MINIMAP2_PATH -t 16 -ax "$RESOLVED_PRESET" $REF_FASTA "${READS_LONG_PATHS[@]}" | samtools sort -@16 -o $OUT_BAM -
+samtools index $OUT_BAM
+
+# Prevent job from finishing until the bam and index files can be found
+while [ ! -f "$OUT_BAM" ] || [ ! -f "$OUT_BAM.bai" ]; do
+    sleep 5s
+done
