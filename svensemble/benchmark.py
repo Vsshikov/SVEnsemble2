@@ -1,11 +1,11 @@
 #! /usr/bin/env python3
 
 #SBATCH --job-name=svensemble2_benchmark
-#SBATCH --output=svensemble2_benchmark.out
-#SBATCH --error=svensemble2_benchmark.err
+#SBATCH --output=logs/benchmark/svensemble2_benchmark.%j.out
+#SBATCH --error=logs/benchmark/svensemble2_benchmark.%j.err
 #SBATCH --time=10:00:00
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=64G
+#SBATCH --mem=8G
 
 import matplotlib as mpl
 from matplotlib import pyplot as plt
@@ -163,6 +163,17 @@ _style_mappings = {
         },
         'text': {
             'label': 'GR_H',
+        }
+    },
+    'gridss_H_lazy': {
+        'line': {
+            'color': tuple([c * 1.2 for c in xgfs_fancy6[0] if c * 1.2 < 1]),
+            'linewidth': 1,
+            'dashes': (2, 2),
+            'label': 'GRIDSS (High Confidence Calls, Lazy Loading)',
+        },
+        'text': {
+            'label': 'GR_H_lazy',
         }
     },
     'svensemble2_gridss': {
@@ -338,7 +349,7 @@ def style_text(text: mpl.text.Text, callset):
     text.set(**style_mapping)
 
 
-def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None):
+def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None, verbose=False):
     """
     Plot ROC curves for multiple prediction arrays against corresponding truth series
 
@@ -366,10 +377,12 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None):
 
         truth_series = callset_val_df['is_in_val']
         if sum(truth_series) == 0:
-            print(f'{callset} has no true positives, skipping')
+            if verbose:
+                print(f'{callset} has no true positives, skipping')
             continue
         elif sum(truth_series) == len(truth_series):
-            print(f'{callset} has no true negatives, skipping')
+            if verbose:
+                print(f'{callset} has no true negatives, skipping')
             continue
         pred_series = callset_val_df.iloc[:, 1]
 
@@ -505,7 +518,7 @@ def plot_reverse_roc_curves(sample_val_dict, svtype=None, ax=None, use_counts=Tr
     return ax
 
 
-def plot_precision_recall_curves(sample_val_dict, ax=None, use_counts=True, title=None, svensemble2_cutoff=None):
+def plot_precision_recall_curves(sample_val_dict, ax=None, use_counts=True, title=None, svensemble2_cutoff=None, n_truth=None, verbose=False):
     """
     Plot precision-recall curves for multiple prediction arrays against corresponding truth series
 
@@ -514,6 +527,9 @@ def plot_precision_recall_curves(sample_val_dict, ax=None, use_counts=True, titl
         ax: matplotlib axis to plot the precision-recall curves on
         use_counts: Whether to plot curves as counts or rates
         title: Title for the plot
+        n_truth: Total number of truth variants in the validation set. When provided
+            and use_counts=True, a secondary x-axis showing recall (TP / n_truth) is
+            drawn on top of the plot.
 
     Returns:
         matplotlib axis with plotted precision-recall curves
@@ -530,17 +546,18 @@ def plot_precision_recall_curves(sample_val_dict, ax=None, use_counts=True, titl
         callset_val_df = sample_val_dict[callset].dropna().copy()
         truth_series = callset_val_df['is_in_val']
         if sum(truth_series) == 0:
-            print(f'{callset} has no true positives, skipping')
+            if verbose:
+                print(f'{callset} has no true positives, skipping')
             continue
         elif sum(truth_series) == len(truth_series):
-            print(f'{callset} has no true negatives, skipping')
+            if verbose:
+                print(f'{callset} has no true negatives, skipping')
             continue
         pred_series = callset_val_df.iloc[:, 1]
 
         precision, recall, thresholds = precision_recall_curve(truth_series, pred_series, pos_label=True)
 
         total_tp = sum(truth_series)
-        total_fn = len(truth_series) - total_tp
 
         if use_counts:
             tp = recall * total_tp
@@ -561,7 +578,8 @@ def plot_precision_recall_curves(sample_val_dict, ax=None, use_counts=True, titl
         ax.plot(tp_metric, precision_metric, **get_style_mapping(callset)['line'])
 
         text_label = callset if callset not in _style_mappings else _style_mappings[callset]['text']['label']
-        ax.text(tp_metric[0], precision_metric[0], text_label, **get_style_mapping(callset)['text'])
+        text_style = {k: v for k, v in get_style_mapping(callset)['text'].items() if k != 'label'}
+        ax.text(tp_metric[0], precision_metric[0], text_label, **text_style)
 
         # If svensemble2_cutoff is present, add a point to the curve at the svensemble2_cutoff
         if (svensemble2_cutoff is not None) and ('svensemble2' in callset):
@@ -581,7 +599,51 @@ def plot_precision_recall_curves(sample_val_dict, ax=None, use_counts=True, titl
     if title:
         plt.title(title, size='large', weight=700)
 
+    if use_counts and n_truth is not None:
+        ax2 = ax.twiny()
+        x_min, x_max = ax.get_xlim()
+        ax2.set_xlim(x_min / n_truth, x_max / n_truth)
+        ax2.xaxis.set_major_formatter(
+            plt.FuncFormatter(lambda v, _: f'{v * 100:.0f}%')
+        )
+        ax2.set_xlabel('Recall', size='large', weight=700)
+        ax.figure.tight_layout()
+
     return ax
+
+
+def get_truth_count(
+    sample_name: str,
+    svtypes: list[str] | None = None,
+    svlens: tuple[float, float] = (50, np.inf),
+    val_set_path: str | None = None,
+    val_set_name: str | None = None,
+) -> int:
+    """Return the number of truth variants that survive the svtype/svlen filter.
+
+    Args:
+        sample_name: Sample name (key in sample_val_sets, e.g. 'NA12878').
+        svtypes: List of SV types to include.  Defaults to the sample meta svtypes.
+        svlens: (min, max) SVLEN range.  Defaults to (50, inf).
+        val_set_path: Override path to truth BPS CSV.
+        val_set_name: Override caller-param source name for annotation.
+
+    Returns:
+        Integer count of truth variants passing the filter.
+    """
+    from .utils import sample_val_sets
+    from . import breakpoints as bps_mod
+
+    if val_set_path is None or val_set_name is None:
+        sample_cfg = sample_val_sets[sample_name]
+        val_set_path = val_set_path or sample_cfg['path']
+        val_set_name = val_set_name or sample_cfg['name']
+        if svtypes is None:
+            svtypes = sample_cfg.get('meta', {}).get('svtypes')
+
+    truth = pd.read_csv(val_set_path)
+    truth_filtered = bps_mod.svlen_svtype_filter(truth, val_set_name, svtypes=svtypes, svlens=svlens)
+    return len(truth_filtered)
 
 
 def preprocess_hg002_val_set(sample, vcf_path, force_rerun=False, long_val=False):
@@ -802,7 +864,7 @@ def preprocess_huddleston_val_set(sample, vcf_path, force_rerun=False):
         huddleston_bp_df.to_csv(out_path, index=False)
 
 
-def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, val_match_margin=1000, additional_cols: None | List[str] = None, verbose=True):
+def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, val_match_margin=300, val_match_insert_size_threshold=0.7, additional_cols: None | List[str] = None, verbose=True):
     """
     Given dataframes of a callset and a validation set, match them and return a dataframe with the following columns:
     INFO_EVENT, {qual_metric}, is_in_val, INFO_INFERRED_SVTYPE, {FILTER_PASS}
@@ -820,12 +882,22 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
             callset_bps_['INFO_DOWNSTREAM_PAIR_COUNT'] + \
             callset_bps_['INFO_PAIR_COUNT']
 
+    # GRIDSS stores per-breakend FILTER_PASS columns; unify them into a single FILTER_PASS
+    if 'FILTER_PASS' not in callset_bps_.columns and \
+            'FILTER_PASS_bnd1' in callset_bps_.columns and \
+            'FILTER_PASS_bnd2' in callset_bps_.columns:
+        callset_bps_.loc[:, 'FILTER_PASS'] = (
+            callset_bps_['FILTER_PASS_bnd1'].astype(bool) &
+            callset_bps_['FILTER_PASS_bnd2'].astype(bool)
+        )
+
     matched_ids = chunk_match.inner_join_bps(
         bp_df_dict={
             callset_name: callset_bps_,
             sample_config['val_set']['name']: val_set_
         },
         max_dist=val_match_margin,
+        insert_size_threshold=val_match_insert_size_threshold,
         ids_only=True,
         ignore_size=True
     )
@@ -842,7 +914,7 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
 
 
 
-def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name, model_name, val_match_margin=1000, additional_cols: None | List[str] = None, verbose=True):
+def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name, model_name, val_match_margin=300, val_match_insert_size_threshold=0.7, additional_cols: None | List[str] = None, verbose=True):
     svens_calls_ = svensemble2_bps.copy()
     val_set_ = val_set.copy()
 
@@ -852,6 +924,7 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, tr
             sample_config['val_set']['name']: val_set_
         },
         max_dist=val_match_margin,
+        insert_size_threshold=val_match_insert_size_threshold,
         ids_only=True,
         ignore_size=True
     )
@@ -867,204 +940,67 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, tr
 
     return val_df
 
-def preprocess_sample_for_benchmark(
-    sample_name: str,
-    model_name: str,
-    additional_callsets: None | List[str] = None,
-    save_pickle: bool = True,
-    verbose: bool = False
-) -> Dict[str, Any]:
-    """
-    Preprocess a sample for benchmarking with a specified SVEnsemble2 model.
 
-    Args:
-        sample_name (str): Name of the sample.
-        model_name (str): SVEnsemble2 model name.
-        sv_types (List[str]): List of SV types to include (e.g., ['DEL']).
-        sv_len_lower (int): Lower bound on SV length.
-        sv_len_upper (int): Upper bound on SV length.
-        save_pickle (bool): Whether to save the processed sample to a pickle file.
+# def filter_sample_by_type_len(
+#     sample: Dict[str, Any],
+#     svtypes: List[str] | None = None,
+#     svlens: Tuple[int, int] | None = None
+# ) -> Dict[str, Any]:
+#     """
+#     Filter a sample by SV type and length.
+#     """
+#     # Filters SVensemble2 and original callsets first
+#     # Then uses a mask from SVEnsemble2 calls to filter matched_bps
+#     # Does so for each original callset and training set
+#     if svtypes is None:
+#         svtypes = caller_params.default_sv_types
+#     if svlens is None:
+#         svlens = caller_params.default_sv_lens
 
-    Returns:
-        Dict[str, Any]: Preprocessed sample dictionary.
-    """
-    # Initialize training sets from presets
-    training_sets = caller_params.training_set_presets['default']
+#     svlen_lower, svlen_upper = svlens
 
-    # Create main sample configuration dictionary
-    sample = sv_utils.create_config_dict(
-        sample_name,
-        training_sets=training_sets,
-        val_set='use_name',
-        model_name=model_name,
-        additional_callsets=additional_callsets
-    )[sample_name]
+#     sample_ = deepcopy(sample)
 
-    bps_suffix = sample['model']['bps_suffix']
-    matched_bps_suffix = sample['model']['matched_bps_suffix']
-    model_pkl_suffix = sample['model']['model_pkl_suffix']
+#     for training_set_name, training_set_callsets in sample_['training_sets'].items():
+#         svlen_svtype_mask = bps._get_svlen_svtype_filter_mask(
+#             sample_['svensemble2_calls'][training_set_name],
+#             'svensemble2',
+#             svlens=svlens,
+#             svtypes=svtypes
+#         )
+#         if sample_['svensemble2_calls'] is not None:
+#             sample_['svensemble2_calls'][training_set_name] = sample_['svensemble2_calls'][training_set_name][svlen_svtype_mask]
+#         if sample_['matched_bps'] is not None:
+#             sample_['matched_bps'][training_set_name] = sample_['matched_bps'][training_set_name][svlen_svtype_mask]
 
-    # Prepare a blank matched_bps dict per training set
-    sample['matched_bps'] = {
-        training_set_name: None
-        for training_set_name in sample['training_sets']
-    }
+#     for callset in sample['callsets']:
+#         sample_['callsets'][callset]['bps'] = bps.svlen_svtype_filter(
+#             sample_['callsets'][callset]['bps'],
+#             callset,
+#             svlens=svlens,
+#             svtypes=svtypes
+#         )
 
-    # Load original callset breakpoints tables
-    for callset_name in sample['callsets']:
-        if sample['callsets'][callset_name]['params']['override_bps_path']:
-            callset_bps_path = sample['sample_dir'] / sample['callsets'][callset_name]['params']['bps_path']
-        else:
-            callset_bps_path = (
-                sample["callsets"][callset_name]["svensemble_dir"] /
-                f"{callset_name}.{bps_suffix}.bps.csv"
-            )
-        sample['callsets'][callset_name]['bps'] = pd.read_csv(callset_bps_path, low_memory=False)
-
-    # Load matched breakpoints tables for each training set
-    for training_set_name in sample['training_sets']:
-        matched_bps_path = (
-            sample['sample_dir']
-            / 'sv_calling'
-            / 'svensemble2'
-            / f'{sample_name}.matched_bps.{training_set_name}.{matched_bps_suffix}.csv'
-        )
-        # Read CSV into DataFrame
-        sample['matched_bps'][training_set_name] = pd.read_csv(
-            matched_bps_path, low_memory=False
-        )
-
-    # Load prediction dictionaries (pickled)
-    unbiased_dict_path = (
-        sample['sample_dir']
-        / 'sv_calling'
-        / 'svensemble2'
-        / f'{sample_name}.{model_pkl_suffix}.model_dict.pkl'
-    )
-    with open(unbiased_dict_path, 'rb') as f:
-        sample['pred_dicts'] = pickle.load(f)
-
-    # Adjust prediction DataFrames: reset index, drop/rename columns appropriately
-    for training_set, pred_dict in sample['pred_dicts'].items():
-        df = pred_dict['y']
-        df.reset_index(inplace=True, drop=False)
-        # Remove unnecessary columns if present
-        drop_cols = [col for col in ['gnomad_INFO_EVENT', 0] if col in df.columns]
-        if drop_cols:
-            df.drop(columns=drop_cols, inplace=True)
-        # Rename prediction column to consistent naming
-        if 1 in df.columns:
-            df.rename(
-                columns={1: f'{training_set}_{model_name}_pred'},
-                inplace=True
-            )
-
-    # Extra preprocessing/annotations per callset type
-    for training_set_name, training_set_callsets in sample['training_sets'].items():
-        # Annotate gridss_FILTER_PASS with logical AND of both bnd filter passes
-        if 'gridss' in training_set_callsets:
-            sample['matched_bps'][training_set_name].loc[
-                :, 'gridss_FILTER_PASS'
-            ] = np.all(
-                sample['matched_bps'][training_set_name][
-                    ['gridss_FILTER_PASS_bnd1', 'gridss_FILTER_PASS_bnd2']
-                ].astype(bool),
-                axis=1
-            )
-        # Combine manta_candidate pair counts into a total
-        if 'manta_candidate' in training_set_callsets:
-            sample['matched_bps'][training_set_name].loc[:, 'manta_candidate_INFO_TOTAL_PAIR_COUNT'] = (
-                sample['matched_bps'][training_set_name]['manta_candidate_INFO_UPSTREAM_PAIR_COUNT'] +
-                sample['matched_bps'][training_set_name]['manta_candidate_INFO_DOWNSTREAM_PAIR_COUNT'] +
-                sample['matched_bps'][training_set_name]['manta_candidate_INFO_PAIR_COUNT']
-            )
-
-    # Generate SVEnsemble2 calls for each training set, using matched breakpoints and predictions
-    sample['svensemble2_calls'] = defaultdict(dict)
-    for training_set, _ in training_sets.items():
-        sample['svensemble2_calls'][training_set] = matchedbps.get_svensemble2_calls(
-            sample['matched_bps'][training_set],
-            sample['pred_dicts'][training_set]['y']
-        )
-        if sample['svensemble2_calls'][training_set].shape[0] != sample['matched_bps'][training_set].shape[0]:
-            raise ValueError(f"Number of SVEnsemble2 calls ({sample['svensemble2_calls'][training_set].shape[0]}) does not match number of matched breakpoints ({sample['matched_bps'][training_set].shape[0]}) for {training_set}")
-
-    # Save processed sample as pickle if requested
-    if save_pickle:
-        out_filename = (
-            f"{sample_name}.{model_name}.bench_preprocessed.pkl"
-        )
-        out_path = (
-            sample['sample_dir']
-            / 'sv_calling'
-            / 'svensemble2'
-            / out_filename
-        )
-        with open(out_path, 'wb') as f:
-            pickle.dump(sample, f)
-
-        return
-
-    return sample
-
-
-def filter_sample_by_type_len(
-    sample: Dict[str, Any],
-    svtypes: List[str] | None = None,
-    svlens: Tuple[int, int] | None = None
-) -> Dict[str, Any]:
-    """
-    Filter a sample by SV type and length.
-    """
-    # Filters SVensemble2 and original callsets first
-    # Then uses a mask from SVEnsemble2 calls to filter matched_bps
-    # Does so for each original callset and training set
-    if svtypes is None:
-        svtypes = caller_params.default_sv_types
-    if svlens is None:
-        svlens = caller_params.default_sv_lens
-
-    svlen_lower, svlen_upper = svlens
-
-    sample_ = deepcopy(sample)
-
-    for training_set_name, training_set_callsets in sample_['training_sets'].items():
-        svlen_svtype_mask = bps._get_svlen_svtype_filter_mask(
-            sample_['svensemble2_calls'][training_set_name],
-            'svensemble2',
-            svlens=svlens,
-            svtypes=svtypes
-        )
-        sample_['svensemble2_calls'][training_set_name] = sample_['svensemble2_calls'][training_set_name][svlen_svtype_mask]
-        sample_['matched_bps'][training_set_name] = sample_['matched_bps'][training_set_name][svlen_svtype_mask]
-
-    for callset in sample['callsets']:
-        sample_['callsets'][callset]['bps'] = bps.svlen_svtype_filter(
-            sample_['callsets'][callset]['bps'],
-            callset,
-            svlens=svlens,
-            svtypes=svtypes
-        )
-
-    return sample_
+#     return sample_
 
 
 # Benchmark a single sample's callsets and SVEnsemble2 ensemble predictions against a validation set,
 # saving the results in a nested dict (callset/SVEnsemble2) structure to disk.
-def benchmark_sample(
+def benchmark_model(
     sample_name,
     model_name,
     svtypes=None,
     svlens=None,
     training_sets: List[str] | str | None = None,
-    val_match_margin: int = 1000,
+    val_match_margin: int = 300,
+    val_match_insert_size_threshold: float = 0.7,
     skip_filtering: bool = False,
     additional_cols: None | List[str] = None,
     additional_callsets: None | List[str] = None,
-    save_pickle=True,
+    limit_to_callsets: None | List[str] = None,
     verbose=False
 ):
-    """|
+    """
     Benchmark callset and SVEnsemble2 predictions for a sample against the corresponding validation set.
 
     Args:
@@ -1075,7 +1011,8 @@ def benchmark_sample(
         training_sets (list or str): Training sets to consider.
         additional_cols (list or str): Additional columns to keep in the validation result dataframe.
         additional_callsets (list or str): Names of additional callsets to include in the benchmark.
-        save_pickle (bool, optional): Whether to save results or return results as a dict. Default: True.
+        limit_to_callsets (list or str): If input, the function will only benchmark the callsets in the list.
+            To add an svensemble2 prediction, use the format 'svensemble2_{training_set_name}'.
         verbose (bool, optional): Whether to print processing info. Default: True.
 
     Returns:
@@ -1086,9 +1023,9 @@ def benchmark_sample(
     #     raise ValueError("Cannot specify svtypes/svlens if set to skip filtering")
 
     if training_sets is None:
-        training_sets = caller_params.training_set_presets['default']
+        training_sets = caller_params.training_set_list_presets['default']
     elif isinstance(training_sets, str):
-        training_sets = caller_params.training_set_presets[training_sets]
+        training_sets = caller_params.training_set_list_presets[training_sets]
 
     if skip_filtering:
         svtypes = None
@@ -1111,59 +1048,105 @@ def benchmark_sample(
 
 
     # Build config dict for the sample, with all paths
-    sample_dict = sv_utils.create_config_dict(
-        sample_name,
-        training_sets=training_sets,
-        val_set="use_name",
-        model_name=model_name,
-        additional_callsets=additional_callsets
-    )[sample_name]
+    config_dicts = []
+    for training_set_name in training_sets:
+        config_dicts.append(sv_utils.create_config_dict(
+            sample_name,
+            training_set=training_set_name,
+            val_set="use_name",
+            model_name=model_name,
+            additional_callsets=additional_callsets
+        )[sample_name])
 
-    bench_preprocessed_basename = f"{sample_name}.{model_name}.bench_preprocessed.pkl"
+    # Get a list of callsets to load
+    callsets_to_load = []
+    callset_paths = []
+    callset_config_dicts = []
+    for config_dict in config_dicts:
+        for callset_name in config_dict['callsets'].keys():
+            if limit_to_callsets is not None and callset_name not in limit_to_callsets:
+                continue
+            if callset_name not in callsets_to_load:
+                callsets_to_load.append(callset_name)
+                callset_paths.append(config_dict['callsets'][callset_name]['bps_path'])
+                callset_config_dicts.append(config_dict)
 
-    # Load filtered sample .pkl with SVEnsemble2 runs in the `svensemble2_calls` dictionary, etc.
-    sample_path = (
-        sample_dict["sample_dir"] / "sv_calling" / "svensemble2" /
-        bench_preprocessed_basename
-    )
-    with open(sample_path, "rb") as f:
-        sample = pickle.load(f)
+    # Get a list of svensemble2 predictions to load
+    svensemble2_preds_to_load = []
+    svensemble2_preds_paths = []
+    svensemble2_preds_config_dicts = []
+    for config_dict in config_dicts:
+        for training_set_name in config_dict['training_sets'].keys():
+            if limit_to_callsets is not None and f'svensemble2_{training_set_name}' not in limit_to_callsets:
+                continue
+            if training_set_name not in svensemble2_preds_to_load:
+                svensemble2_preds_to_load.append(f'svensemble2_{training_set_name}')
+                svensemble2_preds_paths.append(config_dict['workflow_dir'] / 'svensemble2_calls.csv')
+                svensemble2_preds_config_dicts.append(config_dict)
 
+    if additional_callsets is None:
+        additional_callsets = []
+    for additional_callset in additional_callsets:
+        if limit_to_callsets is not None and additional_callset not in limit_to_callsets:
+            continue
+        if additional_callset not in callsets_to_load:
+            # In a single sample with the same model all the paths to additional callsets should be the same
+            additional_callset_paths = set(config_dict['callsets'][additional_callset]['bps_path'] for config_dict in config_dicts)
+            if len(additional_callset_paths) > 1:
+                raise ValueError(f"Multiple paths found for additional callset {additional_callset} in different config dicts, \
+                                 check sample configs for {sample_name}")
+            additional_callset_path = additional_callset_paths.pop()
+            callsets_to_load.append(additional_callset)
+            callset_paths.append(additional_callset_path)
+            callset_config_dicts.append(config_dicts[0])
 
-    if not skip_filtering:
-        sample = filter_sample_by_type_len(sample, svtypes=svtypes, svlens=svlens)
+    val_set_names = set(config_dict['val_set']['name'] for config_dict in config_dicts)
+    if len(val_set_names) > 1:
+        raise ValueError(f"Multiple validation set names found in different config dicts, \
+                         check sample configs for {sample_name}")
+    elif len(val_set_names) == 0:
+        raise FileNotFoundError(f"No validation set names found for {sample_name}, check sample configs")
+    val_set_name = val_set_names.pop()
 
-    # Prepare result dictionary for storing validation info for callsets and SVEnsemble2 predictions
-    sample_val_dict = defaultdict(dict)
+    val_set_path = set(config_dict['val_set']['path'] for config_dict in config_dicts)
+    if len(val_set_path) > 1:
+        raise ValueError(f"Multiple paths found for validation set in different config dicts, \
+                         check sample configs for {sample_name}")
+    elif len(val_set_path) == 0:
+        raise FileNotFoundError(f"No validation set paths found for {sample_name}, check sample configs")
+    val_set_path = val_set_path.pop()
 
-    # Load and filter the sample's validation set for type and length
-    if sample["val_set"] is None:
-        print(f"{sample_name} has no validation set, skipping")
-        return
-
-    val_set = pd.read_csv(sample["val_set"]["path"])
+    val_set = pd.read_csv(val_set_path)
     val_set = bps.svlen_svtype_filter(
-        val_set, sample["val_set"]["name"], svtypes=svtypes, svlens=svlens
+        val_set, val_set_name, svtypes=svtypes, svlens=svlens
     )
     if val_set.shape[0] == 0:
-        raise ValueError(f"No {sample['val_set']['name']} calls found for {sample_name} after filtering for {svtypes_str} and {svlens_str}")
+        raise ValueError(f"No {val_set_name} calls found for {sample_name} after filtering for {svtypes_str} and {svlens_str}")
 
     # Validate original callsets (non-ensemble predictions)
-    for callset_name in sample["callsets"].keys():
-
-        callset_bps = sample['callsets'][callset_name]['bps']
-
+    for callset_name, callset_path, callset_config_dict in zip(callsets_to_load, callset_paths, callset_config_dicts):
+        callset_bps = pd.read_csv(callset_path)
+        callset_bps = bps.svlen_svtype_filter(
+            callset_bps,
+            callset_name,
+            svtypes=svtypes,
+            svlens=svlens
+        )
         val_df = validate_basic_callset(
             callset_bps=callset_bps,
             val_set=val_set,
-            sample_config=sample,
+            sample_config=callset_config_dict,
             callset_name=callset_name,
             val_match_margin=val_match_margin,
+            val_match_insert_size_threshold=val_match_insert_size_threshold,
             additional_cols=additional_cols,
             verbose=verbose
         )
         # Store result under this callset name
-        sample_val_dict[callset_name] = val_df
+        bench_dir = callset_config_dict['workflow_dir'].parent / f'{sample_name}.{model_name}.caller_benchmark' / 'benchmark'
+        if not bench_dir.exists():
+            bench_dir.mkdir(exist_ok=True, parents=True)
+
         if verbose:
             match_count = val_df["is_in_val"].sum()
             total_count = len(val_df)
@@ -1171,42 +1154,39 @@ def benchmark_sample(
                 f"{callset_name} callset for {sample_name} processed "
                 f"({match_count} matches out of {total_count} predictions)"
             )
+        val_df.to_csv(bench_dir / f'{callset_name}.{svtypes_str}.{svlens_str}.benchmark.csv', index=False)
 
     # Validate SVEnsemble2 predictions for each training set
-    for training_set_name in sample["training_sets"].keys():
-        svensemble_preds = sample["svensemble2_calls"][training_set_name]
+    for svensemble2_preds_to_load, svensemble2_preds_path, svensemble2_preds_config_dict in zip(svensemble2_preds_to_load, svensemble2_preds_paths, svensemble2_preds_config_dicts):
+        svensemble_preds = pd.read_csv(svensemble2_preds_path)
+        svensemble_preds = bps.svlen_svtype_filter(
+            svensemble_preds,
+            'svensemble2',
+            svtypes=svtypes,
+            svlens=svlens
+        )
         val_df = validate_svensemble2_predictions(
             svensemble2_bps=svensemble_preds,
             val_set=val_set,
-            sample_config=sample,
-            training_set_name=training_set_name,
+            sample_config=svensemble2_preds_config_dict,
+            training_set_name=svensemble2_preds_to_load.replace('svensemble2_', ''),
             model_name=model_name,
             val_match_margin=val_match_margin,
+            val_match_insert_size_threshold=val_match_insert_size_threshold,
             additional_cols=additional_cols,
             verbose=verbose
         )
-        dict_key = f"svensemble2_{training_set_name}"
-        sample_val_dict[dict_key] = val_df
+        bench_dir = svensemble2_preds_config_dict['workflow_dir'] / 'benchmark'
+        if not bench_dir.exists():
+            bench_dir.mkdir(exist_ok=True, parents=True)
         if verbose:
             match_count = val_df["is_in_val"].sum()
             total_count = len(val_df)
             print(
-                f"SVEnsemble2 predictions ({training_set_name}) for {sample_name} processed "
+                f"SVEnsemble2 predictions ({svensemble2_preds_to_load.replace('svensemble2_', '')}) for {sample_name} processed "
                 f"({match_count} matches out of {total_count} predictions)"
             )
-
-    # Save validation result dict if requested
-
-    if save_pickle:
-        val_dict_path = (
-            sample["sample_dir"] / "sv_calling" / "svensemble2" /
-            f"{sample_name}.{model_name}.{svtypes_str}.{svlens_str}.val_dict.pkl"
-        )
-        with open(val_dict_path, "wb") as f:
-            pickle.dump(dict(sample_val_dict), f)
-        return
-
-    return sample_val_dict
+        val_df.to_csv(bench_dir / f'{svensemble2_preds_to_load}.{svtypes_str}.{svlens_str}.benchmark.csv', index=False)
 
 
 if __name__ == "__main__":
@@ -1217,26 +1197,19 @@ if __name__ == "__main__":
     parser.add_argument('--svtypes', type=str, default=None)
     parser.add_argument('--svlen_lower', type=int, default=caller_params.default_sv_lens[0])
     parser.add_argument('--svlen_upper', type=int, default=caller_params.default_sv_lens[1])
-    parser.add_argument('--training_sets', type=str, default=None)
-    parser.add_argument('--val_match_margin', type=int, default=500)
+    parser.add_argument('--training_sets', type=str, default='default')
+    parser.add_argument('--val_match_margin', type=int, default=300)
+    parser.add_argument('--val_match_insert_size_threshold', type=float, default=0.7)
     parser.add_argument('--skip_filtering', action='store_true', default=False)
     parser.add_argument('--additional_cols', type=str, default=None)
-    parser.add_argument('--save_pickle', action='store_true', default=True)
-    parser.add_argument('--perform_steps', type=str, default=None)
     parser.add_argument('--additional_callsets', type=str, default=None)
+    parser.add_argument('--limit_to_callsets', type=str, default=None)
     parser.add_argument('--verbose', action='store_true', default=False)
     args = parser.parse_args()
-    # Benchmarking requires 2 steps:
-    # 1. Preprocess the sample using the name, list of training sets from csv files and prediction pickles into a single dict
-    #    which will be saved as a pickle file
-    # 2. Benchmark itself
-    if args.perform_steps is not None:
-        perform_steps = args.perform_steps.split(sep=',')
-        for step in perform_steps:
-            if step not in ['preprocess', 'benchmark']:
-                raise ValueError(f"Unknown step: {step}. The steps must be 'preprocess' or 'benchmark'")
 
     svtypes = args.svtypes
+    if svtypes == 'all':
+        svtypes = None
     if svtypes is not None:
         svtypes = svtypes.split(sep=',')
         # Check that there are only supported svtypes in the string
@@ -1254,33 +1227,36 @@ if __name__ == "__main__":
     else:
         svlens = (args.svlen_lower, args.svlen_upper)
 
+    if args.training_sets is not None:
+        training_sets = args.training_sets.split(sep=',')
+    if len(training_sets) == 1 and training_sets[0] in caller_params.training_set_list_presets.keys():
+        training_sets = caller_params.training_set_list_presets[training_sets[0]]
+
+
     if args.additional_cols is not None:
         additional_cols = args.additional_cols.split(sep=',')
     else:
         additional_cols = None
 
-    if 'preprocess' in perform_steps:
-        preprocess_sample_for_benchmark(
-            sample_name=args.sample_name,
-            model_name=args.model_name,
-            save_pickle=args.save_pickle,
-            additional_callsets=additional_callsets,
-            verbose=args.verbose
-        )
+    if args.limit_to_callsets is not None:
+        limit_to_callsets = args.limit_to_callsets.split(sep=',')
+    else:
+        limit_to_callsets = None
 
-    if 'benchmark' in perform_steps:
-        benchmark_sample(
-            sample_name=args.sample_name,
-            model_name=args.model_name,
-            svtypes=svtypes,
-            svlens=(args.svlen_lower, args.svlen_upper),
-            training_sets=args.training_sets,
-            val_match_margin=args.val_match_margin,
-            skip_filtering=args.skip_filtering,
-            additional_cols=additional_cols,
-            save_pickle=args.save_pickle,
-            verbose=args.verbose
-        )
+    benchmark_model(
+        sample_name=args.sample_name,
+        model_name=args.model_name,
+        svtypes=svtypes,
+        svlens=(args.svlen_lower, args.svlen_upper),
+        training_sets=training_sets,
+        val_match_margin=args.val_match_margin,
+        val_match_insert_size_threshold=args.val_match_insert_size_threshold,
+        skip_filtering=args.skip_filtering,
+        additional_cols=additional_cols,
+        additional_callsets=additional_callsets,
+        limit_to_callsets=limit_to_callsets,
+        verbose=args.verbose
+    )
 
 
 # General preprocess with survivor calls

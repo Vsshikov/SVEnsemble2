@@ -7,6 +7,7 @@ Added callers:
 - gridss
 - manta
 - delly
+- sniffles
 
 The file also contains parameters for working with VCF files from reference SV sets.
 Currently, only gnomAD is supported.
@@ -68,41 +69,36 @@ default_event_params = default_params | {
 }
 
 training_set_presets = {
-    'default': {
-        'gridss': ['gridss'],
-        'manta_candidate': ['manta_candidate'],
-        'manta_diploid': ['manta_diploid'],
-        'delly': ['delly'],
-        'gridss+manta_candidate': ['gridss', 'manta_candidate'],
-        'gridss+manta_diploid': ['gridss', 'manta_diploid'],
-        'gridss+delly': ['gridss', 'delly'],
-        'gridss+manta_candidate+delly': ['gridss', 'manta_candidate', 'delly'],
-        'gridss+manta_diploid+delly': ['gridss', 'manta_diploid', 'delly'],
-        'delly+manta_candidate': ['delly', 'manta_candidate'],
-        'delly+manta_diploid': ['delly', 'manta_diploid']
-    },
-    'haploid': {
-        'gridss': ['gridss'],
-        'manta_candidate': ['manta_candidate'],
-        'gridss+manta_candidate': ['gridss', 'manta_candidate']
-    },
-    'gridss_manta': {
-        'gridss': ['gridss'],
-        'manta_candidate': ['manta_candidate'],
-        'manta_diploid': ['manta_diploid'],
-        'gridss+manta_candidate': ['gridss', 'manta_candidate'],
-        'gridss+manta_diploid': ['gridss', 'manta_diploid']
-    },
-    'minimal': {
-        'gridss': ['gridss'],
-        'manta_diploid': ['manta_diploid'],
-        'delly': ['delly'],
-        'gridss+manta_diploid': ['gridss', 'manta_diploid'],
-        'gridss+delly': ['gridss', 'delly'],
-        'gridss+manta_diploid+delly': ['gridss', 'manta_diploid', 'delly'],
-        'delly+manta_diploid': ['delly', 'manta_diploid']
-    }
+    'default': ['delly', 'manta_diploid'],
+    'gridss': ['gridss'],
+    'manta_candidate': ['manta_candidate'],
+    'manta_diploid': ['manta_diploid'],
+    'delly': ['delly'],
+    'gridss+manta_candidate': ['gridss', 'manta_candidate'],
+    'gridss+manta_diploid': ['gridss', 'manta_diploid'],
+    'gridss+delly': ['gridss', 'delly'],
+    'gridss+manta_candidate+delly': ['gridss', 'manta_candidate', 'delly'],
+    'gridss+manta_diploid+delly': ['gridss', 'manta_diploid', 'delly'],
+    'delly+manta_candidate': ['delly', 'manta_candidate'],
+    'delly+manta_diploid': ['delly', 'manta_diploid']
 }
+
+training_set_list_presets = {
+    'default': [
+        'gridss',
+        'manta_candidate',
+        'manta_diploid',
+        'delly',
+        'gridss+manta_candidate',
+        'gridss+manta_diploid',
+        'gridss+delly',
+        'gridss+manta_candidate+delly',
+        'gridss+manta_diploid+delly',
+        'delly+manta_candidate',
+        'delly+manta_diploid'
+    ]
+}
+
 
 # Parameters for GRIDSS
 # Filter entries expected from GRIDSS
@@ -261,6 +257,11 @@ kosugi_params = default_params | {
     'svlens': (50, np.inf)
 }
 
+parikh_params = default_params | {
+    'svlen_source': 'svlen',
+    'svlens': (50, np.inf)
+}
+
 chm13_params = default_params | {
     'svlen_source': 'svlen',
     'bnd2_pos': 'end'
@@ -288,19 +289,93 @@ huddleston_params = default_params | {
     }
 }
 
+gridss_H_params = gridss_params | {
+    'bps_path': 'sv_calling/gridss/svensemble2/gridss_H_bps.csv',
+    'override_bps_path': True
+}
+
+# Parameters for Sniffles2 (long-read SV caller)
+# Filter entries expected from Sniffles2
+sniffles_filters = [
+    'PASS',
+    'GT',
+    'SUPPORT_MIN',
+    'STDEV_POS',
+    'STDEV_LEN',
+    'COV_MIN',
+    'COV_MIN_GT',
+    'COV_CHANGE_DEL',
+    'COV_CHANGE_DUP',
+    'COV_CHANGE_INS',
+    'COV_CHANGE_FRAC_US',
+    'COV_CHANGE_FRAC_SC',
+    'COV_CHANGE_FRAC_CE',
+    'COV_CHANGE_FRAC_ED',
+    'COV_VAR',
+    'MOSAIC_VAF',
+    'NOT_MOSAIC_VAF',
+    'ALN_NM',
+    'STRAND_BND',
+    'STRAND',
+    'STRAND_MOSAIC',
+    'SVLEN_MIN',
+    'SVLEN_MIN_MOSAIC',
+    'SVLEN_MAX_MOSAIC',
+    'SINGLE_BREAK'
+]
+# INFO fields that must be present in Sniffles2 VCF
+sniffles_info_mandatory_cols = [
+    'SVTYPE',
+    'SVLEN',
+    'CHR2'
+]
+# INFO fields from Sniffles2 VCF that will be used for call posterior probability estimation
+sniffles_info_pred_cols = [
+    'SUPPORT',
+    'VAF',
+    'STDEV_POS',
+    'STDEV_LEN',
+    'PRECISE',
+    'IMPRECISE',
+    'NM',
+    'SVLEN'
+]
+
+sniffles_params = default_params | {
+    'source': 'sniffles',
+    'filter_cols': sniffles_filters,
+    'info_cols_mandatory': sniffles_info_mandatory_cols,
+    'info_cols_pred': sniffles_info_pred_cols,
+    'parse_format': True,
+    'format_cols': ['GT', 'GQ', 'DR', 'DV'],
+    'svlen_source': 'svlen',
+    'bps_path': 'sv_calling/sniffles/svensemble2/sniffles.bps.csv',
+    'override_bps_path': True,
+    'bnd2_pos': 'svlen'
+}
+
+sniffles_H_params = sniffles_params | {
+    'bps_path': 'sv_calling/sniffles/svensemble2/sniffles_H.bps.csv',
+    'override_bps_path': True,
+}
+
 caller_param_dict = {
     'gnomad': gnomad_params,
     'gridss': gridss_params,
     'manta_candidate': manta_candidate_params,
     'manta_diploid': manta_diploid_params,
     'delly': delly_params,
+    'sniffles': sniffles_params,
+    'sniffles_H': sniffles_H_params,
     'svensemble2': svensemble2_params,
     'kosugi': kosugi_params,
+    'parikh': parikh_params,
     'chm13_val': chm13_params,
     'hg002_val': hg002_params,
     'huddleston': huddleston_params,
     'hg00514_val': hg00514_params,
-    'survivor': survivor_params
+    'survivor': survivor_params,
+    'gridss_H': gridss_H_params
 }
 
 caller_alt_priority = [

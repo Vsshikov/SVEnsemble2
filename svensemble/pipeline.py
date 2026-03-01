@@ -1,8 +1,8 @@
 #! /usr/bin/env python3
 
 #SBATCH --job-name=svensemble2
-#SBATCH --output=svensemble2.out
-#SBATCH --error=svensemble2.err
+#SBATCH --output=logs/pipeline/svensemble2_%j.out
+#SBATCH --error=logs/pipeline/svensemble2_%j.err
 #SBATCH --time=24:00:00
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=32G
@@ -48,7 +48,7 @@ default_ref_path = Path("/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnse
 
 def parse_preprocess_gnomad(
     sample_name: str,
-    sample_config: dict,
+    workflow_config: dict,
     verbose: bool = False
 ) -> pd.DataFrame:
     """
@@ -56,25 +56,25 @@ def parse_preprocess_gnomad(
 
     Args:
         sample_name (str): Name of the sample.
-        sample_config (dict): Configuration dictionary for the sample.
+        workflow_config (dict): Configuration dictionary for the sample.
         verbose (bool): If True, print progress messages.
     """
     # Check if the sample is a reference sample
-    if not sample_config['is_reference']:
+    if not workflow_config['is_reference']:
         raise ValueError(
             f"Sample {sample_name} is not a reference sample, "
             "cannot be preprocessed as reference"
         )
 
     # Check if the reference sample contains only 1 "callset"
-    if len(sample_config['callsets']) > 1:
+    if len(workflow_config['callsets']) > 1:
         raise ValueError(
             f"Reference sample {sample_name} contains multiple callsets: "
-            f"{list(sample_config['callsets'].keys())}, must contain 1"
+            f"{list(workflow_config['callsets'].keys())}, must contain 1"
         )
 
-    callset_key = next(iter(sample_config['callsets']))
-    callset = sample_config['callsets'][callset_key]
+    callset_key = next(iter(workflow_config['callsets']))
+    callset = workflow_config['callsets'][callset_key]
 
     # Preprocess the reference sample
     if callset['source'] != 'gnomad':
@@ -117,7 +117,7 @@ def parse_preprocess_gnomad(
         force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
     )
 
-    # output_dir = sample_config['sample_dir'] / 'svensemble2'
+    # output_dir = workflow_config['sample_dir'] / 'svensemble2'
     # output_path = output_dir / 'gnomad_bps.csv'
 
     # if verbose:
@@ -133,7 +133,7 @@ def parse_preprocess_gnomad(
 
 def parse_preprocess_gridss(
     sample_name: str,
-    sample_config: dict,
+    workflow_config: dict,
     verbose: bool = False
 ) -> pd.DataFrame:
     """
@@ -141,7 +141,7 @@ def parse_preprocess_gridss(
 
     Args:
         sample_name (str): Name of the sample.
-        sample_config (dict): Configuration dictionary for the sample.
+        workflow_config (dict): Configuration dictionary for the sample.
         verbose (bool): If True, print progress messages.
     """
     def _process_gridss_callset(callset: dict, verbose: bool = False) -> pd.DataFrame:
@@ -190,16 +190,16 @@ def parse_preprocess_gridss(
         return gridss_bp_df
 
 
-    if 'gridss' in sample_config.get('callsets', {}):
-        # output_dir = sample_config['callsets']['gridss']['svensemble_dir']
+    if 'gridss' in workflow_config.get('callsets', {}):
+        # output_dir = workflow_config['callsets']['gridss']['svensemble_dir']
         return _process_gridss_callset(
-            callset=sample_config['callsets']['gridss'],
+            callset=workflow_config['callsets']['gridss'],
             verbose=verbose
         )
 
 def parse_preprocess_manta_candidate(
     sample_name: str,
-    sample_config: dict,
+    workflow_config: dict,
     verbose: bool = False
 ) -> pd.DataFrame:
     """
@@ -207,7 +207,7 @@ def parse_preprocess_manta_candidate(
 
     Args:
         sample_name (str): Name of the sample.
-        sample_config (dict): Configuration dictionary for the sample.
+        workflow_config (dict): Configuration dictionary for the sample.
         verbose (bool): If True, print progress messages.
     """
     def _process_manta_candidate_callset(callset: dict, verbose: bool = False) -> pd.DataFrame:
@@ -261,16 +261,16 @@ def parse_preprocess_manta_candidate(
         #     print(f"Saved breakpoints in {output_path}")
         return manta_candidate_bp_df
 
-    if 'manta_candidate' in sample_config.get('callsets', {}):
-        # output_dir = sample_config['callsets']['manta_candidate']['svensemble_dir']
+    if 'manta_candidate' in workflow_config.get('callsets', {}):
+        # output_dir = workflow_config['callsets']['manta_candidate']['svensemble_dir']
         return _process_manta_candidate_callset(
-            callset=sample_config['callsets']['manta_candidate'],
+            callset=workflow_config['callsets']['manta_candidate'],
             verbose=verbose
         )
 
 def parse_preprocess_manta_diploid(
     sample_name: str,
-    sample_config: dict,
+    workflow_config: dict,
     verbose: bool = False
 ) -> None:
     """
@@ -278,7 +278,7 @@ def parse_preprocess_manta_diploid(
 
     Args:
         sample_name (str): Name of the sample.
-        sample_config (dict): Configuration dictionary for the sample.
+        workflow_config (dict): Configuration dictionary for the sample.
         verbose (bool): If True, print progress messages.
     """
     def _process_manta_diploid_callset(
@@ -335,46 +335,47 @@ def parse_preprocess_manta_diploid(
         #     print(f"Saved breakpoints in {output_path}")
         return manta_diploid_bp_df
 
-    if 'manta_diploid' in sample_config.get('callsets', {}):
-        # output_dir = sample_config['callsets']['manta_diploid']['svensemble_dir']
+    if 'manta_diploid' in workflow_config.get('callsets', {}):
+        # output_dir = workflow_config['callsets']['manta_diploid']['svensemble_dir']
         return _process_manta_diploid_callset(
-            callset=sample_config['callsets']['manta_diploid'],
+            callset=workflow_config['callsets']['manta_diploid'],
             verbose=verbose
         )
 
 def parse_preprocess_delly(
     sample_name: str,
-    sample_config: dict,
+    workflow_config: dict,
     verbose: bool = False
 ) -> None:
     """
     Read and preprocess the delly dataset for a sample.
     """
 
-    def _process_delly_callset(callset: dict, ref_path: Path, verbose: bool = False) -> pd.DataFrame:
+    def _process_delly_callset(callset: dict, temp_dir: Path, ref_path: Path, verbose: bool = False) -> pd.DataFrame:
         """
         Internal function to process a delly callset and save breakpoints.
         """
         if verbose:
             print(f"Creating breakpoints from DELLY BND/TRA calls and saving to {callset['svensemble_dir'] / 'delly_bps.csv'}")
 
-        if not (callset['svensemble_dir'] / 'delly_bnd.vcf').exists():
-            callset['svensemble_dir'].mkdir(parents=True, exist_ok=True)
+        if not (temp_dir / 'delly_bnd.tmp.vcf').exists():
+            temp_dir.mkdir(parents=True, exist_ok=True)
 
         delly2bnd.delly2bnd_noargparse(
             vcf=callset['path'],
             ref=ref_path,
-            out=callset['svensemble_dir'] / 'delly_bnd.vcf'
+            out=temp_dir / 'delly_bnd.tmp.vcf'
         )
 
         if verbose:
             print(f"Loading DELLY VCF from {callset['path']}")
-        delly_bnd_only_vcf = VariantFile(callset['svensemble_dir'] / 'delly_bnd.vcf')
+        delly_bnd_only_vcf = VariantFile(temp_dir / 'delly_bnd.tmp.vcf')
         delly_bnd_only_df, delly_bnd_only_meta = vcfp.parse_vcf_to_df(
             vcf_file=delly_bnd_only_vcf,
             caller_params=callset['params']
         )
         delly_bnd_only_df = caller_specific.delly_preprocess_bnds_only(delly_bnd_only_df, caller_params=callset['params'])
+        os.remove(temp_dir / 'delly_bnd.tmp.vcf')
 
 
         delly_vcf = VariantFile(callset['path'])
@@ -398,20 +399,83 @@ def parse_preprocess_delly(
         #     print(f"Saved breakpoints in {output_path}")
         return delly_bp_df
 
-    if 'delly' in sample_config.get('callsets', {}):
-        if 'ref_path' not in sample_config:
+    if 'delly' in workflow_config.get('callsets', {}):
+        if 'ref_path' not in workflow_config:
             raise ValueError("Reference path not found in sample config")
-        # output_dir = sample_config['callsets']['delly']['svensemble_dir']
+        # output_dir = workflow_config['callsets']['delly']['svensemble_dir']
         return _process_delly_callset(
-            callset=sample_config['callsets']['delly'],
-            ref_path=sample_config['ref_path'],
+            callset=workflow_config['callsets']['delly'],
+            temp_dir=workflow_config['workflow_dir'] / 'temp',
+            ref_path=workflow_config['ref_path'],
+            verbose=verbose
+        )
+
+
+def parse_preprocess_sniffles(
+    sample_name: str,
+    workflow_config: dict,
+    verbose: bool = False
+) -> pd.DataFrame:
+    """
+    Read and preprocess the Sniffles2 dataset for a sample.
+
+    Args:
+        sample_name (str): Name of the sample.
+        workflow_config (dict): Configuration dictionary for the sample.
+        verbose (bool): If True, print progress messages.
+    """
+    def _process_sniffles_callset(callset: dict, verbose: bool = False) -> pd.DataFrame:
+        """
+        Internal function to process a Sniffles2 callset and return breakpoints.
+        """
+        if verbose:
+            print(f"Loading Sniffles2 VCF from {callset['path']}")
+        sniffles_vcf = VariantFile(callset['path'])
+        sniffles_df, sniffles_meta = vcfp.parse_vcf_to_df(
+            vcf_file=sniffles_vcf,
+            caller_params=callset['params']
+        )
+        if verbose:
+            print("Splitting Sniffles2 variants into BND and event-only dataframes")
+        sniffles_bnd_only_df = sniffles_df[sniffles_df['INFO_SVTYPE'] == 'BND']
+        sniffles_evt_only_df = sniffles_df[sniffles_df['INFO_SVTYPE'] != 'BND']
+        if verbose:
+            print("Preprocessing Sniffles2 BND variants")
+        sniffles_bnd_only_df = caller_specific.sniffles_preprocess_bnds_only(
+            sniffles_bnd_only_df,
+            caller_params=callset['params']
+        )
+        if verbose:
+            print("Preprocessing Sniffles2 event-only variants")
+        sniffles_evt_only_df = caller_specific.sniffles_preprocess_evts_only(
+            sniffles_evt_only_df,
+            caller_params=callset['params']
+        )
+        if verbose:
+            print("Converting Sniffles2 event-only variants to breakends")
+        sniffles_evt_bnd_df = evts.event_to_bnd(
+            sniffles_evt_only_df,
+            bnd2_pos=caller_params.sniffles_params['bnd2_pos']
+        )
+        sniffles_df = pd.concat([sniffles_bnd_only_df, sniffles_evt_bnd_df], axis=0)
+        if verbose:
+            print("Converting Sniffles2 breakends to breakpoints")
+        sniffles_bp_df = bnds.bnd_to_bp(
+            sniffles_df,
+            force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
+        )
+        return sniffles_bp_df
+
+    if 'sniffles' in workflow_config.get('callsets', {}):
+        return _process_sniffles_callset(
+            callset=workflow_config['callsets']['sniffles'],
             verbose=verbose
         )
 
 
 def parse_preprocess_sample(
     sample_name: str,
-    sample_config: dict,
+    workflow_config: dict,
     verbose: bool = False
 ) -> None:
     """
@@ -419,7 +483,7 @@ def parse_preprocess_sample(
 
     Args:
         sample_name (str): Name of the sample.
-        sample_config (dict): Configuration dictionary for the sample.
+        workflow_config (dict): Configuration dictionary for the sample.
         verbose (bool): If True, print progress messages.
     """
     caller_dispatch = {
@@ -428,78 +492,25 @@ def parse_preprocess_sample(
         "manta_diploid": parse_preprocess_manta_diploid,
         "manta_candidate": parse_preprocess_manta_candidate,
         "delly": parse_preprocess_delly,
+        "sniffles": parse_preprocess_sniffles,
     }
 
-    for callset_name in sample_config["callsets"].keys():
+    for callset_name in workflow_config["callsets"].keys():
         if callset_name in caller_dispatch.keys():
-            bp_df = caller_dispatch[callset_name](sample_name, sample_config, verbose)
-            bp_df = bps.common_bps_preprocess(bp_df, sample_config['callsets'][callset_name]['params'])
-            model_name = sample_config['model']['bps_suffix']
-            # Create the svensemble_dir if it doesn't exist
-            if not sample_config['callsets'][callset_name]['svensemble_dir'].exists():
-                sample_config['callsets'][callset_name]['svensemble_dir'].mkdir(parents=True, exist_ok=True)
-            bp_df.to_csv(sample_config['callsets'][callset_name]['svensemble_dir'] / f'{callset_name}.{model_name}.bps.csv', index=False)
+            # Create the workflow_dir if it doesn't exist
+            if not workflow_config['workflow_dir'].exists():
+                workflow_config['workflow_dir'].mkdir(parents=True, exist_ok=True)
+            bp_df = caller_dispatch[callset_name](sample_name, workflow_config, verbose)
+            bp_df = bps.common_bps_preprocess(bp_df, workflow_config['callsets'][callset_name]['params'])
+            bp_df.to_csv(workflow_config['workflow_dir'] / f'{callset_name}.bps.csv', index=False)
         else:
             raise ValueError(f"Callset {callset_name} not supported")
 
 
-
-def load_gridss_breakpoints(sample_config: dict) -> pd.DataFrame | None:
-    """Load GRIDSS breakpoints if available."""
-    if 'gridss' in sample_config.get('callsets', {}):
-        gridss_bp_path = (
-            sample_config['sample_dir'] /
-            'sv_calling' / 'gridss' / 'svensemble2' / f'gridss.{sample_config["model"]["bps_suffix"]}.bps.csv'
-        )
-        return pd.read_csv(gridss_bp_path)
-    return None
-
-
-def load_manta_candidate_breakpoints(sample_config: dict) -> pd.DataFrame | None:
-    """Load Manta candidate breakpoints if available."""
-    if 'manta_candidate' in sample_config.get('callsets', {}):
-        manta_candidate_bp_path = (
-            sample_config['sample_dir'] /
-            'sv_calling' / 'manta' / 'svensemble2' / f'manta_candidate.{sample_config["model"]["bps_suffix"]}.bps.csv'
-        )
-        return pd.read_csv(manta_candidate_bp_path)
-    return None
-
-
-def load_manta_diploid_breakpoints(sample_config: dict) -> pd.DataFrame | None:
-    """Load Manta diploid breakpoints if available."""
-    if 'manta_diploid' in sample_config.get('callsets', {}):
-        manta_diploid_bp_path = (
-            sample_config['sample_dir'] /
-            'sv_calling' / 'manta' / 'svensemble2' / f'manta_diploid.{sample_config["model"]["bps_suffix"]}.bps.csv'
-        )
-        return pd.read_csv(manta_diploid_bp_path)
-    return None
-
-
-def load_delly_breakpoints(sample_config: dict) -> pd.DataFrame | None:
-    """Load DELLY breakpoints if available."""
-    if 'delly' in sample_config.get('callsets', {}):
-        delly_bp_path = (
-            sample_config['sample_dir'] /
-            'sv_calling' / 'delly' / 'svensemble2' / f'delly.{sample_config["model"]["bps_suffix"]}.bps.csv'
-        )
-        return pd.read_csv(delly_bp_path)
-    return None
-
-def load_gnomad_breakpoints(ground_truth_sample_config: dict) -> pd.DataFrame:
-    """Always load gnomAD reference breakpoints."""
-    gnomad_bp_path = (
-        ground_truth_sample_config['sample_dir'] /
-        'svensemble2' / 'gnomad.bps.csv'
-    )
-    return pd.read_csv(gnomad_bp_path)
-
-
 def match_sample_breakpoints(
     sample_name: str,
-    sample_config: dict,
-    ground_truth_sample_config: dict,
+    workflow_config: dict,
+    ground_truth_config: dict,
     max_dist: int = 200,
     insert_size_threshold: float = 0.7,
     verbose: bool = False
@@ -514,10 +525,10 @@ def match_sample_breakpoints(
     bp_df_dict = {}
 
     # For each callset in the sample, load the breakpoints into bp_df_dict
-    for callset_name, callset_config in sample_config['callsets'].items():
+    for callset_name, callset_config in workflow_config['callsets'].items():
         if verbose:
             print(f"Loading breakpoints for callset '{callset_name}'...")
-        bp_df = pd.read_csv(callset_config['svensemble_dir'] / f'{callset_name}.{sample_config["model"]["bps_suffix"]}.bps.csv', low_memory=False)
+        bp_df = pd.read_csv(workflow_config['workflow_dir'] / f'{callset_name}.bps.csv', low_memory=False)
         if verbose:
             print(f"Loaded {len(bp_df)} breakpoints for '{callset_name}'.")
 
@@ -526,24 +537,24 @@ def match_sample_breakpoints(
     # Always add reference breakpoints
     # The reference at the moment should always have a single callset
     # Check if true
-    if len(ground_truth_sample_config['callsets']) > 1:
+    if len(ground_truth_config['callsets']) > 1:
         raise ValueError("Reference sample should have a single callset")
 
-    reference_callset_name = list(ground_truth_sample_config['callsets'].keys())[0]
+    ground_truth_callset_name = list(ground_truth_config['callsets'].keys())[0]
     if verbose:
-        print(f"Loading reference breakpoints for callset '{reference_callset_name}'...")
-    ref_bp_df = pd.read_csv(ground_truth_sample_config['callsets'][reference_callset_name]['svensemble_dir'] / f'{reference_callset_name}.bps.csv', low_memory=False)
+        print(f"Loading reference breakpoints for callset '{ground_truth_callset_name}'...")
+    ref_bp_df = pd.read_csv(ground_truth_config['callsets'][ground_truth_callset_name]['svensemble_dir'] / 'bps.csv', low_memory=False)
 
     if verbose:
         if ref_bp_df is not None:
-            print(f"Loaded {len(ref_bp_df)} reference breakpoints for '{reference_callset_name}'.")
+            print(f"Loaded {len(ref_bp_df)} reference breakpoints for '{ground_truth_callset_name}'.")
         else:
-            raise FileNotFoundError(f"No reference breakpoints found for '{reference_callset_name}'.")
+            raise FileNotFoundError(f"No reference breakpoints found for '{ground_truth_callset_name}'.")
 
-    bp_df_dict[reference_callset_name] = ref_bp_df
+    bp_df_dict[ground_truth_callset_name] = ref_bp_df
 
     # Ensure output directory exists
-    output_dir = sample_config['sample_dir'] / 'sv_calling' / 'svensemble2'
+    output_dir = workflow_config['workflow_dir']
     if not output_dir.exists():
         if verbose:
             print(f"Creating output directory: {output_dir}")
@@ -551,130 +562,148 @@ def match_sample_breakpoints(
 
 
     # Perform breakpoint matching for each training set specified for sample using chunk_match
-    for training_set_name, training_set_callsets in sample_config['training_sets'].items():
+    for training_set_name, training_set_callsets in workflow_config['training_sets'].items():
         if verbose:
             print(f"Performing outer join matching of breakpoints for training set: {training_set_name}...")
         matched_bp_df = chunk_match.outer_join_bps(
             bp_df_dict={
-                callset_name: bp_df_dict[callset_name] for callset_name in training_set_callsets + [reference_callset_name]
+                callset_name: bp_df_dict[callset_name] for callset_name in training_set_callsets + [ground_truth_callset_name]
             },
-            ref_callset=reference_callset_name,
+            ref_callset=ground_truth_callset_name,
             insert_size_threshold=insert_size_threshold,
             max_dist=max_dist
         )
         if verbose:
             print(f"Matching complete. Matched breakpoints: {len(matched_bp_df)}")
         # Save matched breakpoints to CSV
-        output_csv_path = output_dir / f'{sample_name}.matched_bps.{training_set_name}.{sample_config["model"]["bps_suffix"]}.csv'
+        output_csv_path = output_dir / 'matched_bps.csv'
         if verbose:
             print(f"Saving matched breakpoints to: {output_csv_path}")
         matched_bp_df.to_csv(output_csv_path, index=False)
 
-
-
-def pu_train_predict_sample(
+def pu_train_sample(
     sample_name: str,
-    sample_config: dict,
-    ground_truth_sample_config: dict,
+    workflow_config: dict,
+    ground_truth_config: dict,
+    save_feature_matrix: bool = False,
     verbose: bool = False
 ) -> None:
     """
-    Train and save a Positive-Unlabeled (PU) learning model for a given sample.
-
-    This function loads the joined breakpoint DataFrame for the sample, preprocesses it
-    for PU learning, splits it into training and validation sets, trains a PU model,
-    and saves the resulting model and predictions.
-
-    Args:
-        sample_name (str): Name of the sample.
-        sample_config (dict): Configuration dictionary for the sample.
-        reference_sample_name (str): Name of the reference sample.
-        verbose (bool, optional): If True, print progress messages. Defaults to False.
-
-    Returns:
-        None
+    Train a Positive-Unlabeled (PU) learning model for a given sample.
     """
     # Load matched breakpoints DataFrame for each training set
-    unbiased_dict = {}
-    for training_set_name, training_set_callsets in sample_config['training_sets'].items():
-        joint_bp_path = (
-            sample_config['sample_dir'] /
-            'sv_calling' /
-            'svensemble2' /
-            f'{sample_name}.matched_bps.{training_set_name}.{sample_config["model"]["bps_suffix"]}.csv'
-        )
-        if verbose:
-            print(f"Loading joint breakpoints from: {joint_bp_path}")
-        joint_bp_df = pd.read_csv(joint_bp_path, low_memory=False)
 
-        # Preprocess for PU learning
-        if verbose:
-            print("Preprocessing sample for PU learning...")
-            print(f"Reference name: {ground_truth_sample_config['callsets'][list(ground_truth_sample_config['callsets'].keys())[0]]['source']}")
+    if len(workflow_config['training_sets']) > 1:
+        raise ValueError("Only one training set per workflow is supported")
 
-        training_set_df = mbps.preprocess_matchedbps_for_pu(
-            joint_bp_df,
-            sample_config,
-            ground_truth_sample_config['callsets'][list(ground_truth_sample_config['callsets'].keys())[0]]['source'],
-            training_set_name,
-            verbose=verbose
-        )
-        del joint_bp_df
-
-        X, y = mbps.get_X_y_from_training_df(
-            training_set_df,
-            match_col='ref_match'
-        )
-        X_train, X_val, y_train, y_val = skm.train_test_split(
-            X, y, train_size=0.8, random_state=0
-        )
-        training_set_splits = {
-            'X': X,
-            'X_train': X_train,
-            'X_val': X_val,
-            'y': y,
-            'y_train': y_train,
-            'y_val': y_val,
-            'X_idx': training_set_df.index
-        }
-        del training_set_df
-
-        if verbose:
-            print(f"Training PU model for training set: {training_set_name}")
-        model_kwargs = sample_config['model']['training_params']['model_kwargs']
-        rf_fit, y_pred = models.train_unbiased_rf_for_split(training_set_splits, **model_kwargs)
-        # Ensure predictions are indexed like the input
-        y_pred = pd.DataFrame(y_pred, index=training_set_splits['X_idx'])
-        unbiased_dict[training_set_name] = {
-            'RF_fit': rf_fit,
-            'y': y_pred
-        }
-
-    # Save the unbiased_dict to disk
-    output_path = (
-        sample_config['sample_dir'] /
-        'sv_calling' /
-        'svensemble2' /
-        f'{sample_name}.{sample_config["model"]["name"]}.model_dict.pkl'
-    )
+    training_set_name, training_set_callsets = list(workflow_config['training_sets'].items())[0]
+    joint_bp_path = workflow_config['workflow_dir'] / 'matched_bps.csv'
     if verbose:
-        print(f"Saving PU model results to: {output_path}")
-    with open(output_path, 'wb') as f:
-        pickle.dump(unbiased_dict, f)
+        print(f"Loading joint breakpoints from: {joint_bp_path}")
+    joint_bp_df = pd.read_csv(joint_bp_path, low_memory=False)
+
+    # Preprocess for PU learning
+    if verbose:
+        print("Preprocessing sample for PU learning...")
+        print(f"Reference name: {ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source']}")
+
+    training_set_df = mbps.preprocess_matchedbps_for_pu(
+        joint_bp_df,
+        workflow_config,
+        ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source'],
+        training_set_name,
+        verbose=verbose
+    )
+    del joint_bp_df
+
+    X, y = mbps.get_X_y_from_training_df(
+        training_set_df,
+        match_col='ref_match'
+    )
+    X_train, X_val, y_train, y_val = skm.train_test_split(
+        X, y, train_size=0.8, random_state=0
+    )
+    training_set_splits = {
+        'X': X,
+        'X_train': X_train,
+        'X_val': X_val,
+        'y': y,
+        'y_train': y_train,
+        'y_val': y_val,
+        'X_idx': training_set_df.index
+    }
+    del training_set_df
+
+    if verbose:
+        print(f"Training PU model for training set: {training_set_name}")
+    model_kwargs = workflow_config['model']['training_params']['model_kwargs']
+    rf_fit = models.train_unbiased_rf_for_split(training_set_splits, **model_kwargs)
+    if save_feature_matrix:
+        # Save the feature matrix to disk
+        output_path = workflow_config['workflow_dir'] / 'feature_matrix.csv'
+        if verbose:
+            print(f"Saving feature matrix to: {output_path}")
+        pd.DataFrame(training_set_splits['X']).to_csv(output_path, index=True)
+    if rf_fit is not None:
+        # Save the model to disk
+        output_path = workflow_config['workflow_dir'] / 'model.pkl'
+        if verbose:
+            print(f"Saving PU model to: {output_path}")
+        with open(output_path, 'wb') as f:
+            pickle.dump(rf_fit, f)
+    else:
+        raise ValueError("No PU model trained for training set")
+    return rf_fit
+
+def pu_predict_sample(
+    sample_name: str,
+    workflow_config: dict,
+    verbose: bool = False
+) -> None:
+    """
+    Predict the probability of a breakpoint being a true SV for a given sample.
+    """
+    if len(workflow_config['training_sets']) > 1:
+        raise ValueError("Only one training set per workflow is supported")
+    if not (workflow_config['workflow_dir'] / 'feature_matrix.csv').exists():
+        raise FileNotFoundError("Feature matrix not found")
+    X = pd.read_csv(workflow_config['workflow_dir'] / 'feature_matrix.csv', low_memory=False)
+    X.set_index([f'{callset_name}_INFO_EVENT' for callset_name in workflow_config['callsets'].keys()], inplace=True)
+    if not (workflow_config['workflow_dir'] / 'model.pkl').exists():
+        raise FileNotFoundError("Model dictionary not found")
+    if verbose:
+        print(f"Loading model from: {workflow_config['workflow_dir'] / 'model.pkl'}")
+    model_fit = pickle.load(open(workflow_config['workflow_dir'] / 'model.pkl', 'rb'))
+    if verbose:
+        print(f"Predicting probabilities for {len(X)} breakpoints")
+    y_pred = model_fit.predict_proba(X)[:,1]
+    if verbose:
+        print(f"Saving predictions to: {workflow_config['workflow_dir'] / 'predictions.csv'}")
+    y_pred = pd.DataFrame(y_pred, columns=[f'{list(workflow_config['training_sets'].keys())[0]}_{workflow_config['model']['name']}_pred'], index=X.index).reset_index(drop=False)
+
+    # Load the matched breakpoints DataFrame
+    matched_bp_df = pd.read_csv(workflow_config['workflow_dir'] / 'matched_bps.csv', low_memory=False)
+
+    svensemble2_calls_df = mbps.get_svensemble2_calls(
+        matched_bp_df,
+        y_pred
+    )
+    svensemble2_calls_df.to_csv(workflow_config['workflow_dir'] / 'svensemble2_calls.csv', index=True)
 
 
 def svensemble2(
-    sample_names: list[str],
+    sample_name: str,
     ground_truth_sample_name: str,
     ref_path: Path,
     model_name: str | None = None,
+    training_set: str | list[str] = 'default',
     verbose: bool = False,
     preprocess: bool = True,
     match: bool = True,
     train: bool = True,
+    predict: bool = True,
     match_max_dist: int = 100,
-    match_insert_size_threshold: float = 0.7,
-    use_cached_preprocessed_truth: bool = False,
+    match_insert_size_threshold: float = 0.7
 ) -> dict:
     """
     Accepts a list of sample names and a data directory.
@@ -691,44 +720,48 @@ def svensemble2(
         ground_truth_sample_name: name of the ground truth sample
         ref_path: path to the reference genome
         model_name: name of the PU learning model to use
-        preprocess: if True, preprocess the samples
+        training_set: training set or sets for model building
+        preprocess: if True, parse and preprocess the samples
         match: if True, match the breakpoints for each sample
-        train: if True, train the PU model for each sample
-        use_cached_preprocessed_truth: if True, use the cached preprocessed truth breakpoints instead of reprocessing them
+        train: if True, train the PU model
+        predict: if True, run predictions on breakpoints
+        match_max_dist: maximum distance for breakpoint matching
+        match_insert_size_threshold: insert size threshold for breakpoint matching
         verbose: if True, print progress messages
     """
     # Create a config dict for the samples using the sample_names
-    samples = {}
-    for sample_name in sample_names:
-        samples.update(sv_utils.create_config_dict(sample_name, ref_path=ref_path, model_name=model_name, is_ground_truth=False))
+    workflow_config = sv_utils.create_config_dict(sample_name, ref_path=ref_path, model_name=model_name, training_set=training_set, is_ground_truth=False)[sample_name]
     # Also create a config dict for the ground truth sample
-    samples.update(sv_utils.create_config_dict(ground_truth_sample_name, ref_path=ref_path, is_ground_truth=True))
+    ground_truth_config = sv_utils.create_config_dict(ground_truth_sample_name, ref_path=ref_path, is_ground_truth=True)[ground_truth_sample_name]
 
-    preprpocess_truth = True
-    if use_cached_preprocessed_truth:
-        # Check if a preprocessed truth sample exists in the correct location
-        if not (samples[ground_truth_sample_name]['callsets'][ground_truth_sample_name]['svensemble_dir'] / f'{ground_truth_sample_name}.bps.csv').exists():
-            raise FileNotFoundError(f"Preprocessed truth breakpoints not found for {ground_truth_sample_name}")
-        else:
-            preprpocess_truth = False
+    if not workflow_config['workflow_dir'].exists():
+        if verbose:
+            print(f"Creating workflow directory: {workflow_config['workflow_dir']}")
+        workflow_config['workflow_dir'].mkdir(parents=True)
+
+    if not (workflow_config['workflow_dir'] / 'workflow_config.pkl').exists():
+        if verbose:
+            print(f"Saving workflow config to: {workflow_config['workflow_dir'] / 'workflow_config.pkl'}")
+        with open(workflow_config['workflow_dir'] / 'workflow_config.pkl', 'wb') as f:
+            pickle.dump(workflow_config, f)
+
+    # Check if a preprocessed truth sample exists in the correct location
+    if not (ground_truth_config['callsets'][ground_truth_sample_name]['svensemble_dir'] / 'bps.csv').exists():
+        raise FileNotFoundError(f"Preprocessed truth breakpoints not found for {ground_truth_sample_name}")
 
     if preprocess:
         # Parse and preprocess the samples
-        for sample_name, sample_config in samples.items():
-            if (sample_name != ground_truth_sample_name) or ((sample_name == ground_truth_sample_name) and preprpocess_truth):
-                parse_preprocess_sample(sample_name=sample_name, sample_config=sample_config, verbose=verbose)
+        parse_preprocess_sample(sample_name=sample_name, workflow_config=workflow_config, verbose=verbose)
 
     if match:
-        # Match the breakpoints for each sample
-        for sample_name, sample_config in samples.items():
-            if sample_name != ground_truth_sample_name:
-                match_sample_breakpoints(sample_name=sample_name, sample_config=sample_config, ground_truth_sample_config=samples[ground_truth_sample_name], max_dist=match_max_dist, insert_size_threshold=match_insert_size_threshold, verbose=verbose)
+        match_sample_breakpoints(sample_name=sample_name, workflow_config=workflow_config, ground_truth_config=ground_truth_config, max_dist=match_max_dist, insert_size_threshold=match_insert_size_threshold, verbose=verbose)
 
     if train:
         # Train the PU models for each sample
-        for sample_name, sample_config in samples.items():
-            if sample_name != ground_truth_sample_name:
-                pu_train_predict_sample(sample_name=sample_name, sample_config=sample_config, ground_truth_sample_config=samples[ground_truth_sample_name], verbose=verbose)
+        pu_train_sample(sample_name=sample_name, workflow_config=workflow_config, ground_truth_config=ground_truth_config, save_feature_matrix=True, verbose=verbose)
+
+    if predict:
+        pu_predict_sample(sample_name=sample_name, workflow_config=workflow_config, verbose=verbose)
 
 
 if __name__ == '__main__':
@@ -787,24 +820,48 @@ if __name__ == '__main__':
         help="If set, train the PU model."
     )
     parser.add_argument(
-        '--use_cached_preprocessed_truth',
+        '--predict',
         action='store_true',
         default=False,
-        help="If set, use the cached preprocessed truth breakpoints instead of preprocessing them anew."
+        help="If set, run predictions on breakpoints."
+    )
+    parser.add_argument(
+        '--training_set',
+        type=str,
+        required=False,
+        default='default',
+        help="Training set or sets for model building."
+    )
+    parser.add_argument(
+        '--match_max_dist',
+        type=int,
+        required=False,
+        default=100,
+        help="Maximum distance for breakpoint matching."
+    )
+    parser.add_argument(
+        '--match_insert_size_threshold',
+        type=float,
+        required=False,
+        default=0.7,
+        help="Insert size threshold for breakpoint matching."
     )
     args = parser.parse_args()
 
     # Run the main SVEnsemble2 pipeline with the provided arguments
     svensemble2(
-        sample_names=[args.sample_name],
+        sample_name=args.sample_name,
         ground_truth_sample_name=args.ground_truth_sample_name,
         ref_path=args.ref_path,
         model_name=args.model_name,
+        training_set=args.training_set,
         verbose=args.verbose,
         preprocess=args.preprocess,
         match=args.match,
         train=args.train,
-        use_cached_preprocessed_truth=args.use_cached_preprocessed_truth
+        predict=args.predict,
+        match_max_dist=args.match_max_dist,
+        match_insert_size_threshold=args.match_insert_size_threshold
     )
 
 # Unbiased  GT preset

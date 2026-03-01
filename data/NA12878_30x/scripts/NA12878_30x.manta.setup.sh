@@ -1,1 +1,0 @@
-callers/manta-1.6.0.centos6_x86_64/bin/configManta.py --bam data/NA12878_30x/aligned/NA12878.minimap.30x.bam --referenceFasta data/hg38/downloads/hg38.no_decoys.fa --runDir data/NA12878_30x/sv_calling/manta/

@@ -427,10 +427,13 @@ def _get_svlen_svtype_filter_mask(
     else:
         raise ValueError(f'Invalid type for svtypes: {type(svtypes)}')
 
+    svtypes_col = annotate_svtypes(bps_df, source)
 
-    svtype_mask = annotate_svtypes(bps_df, source).isin(svtypes)
+    svtype_mask = svtypes_col.isin(svtypes)
+
     sv_sizes = get_sv_sizes(bps_df, source)
-    svlen_mask = (sv_sizes >= svlen_min) & (sv_sizes <= svlen_max)
+    ignore_svlen_svtypes = [no_size_svtype for no_size_svtype in ['INV', 'BND'] if no_size_svtype in svtypes]
+    svlen_mask = ((sv_sizes >= svlen_min) & (sv_sizes <= svlen_max)) | svtypes_col.isin(ignore_svlen_svtypes)
 
     return svtype_mask & svlen_mask
 

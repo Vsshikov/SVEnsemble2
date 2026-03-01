@@ -84,7 +84,6 @@ def bnd_to_bp(
 
     # Generate chromosome keys for sorting
     chrom_key_dict = utils.generate_chrom_key_dict(bnd_df['CHROM'])
-    print(chrom_key_dict)
 
     # Split into first/second breakends
     grsizes = bnd_df.groupby('INFO_EVENT').transform('size')

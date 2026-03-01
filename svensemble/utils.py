@@ -80,6 +80,36 @@ def _get_survivor_callset_dict(sample_name: str) -> dict:
         }
     )
 
+def _get_gridss_H_callset_dict(sample_name: str) -> dict:
+    return defaultdict(str,
+        {
+            'source': 'gridss',
+            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/gridss/svensemble2'),
+            'path': Path(f'data/{sample_name}/sv_calling/gridss/out/{sample_name}.gridss.vcf'),
+            'params': caller_param_dict['gridss_H']
+        }
+    )
+
+def _get_sniffles_callset_dict(sample_name: str) -> dict:
+    return defaultdict(str,
+        {
+            'source': 'sniffles',
+            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/sniffles/svensemble2'),
+            'path': Path(f'data/{sample_name}/sv_calling/sniffles/out/{sample_name}.sniffles.vcf'),
+            'params': caller_param_dict['sniffles']
+        }
+    )
+
+def _get_sniffles_H_callset_dict(sample_name: str) -> dict:
+    return defaultdict(str,
+        {
+            'source': 'sniffles',
+            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/sniffles/svensemble2'),
+            'path': Path(f'data/{sample_name}/sv_calling/sniffles/out/{sample_name}.sniffles.vcf'),
+            'params': caller_param_dict['sniffles_H']
+        }
+    )
+
 def _get_caller_callset_dict(sample_name: str, caller_name: str) -> dict:
     caller_dispatch = {
         'gnomad': _get_gnomad_callset_dict,
@@ -87,7 +117,10 @@ def _get_caller_callset_dict(sample_name: str, caller_name: str) -> dict:
         'manta_candidate': _get_manta_candidate_callset_dict,
         'manta_diploid': _get_manta_diploid_callset_dict,
         'delly': _get_delly_callset_dict,
-        'survivor': _get_survivor_callset_dict
+        'sniffles': _get_sniffles_callset_dict,
+        'sniffles_H': _get_sniffles_H_callset_dict,
+        'survivor': _get_survivor_callset_dict,
+        'gridss_H': _get_gridss_H_callset_dict
     }
 
     return caller_dispatch[caller_name](sample_name)
@@ -96,7 +129,7 @@ def create_config_dict(
     sample_name: str,
     ref_path: Path | None = None,
     is_ground_truth: bool = False,
-    training_sets: str | dict[str, list[str]] = 'default',
+    training_set: str | list[str] = 'default',
     val_set: None | str | dict[str, Any] = None,
     model_name: str = None,
     additional_callsets: list[str] | None = None
@@ -104,15 +137,15 @@ def create_config_dict(
     """
     Based on _caller_params, create a config dictionary for the sample.
     """
-    if isinstance(training_sets, str):
-        if training_sets in training_set_presets.keys():
-            _training_sets = training_set_presets[training_sets]
+    if isinstance(training_set, str):
+        if training_set in training_set_presets.keys():
+            _training_sets = {training_set: training_set_presets[training_set]}
         else:
-            raise ValueError(f'Invalid training set: {training_sets}')
-    elif isinstance(training_sets, dict):
-        _training_sets = training_sets
+            raise ValueError(f'Invalid training set: {training_set}')
+    elif isinstance(training_set, list):
+        _training_sets = {f'{'+'.join(training_set)}': training_set}
     else:
-        raise ValueError(f'Invalid training set: {training_sets}')
+        raise ValueError(f'Invalid training set: {training_set}')
 
     # Training sets are all lists of calleset names
     # Find all unique callset names in the training sets
@@ -151,6 +184,7 @@ def create_config_dict(
         config_dict = {
             sample_name: {
                 'sample_dir': Path(f'data/{sample_name}'),
+                'workflow_dir': Path(f'data/{sample_name}/svensemble2'),
                 'is_reference': True,
                 'callsets': {
                     sample_name: _get_caller_callset_dict(sample_name, default_reference_set)
@@ -162,9 +196,16 @@ def create_config_dict(
     config_dict = {
         sample_name: {
             'sample_dir': Path(f'data/{sample_name}'),
+            'workflow_dir': Path(
+                f'data/{sample_name}/sv_calling/svensemble2/'
+                f'{sample_name}.{model_name}.'
+                f'{'+'.join(_training_sets[list(_training_sets.keys())[0]])}'
+            ),
             'is_reference': False,
             'callsets': {
-                callset_name: _get_caller_callset_dict(sample_name, caller_name=callset_name)
+                callset_name: _get_caller_callset_dict(
+                    sample_name, caller_name=callset_name
+                )
                 for callset_name in callset_names
             },
             'training_sets': _training_sets,
@@ -175,12 +216,17 @@ def create_config_dict(
     }
 
     # If there are custom columns specified in the model config, add them to the config dict of each caller.
-    if 'custom_cols' in config_dict[sample_name]['model']['training_params'].keys():
+    if ('custom_cols' in config_dict[sample_name]['model']['training_params'].keys()) and len(config_dict[sample_name]['model']['training_params']['custom_cols']) > 0:
         print(f"Adding custom columns to the config dict for sample {sample_name}")
         print(f"Custom columns: {config_dict[sample_name]['model']['training_params']['custom_cols']}")
         for callset_name in callset_names:
             config_dict[sample_name]['callsets'][callset_name]['params']['custom_cols_pred'] = config_dict[sample_name]['model']['training_params']['custom_cols']
 
+    for callset_name in callset_names:
+        if config_dict[sample_name]['callsets'][callset_name]['params']['override_bps_path']:
+            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['sample_dir'] / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
+        else:
+            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['workflow_dir'] / f'{callset_name}.bps.csv'
     if not config_dict:
         raise ValueError(f"No config dictionary created for sample {sample_name}")
 

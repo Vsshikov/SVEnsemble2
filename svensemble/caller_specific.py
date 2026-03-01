@@ -455,3 +455,117 @@ def delly_preprocess_bnds_only(delly_df: pd.DataFrame, caller_params: dict|None 
     delly_df_ = delly_df_.drop(columns=cols_to_drop)
 
     return delly_preprocess_common(delly_df_, caller_params)
+
+
+# SNIFFLES2
+# Sniffles2 does not emit CIPOS/CIEND fields; breakpoint uncertainty is reported
+# as STDEV_POS (position stddev) and STDEV_LEN (length stddev).
+# Both are converted to symmetric integer CIPOS/CIEND intervals before the
+# standard BND/event pipeline is applied.
+
+def _sniffles_cipos_from_stdev(stdev_series: pd.Series) -> pd.DataFrame:
+    """Convert a Sniffles2 STDEV series into symmetric CIPOS_l / CIPOS_r integer columns.
+
+    Args:
+        stdev_series: Series of float standard-deviation values (e.g. INFO_STDEV_POS).
+
+    Returns:
+        DataFrame with two columns: <name>_l (negative) and <name>_r (positive),
+        both equal in magnitude to the rounded standard deviation.
+    """
+    stdev_int = stdev_series.fillna(0).apply(lambda x: int(round(x)))
+    base = stdev_series.name.replace('INFO_STDEV_POS', 'INFO_CIPOS').replace('INFO_STDEV_LEN', 'INFO_CIEND')
+    return pd.DataFrame(
+        {f'{base}_l': -stdev_int, f'{base}_r': stdev_int},
+        index=stdev_series.index
+    )
+
+
+def sniffles_preprocess_common(
+    sniffles_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Common preprocessing for all Sniffles2 entries (BND and non-BND).
+
+    Applies steps shared by both BND and event preprocessing:
+    1. Sets INFO_EVENT to the variant ID
+    2. Converts INFO_STDEV_POS to symmetric INFO_CIPOS_l / INFO_CIPOS_r integers
+    3. Converts negative SVLEN for DEL records to positive values
+
+    Args:
+        sniffles_df: DataFrame of Sniffles2 variant calls
+        caller_params: Caller-specific parameters (defaults to sniffles_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.sniffles_params
+
+    sniffles_df_ = sniffles_df.copy()
+
+    sniffles_df_.loc[:, 'INFO_EVENT'] = sniffles_df_['ID']
+
+    sniffles_df_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = _sniffles_cipos_from_stdev(
+        sniffles_df_['INFO_STDEV_POS']
+    )
+
+    # Sniffles2 reports negative SVLEN for deletions; convert to positive for consistency
+    del_mask = sniffles_df_['INFO_SVTYPE'] == 'DEL'
+    sniffles_df_.loc[del_mask, 'INFO_SVLEN'] = sniffles_df_.loc[del_mask, 'INFO_SVLEN'].abs()
+
+    return sniffles_df_
+
+
+def sniffles_preprocess_evts_only(
+    sniffles_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Preprocessing for Sniffles2 non-BND event entries (DEL, INS, DUP, INV).
+
+    In addition to the common steps, this function:
+    1. Converts INFO_STDEV_LEN to symmetric INFO_CIEND_l / INFO_CIEND_r integers
+    2. Sets INFO_CHR2 to CHROM (intrachromosomal events share start/end chromosome)
+
+    Args:
+        sniffles_df: DataFrame of Sniffles2 non-BND variant calls
+        caller_params: Caller-specific parameters (defaults to sniffles_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.sniffles_params
+
+    sniffles_df_ = sniffles_df.copy()
+
+    sniffles_df_.loc[:, ['INFO_CIEND_l', 'INFO_CIEND_r']] = _sniffles_cipos_from_stdev(
+        sniffles_df_['INFO_STDEV_LEN']
+    )
+
+    # Intrachromosomal events share start and end chromosome
+    sniffles_df_.loc[:, 'INFO_CHR2'] = sniffles_df_['CHROM']
+
+    return sniffles_preprocess_common(sniffles_df_, caller_params)
+
+
+def sniffles_preprocess_bnds_only(
+    sniffles_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Preprocessing for Sniffles2 BND entries.
+
+    INFO_CHR2 is already populated from the VCF for BND records; only the
+    common preprocessing steps are applied.
+
+    Args:
+        sniffles_df: DataFrame of Sniffles2 BND variant calls
+        caller_params: Caller-specific parameters (defaults to sniffles_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.sniffles_params
+
+    return sniffles_preprocess_common(sniffles_df, caller_params)

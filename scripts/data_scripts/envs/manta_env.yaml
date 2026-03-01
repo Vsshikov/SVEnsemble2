@@ -1,0 +1,11 @@
+name: manta_env
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=2.7
+  - numpy
+  - zlib
+  - setuptools
+  - pip

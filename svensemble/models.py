@@ -5,11 +5,10 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier as RF
 
 
-
 def train_unbiased_rf_for_split(
     training_set_train_test_split: dict,
     **model_kwargs
-) -> tuple[RF, np.ndarray] | tuple[None, None]:
+) -> RF | None:
     """
     Train an unbiased random forest model for a single training set using the Duplessis method.
 
@@ -18,9 +17,7 @@ def train_unbiased_rf_for_split(
             Dictionary containing train/test splits for a training set.
 
     Returns:
-        tuple: (RF_duplessis_fit, y_duplessis)
-            - RF_duplessis_fit: Trained RandomForestClassifier model.
-            - y_duplessis: Predicted probabilities for the full set X.
+        RF: Trained RandomForestClassifier model.
     """
     # Set default model kwargs.
     # Rewrite/update if model_kwargs are supplied
@@ -42,7 +39,7 @@ def train_unbiased_rf_for_split(
         print(
             "No positive labels in the training or validation set, skipping"
         )
-        return None, None
+        return None
 
     rf_nontrad = RF(
         max_features=int(np.sqrt(X.shape[1])),
@@ -54,6 +51,15 @@ def train_unbiased_rf_for_split(
 
     label_freq = (y_nontrad & y_val).sum() / y_val.sum()
     label_prob = y.sum() / len(y)
+
+    if label_freq == 0:
+        print(
+            "label_freq is 0: the non-traditional RF predicted no true positives "
+            "in the validation set. This means no matches to ground truth were found in this dataset. "
+            "Skipping this split."
+        )
+        return None
+
     clpr = label_prob / label_freq
 
     weight_dict = {
@@ -69,6 +75,6 @@ def train_unbiased_rf_for_split(
     )
 
     rf_duplessis_fit = rf_duplessis.fit(X_train, y_train)
-    y_duplessis = rf_duplessis_fit.predict_proba(X)
+    # y_duplessis = rf_duplessis_fit.predict_proba(X)
 
-    return rf_duplessis_fit, y_duplessis
+    return rf_duplessis_fit#, y_duplessis

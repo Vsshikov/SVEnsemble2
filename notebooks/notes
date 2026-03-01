@@ -1,0 +1,10 @@
+Jinjin tree learning talk
+sample-level feature contribution???
+treeBayes
+what is copula???
+Q! you need variables to be distributed according to preset distributions, correct?
+Q! how does this work with complex vairable interactions?
+PPCA - look it up
+how deep does interaction of vars go?
+bayesian weights
+takes into account previous temporal samples - autoregressive sequential prediction - cool

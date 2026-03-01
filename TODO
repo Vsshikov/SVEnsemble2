@@ -13,6 +13,12 @@ Complete tasks for discussion:
 
 TODO:
 
+Write a preprocessing script for ground truth data.
+Untie svensemble sample configs from _sample_params.py and instead use a json saved at data dir
+Possibly use master_args.sh to construct the sample json?
+
+
+
 Look at SVLENs. Possible explanations for SVLEN importance:
 - SVs that are too long/short classified as erroneous
 - SVs from different chroms (SVLEN=0) classified as erroneous
@@ -150,3 +156,38 @@ In the future - merge long/short reads and/or improve either short/long reads st
 Load LR fqs.
 Callers: Sniffles2, what else?
 Matching to short read data - different representation
+
+Create master script to submit SLURM jobs:
+- accepting preprocessed BAM file
+- running:
+    - manta preprocess + manta calling
+    - gridss
+    - delly
+    - survivor
+- results to be saved to data/sample_name dir to corresponding caller folders
+
+
+
+DONE:
+
+========== Refactor main pipeline ==========
+
+Currently:
+- creates preprocessed bps files in svensemble directory within caller dir
+- creates separate matched_bps files in svensemble directory for each model and each training set
+- creates pooled model_dict with all models for all sets
+- model training and prediction steps are in single function
+Refactor to:
+- create a directory within sample data dir for entire workflow
+- workflow to be separate for each:
+    - sample
+    - model
+    - training set
+- preprocessed input callsets to be saved in this dir as well.
+- workflow dir structure:
+    - preprocessed bps files
+    - matchedbps file
+    - model file
+    - svensemble predictions file
+    - benchmark dir
+        - each benchmark file separately

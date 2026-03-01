@@ -181,7 +181,7 @@ def preprocess_matchedbps_for_pu(
     sample_config: dict,
     match_sample_name: str,
     training_set_name: str,
-    add_match_ids_to_index: bool = True,
+    add_match_ids_to_index: bool = False,
     ignore_match_errors: bool = False,
     verbose: bool = False
 ) -> pd.DataFrame:

@@ -22,8 +22,6 @@ def _get_bnd2_pos(bnd_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.Series:
         'pos2': lambda x: x['INFO_POS2'].astype(int) + 1
     }
 
-    print(_bnd2_pos_dispatch[bnd2_pos](bnd_df))
-
     return _bnd2_pos_dispatch[bnd2_pos](bnd_df)
 
 def convert_del_to_bnd(del_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.DataFrame:

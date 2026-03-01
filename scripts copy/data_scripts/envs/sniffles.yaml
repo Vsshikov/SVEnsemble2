@@ -1,0 +1,7 @@
+name: sniffles2
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10.15
+  - sniffles=2.7.2

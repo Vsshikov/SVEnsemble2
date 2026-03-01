@@ -348,6 +348,7 @@ def get_pairwise_matches(
                 [
                     ((sources[i], events[i]), (sources[j], events[j]))
                     for i, j in zip(i_indices, j_indices)
+                    if sources[i] != sources[j]  # only cross-source pairs
                 ]
             )
 
