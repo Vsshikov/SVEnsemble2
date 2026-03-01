@@ -169,8 +169,6 @@ fi
 
 # ========== ========== SVENSEMBLE2 PIPELINE ========== ==========
 
-module load micromamba
-
 # Collect all caller job IDs into a single dependency string
 _sve_ids=""
 for _id in "$manta_id" "$gridss_id" "$delly_id" "$sniffles_id"; do
@@ -179,91 +177,71 @@ done
 echo "$(date): Caller jobs submitted for $SAMPLE_NAME: $_sve_ids" >> $LOG_DIR/run.log
 [[ -n "$_sve_ids" ]] && SVE_CALLER_DEPENDENCY="--dependency=afterok${_sve_ids}" || SVE_CALLER_DEPENDENCY=""
 
-# Build step flags from config booleans
-SVE_STEP_FLAGS=""
-[[ "$SVE_STEP_PREPROCESS" == "true" ]] && SVE_STEP_FLAGS+=" --preprocess"
-[[ "$SVE_STEP_MATCH"      == "true" ]] && SVE_STEP_FLAGS+=" --match"
-[[ "$SVE_STEP_TRAIN"      == "true" ]] && SVE_STEP_FLAGS+=" --train"
-[[ "$SVE_STEP_PREDICT"    == "true" ]] && SVE_STEP_FLAGS+=" --predict"
-[[ "$SVE_VERBOSE"         == "true" ]] && SVE_STEP_FLAGS+=" --verbose"
-
-# Submit one job per model × training_set combination
+# Submit one SLURM array job covering all model × training_set combinations.
+# Each task reads its parameters from a TSV task file via SLURM_ARRAY_TASK_ID.
 _sve_job_ids=()
 if [[ "$RERUN" == "true" || "$SVENSEMBLE2_RERUN" == "true" ]]; then
+    SVE_TASK_FILE="$LOG_DIR/svensemble2/tasks.tsv"
     for SVE_MODEL in "${SVE_MODELS[@]}"; do
         for SVE_TRAINING_SET in "${SVE_TRAINING_SETS[@]}"; do
-            SVE_COMMAND="$PROJ_DIR/svensemble/pipeline.py \
-                --sample_name $SAMPLE_NAME \
-                --ground_truth_sample_name $SVE_GROUND_TRUTH_SAMPLE_NAME \
-                --ref_path $REF_FASTA \
-                --model_name $SVE_MODEL \
-                --training_set $SVE_TRAINING_SET \
-                $SVE_STEP_FLAGS \
-                --match_max_dist $SVE_MATCH_MAX_DIST \
-                --match_insert_size_threshold $SVE_MATCH_INSERT_SIZE_THRESHOLD"
-            echo "$(date): Submitting SVEnsemble2 job:" >> $LOG_DIR/run.log
-            echo -e "$SVE_COMMAND" >> $LOG_DIR/run.log
-            sve_id=$(micromamba run -n SVEnsemble2 sbatch --parsable --chdir=$SAMPLE_DIR $SVE_CALLER_DEPENDENCY \
-                --output=$LOG_DIR/svensemble2/%j.out --error=$LOG_DIR/svensemble2/%j.err \
-                $SVE_COMMAND)
-            echo "$(date): Submitted SVEnsemble2 job with ID: $sve_id" >> $LOG_DIR/run.log
-            [[ -n "$sve_id" ]] && _sve_job_ids+=("$sve_id")
+            printf '%s\t%s\n' "$SVE_MODEL" "$SVE_TRAINING_SET"
         done
-    done
+    done > "$SVE_TASK_FILE"
+    N_SVE_TASKS=$(wc -l < "$SVE_TASK_FILE")
+
+    echo "$(date): SVEnsemble2 task file (${N_SVE_TASKS} tasks): $SVE_TASK_FILE" >> $LOG_DIR/run.log
+    cat "$SVE_TASK_FILE" >> $LOG_DIR/run.log
+
+    sve_array_id=$(sbatch --parsable --chdir="$SAMPLE_DIR" $SVE_CALLER_DEPENDENCY \
+        --array=0-$((N_SVE_TASKS - 1)) \
+        --output="$LOG_DIR/svensemble2/%A_%a.out" \
+        --error="$LOG_DIR/svensemble2/%A_%a.err" \
+        "$SAMPLE_DIR/scripts/svensemble_array.sh" "$SOURCE_FILE" "$SVE_TASK_FILE")
+    echo "$(date): Submitted SVEnsemble2 array job with ID: $sve_array_id (${N_SVE_TASKS} tasks)" >> $LOG_DIR/run.log
+    [[ -n "$sve_array_id" ]] && _sve_job_ids+=("$sve_array_id")
 fi
 
 # ========== ========== BENCHMARKING ========== ==========
 
 if [[ "$BENCHMARK" == "true" ]]; then
-    # Build dependency on all SVEnsemble2 pipeline jobs
+    # Build dependency on all SVEnsemble2 array jobs (afterok waits for every task)
     _bench_dep_ids=""
     for _id in "${_sve_job_ids[@]}"; do
         [[ -n "$_id" ]] && _bench_dep_ids="${_bench_dep_ids}:${_id}"
     done
     [[ -n "$_bench_dep_ids" ]] && BENCH_DEPENDENCY="--dependency=afterok${_bench_dep_ids}" || BENCH_DEPENDENCY=""
 
-    # Build static flag string (flags that are constant across all benchmark jobs)
-    SVE_BENCH_FLAGS_STATIC=""
-    [[ -n "$SVE_BENCH_SVLEN_UPPER" ]]                         && SVE_BENCH_FLAGS_STATIC+=" --svlen_upper $SVE_BENCH_SVLEN_UPPER"
-    [[ -n "$SVE_BENCH_VAL_MATCH_MARGIN" ]]                    && SVE_BENCH_FLAGS_STATIC+=" --val_match_margin $SVE_BENCH_VAL_MATCH_MARGIN"
-    [[ -n "$SVE_BENCH_VAL_MATCH_INSERT_SIZE_THRESHOLD" ]]     && SVE_BENCH_FLAGS_STATIC+=" --val_match_insert_size_threshold $SVE_BENCH_VAL_MATCH_INSERT_SIZE_THRESHOLD"
-    [[ -n "$SVE_BENCH_ADDITIONAL_CALLSETS" ]]                 && SVE_BENCH_FLAGS_STATIC+=" --additional_callsets $SVE_BENCH_ADDITIONAL_CALLSETS"
-    [[ -n "$SVE_BENCH_ADDITIONAL_COLS" ]]                     && SVE_BENCH_FLAGS_STATIC+=" --additional_cols $SVE_BENCH_ADDITIONAL_COLS"
-    [[ -n "$SVE_BENCH_LIMIT_TO_CALLSETS" ]]                   && SVE_BENCH_FLAGS_STATIC+=" --limit_to_callsets $SVE_BENCH_LIMIT_TO_CALLSETS"
-    [[ "$SVE_BENCH_SKIP_FILTERING" == "true" ]]               && SVE_BENCH_FLAGS_STATIC+=" --skip_filtering"
-    [[ "$SVE_VERBOSE"              == "true" ]]               && SVE_BENCH_FLAGS_STATIC+=" --verbose"
-
     # Normalise SVE_BENCH_SVTYPES and SVE_BENCH_SVLEN_LOWER to arrays.
-    # An empty array means "no filter" — one job is still submitted without that flag.
+    # An empty array means "no filter" — one task is still written without that flag.
     _bench_svtypes_list=("${SVE_BENCH_SVTYPES[@]}")
     [[ ${#_bench_svtypes_list[@]} -eq 0 ]] && _bench_svtypes_list=("")
 
     _bench_svlen_lower_list=("${SVE_BENCH_SVLEN_LOWER[@]}")
     [[ ${#_bench_svlen_lower_list[@]} -eq 0 ]] && _bench_svlen_lower_list=("")
 
-    # Submit one benchmark job per model × training_set × svtypes × svlen_lower combination
+    # Submit one SLURM array job covering all model × training_set × svtypes × svlen_lower combinations.
+    # Each task reads its parameters from a TSV task file via SLURM_ARRAY_TASK_ID.
+    BENCH_TASK_FILE="$LOG_DIR/benchmark/tasks.tsv"
     for SVE_MODEL in "${SVE_MODELS[@]}"; do
         for SVE_TRAINING_SET in "${SVE_TRAINING_SETS[@]}"; do
             for _svtypes in "${_bench_svtypes_list[@]}"; do
                 for _svlen_lower in "${_bench_svlen_lower_list[@]}"; do
-                    _bench_flags="$SVE_BENCH_FLAGS_STATIC"
-                    [[ -n "$_svtypes" ]]     && _bench_flags+=" --svtypes $_svtypes"
-                    [[ -n "$_svlen_lower" ]] && _bench_flags+=" --svlen_lower $_svlen_lower"
-
-                    BENCH_COMMAND="$PROJ_DIR/svensemble/benchmark.py \
-                        --sample_name $SAMPLE_NAME \
-                        --model_name $SVE_MODEL \
-                        --training_sets $SVE_TRAINING_SET \
-                        $_bench_flags"
-                    echo "$(date): Submitting benchmark job:" >> $LOG_DIR/run.log
-                    echo -e "$BENCH_COMMAND" >> $LOG_DIR/run.log
-                    bench_id=$(micromamba run -n SVEnsemble2 sbatch --parsable --chdir=$SAMPLE_DIR $BENCH_DEPENDENCY \
-                        --output=$LOG_DIR/benchmark/%j.out --error=$LOG_DIR/benchmark/%j.err \
-                        $BENCH_COMMAND)
-                    echo "$(date): Submitted benchmark job with ID: $bench_id" >> $LOG_DIR/run.log
+                    printf '%s\t%s\t%s\t%s\n' \
+                        "$SVE_MODEL" "$SVE_TRAINING_SET" "$_svtypes" "$_svlen_lower"
                 done
             done
         done
-    done
+    done > "$BENCH_TASK_FILE"
+    N_BENCH_TASKS=$(wc -l < "$BENCH_TASK_FILE")
+
+    echo "$(date): Benchmark task file (${N_BENCH_TASKS} tasks): $BENCH_TASK_FILE" >> $LOG_DIR/run.log
+    cat "$BENCH_TASK_FILE" >> $LOG_DIR/run.log
+
+    bench_array_id=$(sbatch --parsable --chdir="$SAMPLE_DIR" $BENCH_DEPENDENCY \
+        --array=0-$((N_BENCH_TASKS - 1)) \
+        --output="$LOG_DIR/benchmark/%A_%a.out" \
+        --error="$LOG_DIR/benchmark/%A_%a.err" \
+        "$SAMPLE_DIR/scripts/benchmark_array.sh" "$SOURCE_FILE" "$BENCH_TASK_FILE")
+    echo "$(date): Submitted benchmark array job with ID: $bench_array_id (${N_BENCH_TASKS} tasks)" >> $LOG_DIR/run.log
 fi
 
