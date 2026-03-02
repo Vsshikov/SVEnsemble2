@@ -14,7 +14,8 @@
 #
 # Task file format (one combination per line, tab-separated):
 #   SVE_MODEL<TAB>SVE_TRAINING_SET<TAB>SVTYPES<TAB>SVLEN_LOWER
-# SVTYPES and SVLEN_LOWER may be empty (adjacent tabs produce empty strings).
+# Optional fields (SVTYPES, SVLEN_LOWER) use "." as a sentinel for "no value"
+# to avoid bash collapsing consecutive tab delimiters during IFS=$'\t' read.
 
 SOURCE_FILE="$1"
 TASK_FILE="$2"
@@ -23,9 +24,13 @@ PROJ_DIR="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2"
 
 source "$SOURCE_FILE"
 
-# Read parameters for this task (task file is 0-indexed, sed is 1-indexed)
+# Read parameters for this task (task file is 0-indexed, sed is 1-indexed).
+# Empty optional fields are written as "." in the task file (see master.sh) so
+# that IFS=$'\t' read does not collapse consecutive tabs into a single delimiter.
 IFS=$'\t' read -r SVE_MODEL SVE_TRAINING_SET _svtypes _svlen_lower \
     < <(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$TASK_FILE")
+[[ "$_svtypes"     == "." ]] && _svtypes=""
+[[ "$_svlen_lower" == "." ]] && _svlen_lower=""
 
 echo "$(date): Array task ${SLURM_ARRAY_TASK_ID}: model=${SVE_MODEL} training_set=${SVE_TRAINING_SET} svtypes='${_svtypes}' svlen_lower='${_svlen_lower}'"
 

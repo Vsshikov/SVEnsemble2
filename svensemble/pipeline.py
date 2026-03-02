@@ -657,6 +657,10 @@ def pu_predict_sample(
     model_fit = pickle.load(open(workflow_config['workflow_dir'] / 'model.pkl', 'rb'))
     if verbose:
         print(f"Predicting probabilities for {len(X)} breakpoints")
+
+    # Fill missing features with 0 if any were introduced in training - from other samples or with the model function
+    X = X.reindex(columns=model_fit.feature_names_in_, fill_value=0)
+
     y_pred = model_fit.predict_proba(X)[:,1]
     if verbose:
         print(f"Saving predictions to: {workflow_config['workflow_dir'] / 'predictions.csv'}")

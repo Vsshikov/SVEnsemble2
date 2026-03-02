@@ -181,7 +181,7 @@ gridss_params = default_params | {
     'info_cols_pred': gridss_info_pred_cols,
     'parse_format': False,
     'svlen_source': 'alt',
-    'bps_path': 'sv_calling/gridss/svensemble2/gridss_bps.csv',
+    'bps_path': 'gridss.bps.csv',
     'bnd2_pos': None
 }
 
@@ -199,7 +199,7 @@ gnomad_params = default_params | {
         'RD': 500
     },
     'is_reference': True,
-    'bps_path': 'svensemble2/gnomad_bps.csv'
+    'bps_path': 'gnomad.bps.csv'
 }
 
 manta_candidate_params = default_params | {
@@ -210,7 +210,7 @@ manta_candidate_params = default_params | {
     'info_cols_pred': ['IMPRECISE', 'HOMLEN', 'BND_DEPTH', 'SVLEN', 'PAIR_COUNT', 'UPSTREAM_PAIR_COUNT', 'DOWNSTREAM_PAIR_COUNT', 'BND_PAIR_COUNT'],
     'parse_format': False,
     'svlen_source': 'svlen',
-    'bps_path': 'sv_calling/manta/svensemble2/manta_candidate_bps.csv',
+    'bps_path': 'manta_candidate.bps.csv',
     'qual_metric': 'INFO_TOTAL_PAIR_COUNT',
     'bnd2_pos': 'end'
 }
@@ -224,7 +224,7 @@ manta_diploid_params = default_params | {
     'parse_format': True,
     'format_cols': ['FT', 'GQ', 'PR', 'SR'],
     'svlen_source': 'svlen',
-    'bps_path': 'sv_calling/manta/svensemble2/manta_diploid_bps.csv',
+    'bps_path': 'manta_diploid.bps.csv',
     'bnd2_pos': 'end'
 }
 
@@ -237,7 +237,7 @@ delly_params = default_params | {
     'parse_format': True,
     'format_cols': ['GT', 'GQ', 'RC', 'RCL', 'RCR', 'RDCN', 'DR', 'DV', 'RR', 'RV'],
     'svlen_source': 'svlen',
-    'bps_path': 'sv_calling/delly/svensemble2/delly_bps.csv',
+    'bps_path': 'delly.bps.csv',
     'bnd2_pos': 'end'
 }
 
@@ -349,10 +349,11 @@ sniffles_params = default_params | {
     'parse_format': True,
     'format_cols': ['GT', 'GQ', 'DR', 'DV'],
     'svlen_source': 'svlen',
-    'bps_path': 'sv_calling/sniffles/svensemble2/sniffles.bps.csv',
-    'override_bps_path': True,
+    'bps_path': 'sniffles.bps.csv',
+    'override_bps_path': False,
     'bnd2_pos': 'svlen'
 }
+
 
 sniffles_H_params = sniffles_params | {
     'bps_path': 'sv_calling/sniffles/svensemble2/sniffles_H.bps.csv',

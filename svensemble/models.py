@@ -162,6 +162,7 @@ def train_unbiased_concat_rf(
     training_set_dfs = []
     for sample in workflow_config['model']['training_params']['function_params']['samples']:
         if sample == workflow_config['sample_name']:
+            sample_workflow_config = workflow_config
             sample_joint_bp_df = joint_bp_df
         else:
             sample_workflow_config = sv_utils.create_config_dict(sample, model_name=workflow_config['model']['name'], training_set=training_set_name)[sample]

@@ -193,6 +193,8 @@ def create_config_dict(
         }
         return defaultdict(str, config_dict)
 
+    training_set_name, training_set_callers = next(iter(_training_sets.items()))
+
     config_dict = {
         sample_name: {
             'sample_name': sample_name,
@@ -200,7 +202,7 @@ def create_config_dict(
             'workflow_dir': Path(
                 f'data/{sample_name}/sv_calling/svensemble2/'
                 f'{sample_name}.{model_name}.'
-                f'{'+'.join(_training_sets[list(_training_sets.keys())[0]])}'
+                f'{training_set_name}'
             ),
             'is_reference': False,
             'callsets': {
@@ -229,20 +231,22 @@ def create_config_dict(
         config_dict[sample_name]['model']['matched_bps_path'] = Path(
                 f'data/{sample_name}/sv_calling/svensemble2/'
                 f'{sample_name}.{config_dict[sample_name]['model']['matched_bps_suffix']}.'
-                f'{'+'.join(_training_sets[list(_training_sets.keys())[0]])}'
+                f'{training_set_name}'
                 '/matched_bps.csv'
             )
     if 'feature_matrix_suffix' in config_dict[sample_name]['model'].keys():
         config_dict[sample_name]['model']['feature_matrix_path'] = Path(
                 f'data/{sample_name}/sv_calling/svensemble2/'
                 f'{sample_name}.{config_dict[sample_name]['model']['feature_matrix_suffix']}.'
-                f'{'+'.join(_training_sets[list(_training_sets.keys())[0]])}'
+                f'{training_set_name}'
                 '/feature_matrix.csv'
             )
 
     for callset_name in callset_names:
         if config_dict[sample_name]['callsets'][callset_name]['params']['override_bps_path']:
             config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['sample_dir'] / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
+        elif 'bps_suffix' in config_dict[sample_name]['model'].keys():
+            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['sample_dir'] / f'sv_calling/svensemble2/{sample_name}.{config_dict[sample_name]['model']['bps_suffix']}.{training_set_name}' / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
         else:
             config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['workflow_dir'] / f'{callset_name}.bps.csv'
     if not config_dict:

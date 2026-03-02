@@ -227,7 +227,7 @@ if [[ "$BENCHMARK" == "true" ]]; then
             for _svtypes in "${_bench_svtypes_list[@]}"; do
                 for _svlen_lower in "${_bench_svlen_lower_list[@]}"; do
                     printf '%s\t%s\t%s\t%s\n' \
-                        "$SVE_MODEL" "$SVE_TRAINING_SET" "$_svtypes" "$_svlen_lower"
+                        "$SVE_MODEL" "$SVE_TRAINING_SET" "${_svtypes:-.}" "${_svlen_lower:-.}"
                 done
             done
         done
