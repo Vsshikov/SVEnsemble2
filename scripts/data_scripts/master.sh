@@ -144,7 +144,7 @@ if [[ ! -z "$READS_LONG_PATHS" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/align
 fi
 
 # ========== LONG READ CALLERS ==========
-if [[ ! -z "$READS_LONG_PATHS" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_calling/sniffles/out/${SAMPLE_NAME}.sniffles.vcf" )]]; then
+if [[ ! -z "$READS_LONG_PATHS" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_calling/sniffles/out/${SAMPLE_NAME}.long.sniffles.vcf" )]]; then
     sniffles_id=$(sbatch --parsable --chdir=$SAMPLE_DIR $MINIMAP_LONG_DEPENDENCY \
         --output=$LOG_DIR/sniffles/%j.out --error=$LOG_DIR/sniffles/%j.err \
         $SAMPLE_DIR/scripts/sniffles.sh $SOURCE_FILE)
@@ -160,7 +160,7 @@ else
     SURVIVOR_DEPENDENCY="";
 fi
 
-if [[ "$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_calling/survivor/out/${SAMPLE_NAME}.survivor.vcf" ]]; then
+if [[ "$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_calling/survivor/${SAMPLE_NAME}.survivor.vcf" ]]; then
     survivor_id=$(sbatch --parsable --chdir=$SAMPLE_DIR $SURVIVOR_DEPENDENCY \
         --output=$LOG_DIR/survivor/%j.out --error=$LOG_DIR/survivor/%j.err \
         $SAMPLE_DIR/scripts/survivor.sh $SOURCE_FILE)
@@ -209,7 +209,7 @@ if [[ "$BENCHMARK" == "true" ]]; then
     for _id in "${_sve_job_ids[@]}"; do
         [[ -n "$_id" ]] && _bench_dep_ids="${_bench_dep_ids}:${_id}"
     done
-    [[ -n "$_bench_dep_ids" ]] && BENCH_DEPENDENCY="--dependency=afterok${_bench_dep_ids}" || BENCH_DEPENDENCY=""
+    [[ -n "$_bench_dep_ids" ]] && BENCH_DEPENDENCY="--dependency=afterany${_bench_dep_ids}" || BENCH_DEPENDENCY=""
 
     # Normalise SVE_BENCH_SVTYPES and SVE_BENCH_SVLEN_LOWER to arrays.
     # An empty array means "no filter" — one task is still written without that flag.

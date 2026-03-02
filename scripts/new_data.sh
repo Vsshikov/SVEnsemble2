@@ -29,18 +29,18 @@ for script in $(ls $PROJ_DIR/scripts/data_scripts); do
     ln -s $PROJ_DIR/scripts/data_scripts/$script $SAMPLE_DIR/scripts/$script
 done
 
-mkdir -p $SAMPLE_DIR/scripts/envs
-for yaml in $(ls $PROJ_DIR/scripts/data_scripts/envs); do
-    ln -s $PROJ_DIR/scripts/data_scripts/envs/$yaml $SAMPLE_DIR/scripts/envs/$yaml
-done
+# mkdir -p $SAMPLE_DIR/scripts/envs
+# for yaml in $(ls $PROJ_DIR/scripts/data_scripts/envs); do
+#     ln -s $PROJ_DIR/scripts/data_scripts/envs/$yaml $SAMPLE_DIR/scripts/envs/$yaml
+# done
 
 mkdir -p $SAMPLE_DIR/logs
 mkdir -p $SAMPLE_DIR/downloads
 mkdir -p $SAMPLE_DIR/preprocessed
 
 # Set the default values in the master_args.sh file
-sed -i "s/SAMPLE_NAME=/SAMPLE_NAME=$SAMPLE_NAME/" $SAMPLE_DIR/scripts/master_args.sh
-sed -i "s/SAMPLE_DIR=/SAMPLE_DIR=$SAMPLE_DIR/" $SAMPLE_DIR/scripts/master_args.sh
+sed -i "s|SAMPLE_NAME=|SAMPLE_NAME=$SAMPLE_NAME|" $SAMPLE_DIR/scripts/master_args.sh
+sed -i "s|SAMPLE_DIR=|SAMPLE_DIR=$SAMPLE_DIR|" $SAMPLE_DIR/scripts/master_args.sh
 
 echo "New data directory created for sample: $SAMPLE_NAME"
 echo "Sample directory: $SAMPLE_DIR"

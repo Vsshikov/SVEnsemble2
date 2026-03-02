@@ -600,50 +600,31 @@ def pu_train_sample(
     joint_bp_path = workflow_config['workflow_dir'] / 'matched_bps.csv'
     if verbose:
         print(f"Loading joint breakpoints from: {joint_bp_path}")
-    joint_bp_df = pd.read_csv(joint_bp_path, low_memory=False)
+    try:
+        joint_bp_df = pd.read_csv(joint_bp_path, low_memory=False)
+    except FileNotFoundError:
+        if verbose:
+            print(f"Joint breakpoints not found at {joint_bp_path}, loading from {workflow_config['model']['matched_bps_path']}")
+        joint_bp_df = pd.read_csv(workflow_config['model']['matched_bps_path'], low_memory=False)
 
     # Preprocess for PU learning
     if verbose:
         print("Preprocessing sample for PU learning...")
         print(f"Reference name: {ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source']}")
 
-    training_set_df = mbps.preprocess_matchedbps_for_pu(
+    X, rf_fit = models.train_model(
         joint_bp_df,
         workflow_config,
-        ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source'],
+        ground_truth_config,
         training_set_name,
         verbose=verbose
     )
-    del joint_bp_df
-
-    X, y = mbps.get_X_y_from_training_df(
-        training_set_df,
-        match_col='ref_match'
-    )
-    X_train, X_val, y_train, y_val = skm.train_test_split(
-        X, y, train_size=0.8, random_state=0
-    )
-    training_set_splits = {
-        'X': X,
-        'X_train': X_train,
-        'X_val': X_val,
-        'y': y,
-        'y_train': y_train,
-        'y_val': y_val,
-        'X_idx': training_set_df.index
-    }
-    del training_set_df
-
-    if verbose:
-        print(f"Training PU model for training set: {training_set_name}")
-    model_kwargs = workflow_config['model']['training_params']['model_kwargs']
-    rf_fit = models.train_unbiased_rf_for_split(training_set_splits, **model_kwargs)
     if save_feature_matrix:
         # Save the feature matrix to disk
         output_path = workflow_config['workflow_dir'] / 'feature_matrix.csv'
         if verbose:
             print(f"Saving feature matrix to: {output_path}")
-        pd.DataFrame(training_set_splits['X']).to_csv(output_path, index=True)
+        pd.DataFrame(X).to_csv(output_path, index=True)
     if rf_fit is not None:
         # Save the model to disk
         output_path = workflow_config['workflow_dir'] / 'model.pkl'
@@ -665,12 +646,12 @@ def pu_predict_sample(
     """
     if len(workflow_config['training_sets']) > 1:
         raise ValueError("Only one training set per workflow is supported")
-    if not (workflow_config['workflow_dir'] / 'feature_matrix.csv').exists():
-        raise FileNotFoundError("Feature matrix not found")
-    X = pd.read_csv(workflow_config['workflow_dir'] / 'feature_matrix.csv', low_memory=False)
+    if not (workflow_config['model']['feature_matrix_path']).exists():
+        raise FileNotFoundError(f"Feature matrix not found at {workflow_config['model']['feature_matrix_path']}")
+    X = pd.read_csv(workflow_config['model']['feature_matrix_path'], low_memory=False)
     X.set_index([f'{callset_name}_INFO_EVENT' for callset_name in workflow_config['callsets'].keys()], inplace=True)
     if not (workflow_config['workflow_dir'] / 'model.pkl').exists():
-        raise FileNotFoundError("Model dictionary not found")
+        raise FileNotFoundError(f"Model dictionary not found at {workflow_config['workflow_dir'] / 'model.pkl'}")
     if verbose:
         print(f"Loading model from: {workflow_config['workflow_dir'] / 'model.pkl'}")
     model_fit = pickle.load(open(workflow_config['workflow_dir'] / 'model.pkl', 'rb'))
@@ -682,7 +663,9 @@ def pu_predict_sample(
     y_pred = pd.DataFrame(y_pred, columns=[f'{list(workflow_config['training_sets'].keys())[0]}_{workflow_config['model']['name']}_pred'], index=X.index).reset_index(drop=False)
 
     # Load the matched breakpoints DataFrame
-    matched_bp_df = pd.read_csv(workflow_config['workflow_dir'] / 'matched_bps.csv', low_memory=False)
+    if not (workflow_config['model']['matched_bps_path']).exists():
+        raise FileNotFoundError(f"Matched breakpoints not found at {workflow_config['model']['matched_bps_path']}")
+    matched_bp_df = pd.read_csv(workflow_config['model']['matched_bps_path'], low_memory=False)
 
     svensemble2_calls_df = mbps.get_svensemble2_calls(
         matched_bp_df,

@@ -30,7 +30,7 @@ OUTPUT_VCF="$SAMPLE_DIR/sv_calling/sniffles/out/${SAMPLE_NAME}.long.sniffles.vcf
 mkdir -p "$(dirname "$OUTPUT_VCF")"
 
 micromamba run -n "$ENV_NAME" sniffles \
-    -i "$SAMPLE_DIR/aligned/${SAMPLE_NAME}.long.minimap.bam" \
+    -i "$SAMPLE_DIR/aligned_long/${SAMPLE_NAME}.long.minimap.bam" \
     -v "$OUTPUT_VCF" \
     --reference "$REF_FASTA" \
     --threads "${SLURM_CPUS_PER_TASK:-8}"

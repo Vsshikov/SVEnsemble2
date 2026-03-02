@@ -39,7 +39,7 @@ SVE_STEP_FLAGS=""
 module load micromamba
 
 # shellcheck disable=SC2086
-micromamba run -n SVEnsemble2 "$PROJ_DIR/svensemble/pipeline.py" \
+micromamba run -n SVEnsemble2 python "$PROJ_DIR/svensemble/pipeline.py" \
     --sample_name "$SAMPLE_NAME" \
     --ground_truth_sample_name "$SVE_GROUND_TRUTH_SAMPLE_NAME" \
     --ref_path "$REF_FASTA" \

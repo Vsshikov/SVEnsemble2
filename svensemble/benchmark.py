@@ -991,6 +991,8 @@ def benchmark_model(
     model_name,
     svtypes=None,
     svlens=None,
+    val_set_name=None,
+    val_set_path=None,
     training_sets: List[str] | str | None = None,
     val_match_margin: int = 300,
     val_match_insert_size_threshold: float = 0.7,
@@ -1008,6 +1010,7 @@ def benchmark_model(
         model_name (str): Model identifier (e.g. 'unbiased').
         svtypes (list or tuple): Structural variant types to consider.
         svlens (tuple): SV length range (min, max).
+        val_set_path (str): Path to the validation set. If not provided, the function will use the validation set path from the sample config.
         training_sets (list or str): Training sets to consider.
         additional_cols (list or str): Additional columns to keep in the validation result dataframe.
         additional_callsets (list or str): Names of additional callsets to include in the benchmark.
@@ -1046,6 +1049,20 @@ def benchmark_model(
     else:
         svlens_str = f'{svlens[0]}:{svlens[1]}'
 
+    val_set_str = ""
+    if val_set_path is None:
+        val_set_arg = "use_name"
+    else:
+        try:
+            val_set_path = Path(val_set_path)
+        except Exception as e:
+            raise ValueError(f"Invalid input path for validation set: {val_set_path}, error: {e}")
+        if val_set_name is None:
+            raise ValueError("Validation set name is required when providing a path for the validation set, use --val_set_name argument")
+        val_set_arg = sample_params.sample_val_set_template.copy()
+        val_set_arg['path'] = val_set_path
+        val_set_arg['name'] = val_set_name
+        val_set_str = val_set_name
 
     # Build config dict for the sample, with all paths
     config_dicts = []
@@ -1053,7 +1070,7 @@ def benchmark_model(
         config_dicts.append(sv_utils.create_config_dict(
             sample_name,
             training_set=training_set_name,
-            val_set="use_name",
+            val_set=val_set_arg,
             model_name=model_name,
             additional_callsets=additional_callsets
         )[sample_name])
@@ -1154,7 +1171,7 @@ def benchmark_model(
                 f"{callset_name} callset for {sample_name} processed "
                 f"({match_count} matches out of {total_count} predictions)"
             )
-        val_df.to_csv(bench_dir / f'{callset_name}.{svtypes_str}.{svlens_str}.benchmark.csv', index=False)
+        val_df.to_csv(bench_dir / f'{callset_name}.{svtypes_str}.{svlens_str}.{val_set_str}.benchmark.csv', index=False)
 
     # Validate SVEnsemble2 predictions for each training set
     for svensemble2_preds_to_load, svensemble2_preds_path, svensemble2_preds_config_dict in zip(svensemble2_preds_to_load, svensemble2_preds_paths, svensemble2_preds_config_dicts):
@@ -1186,7 +1203,7 @@ def benchmark_model(
                 f"SVEnsemble2 predictions ({svensemble2_preds_to_load.replace('svensemble2_', '')}) for {sample_name} processed "
                 f"({match_count} matches out of {total_count} predictions)"
             )
-        val_df.to_csv(bench_dir / f'{svensemble2_preds_to_load}.{svtypes_str}.{svlens_str}.benchmark.csv', index=False)
+        val_df.to_csv(bench_dir / f'{svensemble2_preds_to_load}.{svtypes_str}.{svlens_str}.{val_set_str}.benchmark.csv', index=False)
 
 
 if __name__ == "__main__":
@@ -1197,6 +1214,8 @@ if __name__ == "__main__":
     parser.add_argument('--svtypes', type=str, default=None)
     parser.add_argument('--svlen_lower', type=int, default=caller_params.default_sv_lens[0])
     parser.add_argument('--svlen_upper', type=int, default=caller_params.default_sv_lens[1])
+    parser.add_argument('--val_set_path', type=str, default=None)
+    parser.add_argument('--val_set_name', type=str, default=None)
     parser.add_argument('--training_sets', type=str, default='default')
     parser.add_argument('--val_match_margin', type=int, default=300)
     parser.add_argument('--val_match_insert_size_threshold', type=float, default=0.7)
@@ -1249,6 +1268,8 @@ if __name__ == "__main__":
         svtypes=svtypes,
         svlens=(args.svlen_lower, args.svlen_upper),
         training_sets=training_sets,
+        val_set_path=args.val_set_path,
+        val_set_name=args.val_set_name,
         val_match_margin=args.val_match_margin,
         val_match_insert_size_threshold=args.val_match_insert_size_threshold,
         skip_filtering=args.skip_filtering,
@@ -1257,20 +1278,3 @@ if __name__ == "__main__":
         limit_to_callsets=limit_to_callsets,
         verbose=args.verbose
     )
-
-
-# General preprocess with survivor calls
-# for model_name in unbiased unbiased_GT; do for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name $model_name --skip_filtering --perform_steps preprocess --additional_callsets survivor --verbose; done; done; done
-#
-# Run benchmark on the processed samples with default parameters on all sv types separately
-# for model_name in unbiased unbiased_GT; do for svtype in DEL INS DUP INV OTHER; do for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name $model_name --svtypes $svtype --perform_steps benchmark --additional_callsets survivor --verbose; done; done; done
-#
-# Run benchmark for separate sv types with minimum svlen 0. The only val set with such lower length is HG002
-# for model_name in unbiased unbiased_GT; do for svtype in DEL INS DUP INV OTHER; do for sample_name in HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name $model_name --svtypes $svtype --perform_steps benchmark --svlen_lower 0 --additional_callsets survivor --verbose; done; done; done
-#
-# Run benchmark for each sample without svtype filtering
-# for model_name in unbiased unbiased_GT; do for sample_name in NA12878 NA12878_30x CHM13 HG002; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name $model_name --perform_steps benchmark --additional_callsets survivor --verbose; done; done
-#
-#
-# Test benchmark on smallest sample
-# for model_name in unbiased unbiased_GT; do for svtype in DEL INS DUP INV OTHER; do for sample_name in NA12878_30x; do sbatch svensemble/benchmark.py --sample_name $sample_name --model_name $model_name --svtypes $svtype --perform_steps benchmark --additional_callsets survivor --verbose; done; done; done

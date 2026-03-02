@@ -45,7 +45,7 @@ _bench_flags=""
 module load micromamba
 
 # shellcheck disable=SC2086
-micromamba run -n SVEnsemble2 "$PROJ_DIR/svensemble/benchmark.py" \
+micromamba run -n SVEnsemble2 python "$PROJ_DIR/svensemble/benchmark.py" \
     --sample_name "$SAMPLE_NAME" \
     --model_name "$SVE_MODEL" \
     --training_sets "$SVE_TRAINING_SET" \

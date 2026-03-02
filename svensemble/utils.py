@@ -195,6 +195,7 @@ def create_config_dict(
 
     config_dict = {
         sample_name: {
+            'sample_name': sample_name,
             'sample_dir': Path(f'data/{sample_name}'),
             'workflow_dir': Path(
                 f'data/{sample_name}/sv_calling/svensemble2/'
@@ -221,6 +222,23 @@ def create_config_dict(
         print(f"Custom columns: {config_dict[sample_name]['model']['training_params']['custom_cols']}")
         for callset_name in callset_names:
             config_dict[sample_name]['callsets'][callset_name]['params']['custom_cols_pred'] = config_dict[sample_name]['model']['training_params']['custom_cols']
+
+    # Specify the path to the matched breakpoints used for training the model
+    # If the model uses matched_bps from another workflow
+    if 'matched_bps_suffix' in config_dict[sample_name]['model'].keys():
+        config_dict[sample_name]['model']['matched_bps_path'] = Path(
+                f'data/{sample_name}/sv_calling/svensemble2/'
+                f'{sample_name}.{config_dict[sample_name]['model']['matched_bps_suffix']}.'
+                f'{'+'.join(_training_sets[list(_training_sets.keys())[0]])}'
+                '/matched_bps.csv'
+            )
+    if 'feature_matrix_suffix' in config_dict[sample_name]['model'].keys():
+        config_dict[sample_name]['model']['feature_matrix_path'] = Path(
+                f'data/{sample_name}/sv_calling/svensemble2/'
+                f'{sample_name}.{config_dict[sample_name]['model']['feature_matrix_suffix']}.'
+                f'{'+'.join(_training_sets[list(_training_sets.keys())[0]])}'
+                '/feature_matrix.csv'
+            )
 
     for callset_name in callset_names:
         if config_dict[sample_name]['callsets'][callset_name]['params']['override_bps_path']:
