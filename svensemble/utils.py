@@ -95,7 +95,7 @@ def _get_sniffles_callset_dict(sample_name: str) -> dict:
         {
             'source': 'sniffles',
             'svensemble_dir': Path(f'data/{sample_name}/sv_calling/sniffles/svensemble2'),
-            'path': Path(f'data/{sample_name}/sv_calling/sniffles/out/{sample_name}.sniffles.vcf'),
+            'path': Path(f'data/{sample_name}/sv_calling/sniffles/out/{sample_name}.long.sniffles.vcf'),
             'params': caller_param_dict['sniffles']
         }
     )
@@ -105,7 +105,7 @@ def _get_sniffles_H_callset_dict(sample_name: str) -> dict:
         {
             'source': 'sniffles',
             'svensemble_dir': Path(f'data/{sample_name}/sv_calling/sniffles/svensemble2'),
-            'path': Path(f'data/{sample_name}/sv_calling/sniffles/out/{sample_name}.sniffles.vcf'),
+            'path': Path(f'data/{sample_name}/sv_calling/sniffles/out/{sample_name}.long.sniffles.vcf'),
             'params': caller_param_dict['sniffles_H']
         }
     )
@@ -163,12 +163,12 @@ def create_config_dict(
     if (val_set == 'use_name'):
         if sample_name not in sample_val_sets.keys():
             raise ValueError(f'Validation set not found for sample: {sample_name}')
-        val_set = sample_val_sets[sample_name]
-    elif val_set in sample_val_sets.keys():
-        val_set = sample_val_sets[val_set]
+        val_set = sample_val_sets[sample_name].copy()
+    elif val_set in list(sample_val_sets.keys()):
+        val_set = sample_val_sets[val_set].copy()
     elif isinstance(val_set, dict):
         if all(key in val_set.keys() for key in sample_val_set_template.keys()):
-            val_set = val_set
+            pass
         else:
             raise ValueError(f'Invalid validation set: {val_set}')
         try:
@@ -179,6 +179,23 @@ def create_config_dict(
         val_set = None
     else:
         raise ValueError(f'Invalid validation set: {val_set}')
+
+    # Val_set must have a viable callset param setup
+    if val_set is not None:
+        val_name = val_set.get('name')
+        if not val_name or not str(val_name).strip():
+            raise ValueError(
+                f"Validation set has an empty or missing 'name'. "
+                f"Ensure 'name' is set to a key in _caller_params.caller_param_dict. Got: {repr(val_name)}"
+            )
+        try:
+            val_set['params'] = caller_param_dict[val_name]
+        except KeyError as e:
+            raise ValueError(
+                f'Validation set "{val_name}" does not have a callable param setup in _caller_params.py. '
+                f'Available names: {list(caller_param_dict.keys())}. Error: {e}'
+            )
+
 
     if model_name is None:
         model_name = default_model_name
@@ -220,7 +237,7 @@ def create_config_dict(
             'training_sets': _training_sets,
             'ref_path': ref_path,
             'val_set': val_set,
-            'model': model_configs[model_name]
+            'model': model_configs[model_name].copy()
         }
     }
 

@@ -110,3 +110,23 @@ SVE_BENCH_ADDITIONAL_COLS=FILTER_PASS,FILTER_PASS_bnd1,FILTER_PASS_bnd2
 # Comma-separated callsets to restrict evaluation to (leave empty for all)
 SVE_BENCH_LIMIT_TO_CALLSETS=
 SVE_BENCH_SKIP_FILTERING=false
+# Custom validation set — overrides the default val set for the sample defined in _sample_params.py.
+# Both must be set together: VAL_SET_NAME is the key in _caller_params.caller_param_dict used to
+# parse the BPS file; VAL_SET_PATH is the absolute path to a preprocessed .bps.csv file.
+# Leave empty to use the default val set for the sample.
+SVE_BENCH_VAL_SET_PATH=
+SVE_BENCH_VAL_SET_NAME=
+
+# ========== SVEnsemble2 SHAP Parameters ==========
+# Set SHAP=true to submit SHAP assessment jobs after benchmarking completes.
+SHAP=false
+# Data source for SHAP: 'bench_pkl' (bench_preprocessed pickle) or 'workflow' (model.pkl + feature_matrix.csv)
+SVE_SHAP_SOURCE=bench_pkl
+# Set to true to use GPUTreeExplainer (requires gpuq partition and max_depth <= 31)
+SVE_SHAP_USE_GPU=false
+# Subsample to at most N rows for SHAP computation (leave empty for all rows)
+SVE_SHAP_MAX_SAMPLES=
+# Generate beeswarm and bar summary plots
+SVE_SHAP_PLOT=true
+# Number of top features to display in summary and plots
+SVE_SHAP_TOP_N=20

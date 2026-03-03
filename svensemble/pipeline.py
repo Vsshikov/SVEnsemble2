@@ -1,12 +1,5 @@
 #! /usr/bin/env python3
 
-#SBATCH --job-name=svensemble2
-#SBATCH --output=logs/pipeline/svensemble2_%j.out
-#SBATCH --error=logs/pipeline/svensemble2_%j.err
-#SBATCH --time=24:00:00
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=32G
-
 
 """
 A top-level script to run the SVEnsemble pipeline.

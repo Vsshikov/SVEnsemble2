@@ -1,11 +1,5 @@
 #! /usr/bin/env python3
 
-#SBATCH --job-name=svensemble2_benchmark
-#SBATCH --output=logs/benchmark/svensemble2_benchmark.%j.out
-#SBATCH --error=logs/benchmark/svensemble2_benchmark.%j.err
-#SBATCH --time=10:00:00
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=8G
 
 import matplotlib as mpl
 from matplotlib import pyplot as plt
@@ -142,6 +136,10 @@ def get_plot_colors(n_callsets):
 xgfs_fancy6 = [(86, 100, 26), (192, 175, 251), (230, 161, 118), (0, 103, 138), (152, 68, 100), (94, 204, 171), (205, 205, 205)]
 # Convert to RGB tuples with 0-1 floats
 xgfs_fancy6 = [tuple(color / 255 for color in color_tuple) for color_tuple in xgfs_fancy6]
+
+xgfs_fancy_ext = [(88, 55, 170), (200, 50, 50), (255, 165, 0), (0, 160, 80), (180, 40, 180), (255, 100, 50), (40, 140, 200), (200, 180, 0)]
+xgfs_fancy_ext = [tuple(c / 255 for c in rgb) for rgb in xgfs_fancy_ext]
+
 _style_mappings = {
     'gridss': {
         'line': {
@@ -267,7 +265,131 @@ _style_mappings = {
         'text': {
             'label': 'GR+MA+DE',
         }
-    }
+    },
+    'manta_candidate': {
+        'line': {
+            'color': xgfs_fancy6[3],
+            'linewidth': 0.7,
+            'dashes': (4, 2),
+            'label': 'Manta (Candidate)',
+        },
+        'text': {
+            'label': 'MC',
+        }
+    },
+    'svensemble2_manta_candidate': {
+        'line': {
+            'color': xgfs_fancy6[3],
+            'linewidth': 1,
+            'dashes': (4, 2),
+            'label': 'SVEnsemble2 (Manta Candidate)',
+        },
+        'text': {
+            'label': 'MC',
+        }
+    },
+    'sniffles': {
+        'line': {
+            'color': xgfs_fancy_ext[0],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'Sniffles',
+        },
+        'text': {
+            'label': 'SN',
+        }
+    },
+    'sniffles_H': {
+        'line': {
+            'color': xgfs_fancy_ext[0],
+            'linewidth': 1,
+            'dashes': (2, 2),
+            'label': 'Sniffles (High Confidence Calls)',
+        },
+        'text': {
+            'label': 'SN_H',
+        }
+    },
+    'svensemble2_sniffles': {
+        'line': {
+            'color': xgfs_fancy_ext[0],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (Sniffles)',
+        },
+        'text': {
+            'label': 'SN',
+        }
+    },
+    'svensemble2_sniffles+gridss': {
+        'line': {
+            'color': xgfs_fancy_ext[1],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (Sniffles + GRIDSS)',
+        },
+        'text': {
+            'label': 'SN+GR',
+        }
+    },
+    'svensemble2_sniffles+manta_candidate': {
+        'line': {
+            'color': xgfs_fancy_ext[2],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (Sniffles + Manta Candidate)',
+        },
+        'text': {
+            'label': 'SN+MC',
+        }
+    },
+    'svensemble2_sniffles+manta_diploid': {
+        'line': {
+            'color': xgfs_fancy_ext[3],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (Sniffles + Manta)',
+        },
+        'text': {
+            'label': 'SN+MA',
+        }
+    },
+    'svensemble2_sniffles+delly': {
+        'line': {
+            'color': xgfs_fancy_ext[4],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (Sniffles + Delly)',
+        },
+        'text': {
+            'label': 'SN+DE',
+        }
+    },
+    'svensemble2_sniffles+manta_candidate+delly': {
+        'line': {
+            'color': xgfs_fancy_ext[5],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (Sniffles + Manta Candidate + Delly)',
+        },
+        'text': {
+            'label': 'SN+MC+DE',
+        }
+    },
+    'svensemble2_sniffles+manta_diploid+delly': {
+        'line': {
+            'color': xgfs_fancy_ext[6],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (Sniffles + Manta + Delly)',
+        },
+        'text': {
+            'label': 'SN+MA+DE',
+        }
+    },
+    'svensemble2_sniffles+gridss+manta_diploid+delly': {
+        'line': {
+            'color': xgfs_fancy_ext[7],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (Sniffles + GRIDSS + Manta + Delly)',
+        },
+        'text': {
+            'label': 'SN+GR+MA+DE',
+        }
+    },
 }
 
 default_style_mapping = {
@@ -290,10 +412,14 @@ def get_style_mapping(callset, default_style_mapping=default_style_mapping):
     _default_style_mapping = deepcopy(default_style_mapping)
     if callset in _style_mappings:
         style_mapping = sv_utils.update(_default_style_mapping, _style_mappings[callset])
+    else:
+        _fallback_color = plt.get_cmap('tab20')(hash(callset) % 20)
+        _default_style_mapping['line']['color'] = _fallback_color
+        _default_style_mapping['line']['label'] = callset
+        style_mapping = _default_style_mapping
+    if 'color' in style_mapping['line']:
         style_mapping['text']['bbox']['ec'] = style_mapping['line']['color']
         style_mapping['text']['bbox']['fc'] = style_mapping['line']['color']
-    else:
-        style_mapping = _default_style_mapping
     return style_mapping
 
 # Create ordering for callsets. svensemble2 calls should always follow corresponding original callsets.
@@ -305,12 +431,24 @@ _callset_order = [
     'svensemble2_gridss',
     'manta_diploid',
     'svensemble2_manta_diploid',
+    'manta_candidate',
+    'svensemble2_manta_candidate',
     'delly',
     'svensemble2_delly',
+    'sniffles',
+    'sniffles_H',
+    'svensemble2_sniffles',
     'survivor',
     'svensemble2_delly+manta_diploid',
     'svensemble2_gridss+manta_diploid',
+    'svensemble2_sniffles+gridss',
+    'svensemble2_sniffles+manta_candidate',
+    'svensemble2_sniffles+manta_diploid',
+    'svensemble2_sniffles+delly',
+    'svensemble2_sniffles+manta_candidate+delly',
+    'svensemble2_sniffles+manta_diploid+delly',
     'svensemble2_gridss+manta_diploid+delly',
+    'svensemble2_sniffles+gridss+manta_diploid+delly',
 ]
 # def order_legend(plt, callsets):
 #     """
@@ -1023,6 +1161,8 @@ def benchmark_model(
         model_name (str): Model identifier (e.g. 'unbiased').
         svtypes (list or tuple): Structural variant types to consider.
         svlens (tuple): SV length range (min, max).
+        val_set_name (str): Name of the validation set. If not provided, the function will use the validation set name from the sample config.
+            the validation set name must have a valid callset param setup in _caller_params.py
         val_set_path (str): Path to the validation set. If not provided, the function will use the validation set path from the sample config.
         training_sets (list or str): Training sets to consider.
         additional_cols (list or str): Additional columns to keep in the validation result dataframe.
@@ -1062,16 +1202,29 @@ def benchmark_model(
     else:
         svlens_str = f'{svlens[0]}:{svlens[1]}'
 
+    # Normalise sentinel empty strings (common from SLURM array jobs)
+    if isinstance(val_set_name, str) and not val_set_name.strip():
+        val_set_name = None
+    if isinstance(val_set_path, str) and not val_set_path.strip():
+        val_set_path = None
+
     val_set_str = ""
-    if val_set_path is None:
+    if val_set_name is None and val_set_path is None:
+        # Neither provided → use the validation set registered for this sample
         val_set_arg = "use_name"
+    elif val_set_path is not None and val_set_name is None:
+        raise ValueError(
+            "--val_set_name is required when --val_set_path is provided."
+        )
+    elif val_set_name is not None and val_set_path is None:
+        raise ValueError(
+            f"--val_set_path is required when --val_set_name ('{val_set_name}') is provided."
+        )
     else:
         try:
             val_set_path = Path(val_set_path)
         except Exception as e:
             raise ValueError(f"Invalid input path for validation set: {val_set_path}, error: {e}")
-        if val_set_name is None:
-            raise ValueError("Validation set name is required when providing a path for the validation set, use --val_set_name argument")
         val_set_arg = sample_params.sample_val_set_template.copy()
         val_set_arg['path'] = val_set_path
         val_set_arg['name'] = val_set_name
@@ -1275,14 +1428,25 @@ if __name__ == "__main__":
     else:
         limit_to_callsets = None
 
+    # If the val_set_path or val_set_name is an empty string, set it to None
+    # Needed for proper argument parsing in slurm arrays
+    if args.val_set_path == "":
+        val_set_path = None
+    else:
+        val_set_path = args.val_set_path
+    if args.val_set_name == "":
+        val_set_name = None
+    else:
+        val_set_name = args.val_set_name
+
     benchmark_model(
         sample_name=args.sample_name,
         model_name=args.model_name,
         svtypes=svtypes,
         svlens=(args.svlen_lower, args.svlen_upper),
         training_sets=training_sets,
-        val_set_path=args.val_set_path,
-        val_set_name=args.val_set_name,
+        val_set_path=val_set_path,
+        val_set_name=val_set_name,
         val_match_margin=args.val_match_margin,
         val_match_insert_size_threshold=args.val_match_insert_size_threshold,
         skip_filtering=args.skip_filtering,

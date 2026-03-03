@@ -5,7 +5,8 @@ default_model_name = 'unbiased'
 sample_val_set_template = {
     'name': '',
     'path': Path(''),
-    'meta': {}
+    'meta': {},
+    'callset_params': {}
 }
 
 sample_val_sets = {
@@ -77,3 +78,8 @@ sample_val_sets = {
         }
     },
 }
+
+# Ensure same structure in all val_set dicts by filling in missing keys from the template
+for val_set in sample_val_sets.values():
+    for key, default in sample_val_set_template.items():
+        val_set.setdefault(key, default)

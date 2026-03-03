@@ -80,7 +80,18 @@ training_set_presets = {
     'gridss+manta_candidate+delly': ['gridss', 'manta_candidate', 'delly'],
     'gridss+manta_diploid+delly': ['gridss', 'manta_diploid', 'delly'],
     'delly+manta_candidate': ['delly', 'manta_candidate'],
-    'delly+manta_diploid': ['delly', 'manta_diploid']
+    'delly+manta_diploid': ['delly', 'manta_diploid'],
+    'sniffles': ['sniffles'],
+    'sniffles+gridss': ['sniffles', 'gridss'],
+    'sniffles+manta_candidate': ['sniffles', 'manta_candidate'],
+    'sniffles+manta_diploid': ['sniffles', 'manta_diploid'],
+    'sniffles+delly': ['sniffles', 'delly'],
+    'sniffles+manta_candidate+delly': ['sniffles', 'manta_candidate', 'delly'],
+    'sniffles+manta_diploid+delly': ['sniffles', 'manta_diploid', 'delly'],
+    'sniffles+gridss+manta_candidate': ['sniffles', 'gridss', 'manta_candidate'],
+    'sniffles+gridss+manta_diploid': ['sniffles', 'gridss', 'manta_diploid'],
+    'sniffles+gridss+manta_candidate+delly': ['sniffles', 'gridss', 'manta_candidate', 'delly'],
+    'sniffles+gridss+manta_diploid+delly': ['sniffles', 'gridss', 'manta_diploid', 'delly'],
 }
 
 training_set_list_presets = {
@@ -96,6 +107,19 @@ training_set_list_presets = {
         'gridss+manta_diploid+delly',
         'delly+manta_candidate',
         'delly+manta_diploid'
+    ],
+    'sniffles': [
+        'sniffles',
+        'sniffles+gridss',
+        'sniffles+manta_candidate',
+        'sniffles+manta_diploid',
+        'sniffles+delly',
+        'sniffles+manta_candidate+delly',
+        'sniffles+manta_diploid+delly',
+        'sniffles+gridss+manta_candidate',
+        'sniffles+gridss+manta_diploid',
+        'sniffles+gridss+manta_candidate+delly',
+        'sniffles+gridss+manta_diploid+delly',
     ]
 }
 
@@ -199,7 +223,8 @@ gnomad_params = default_params | {
         'RD': 500
     },
     'is_reference': True,
-    'bps_path': 'gnomad.bps.csv'
+    'bps_path': 'gnomad.bps.csv',
+    'input_path': 'gnomad.vcf.gz'
 }
 
 manta_candidate_params = default_params | {
