@@ -803,42 +803,55 @@ def preprocess_chm13_val_set(sample, vcf_path, force_rerun=False):
 
 def preprocess_hg00514_val_set(sample, vcf_path, force_rerun=False):
     """
-    Preprocess the HG00514 validation set, converting to VCF-like breakpoints and saving as CSV.
+    Preprocess the HG00514 validation VCF file for benchmarking by parsing, annotating,
+    and converting SV events to breakpoints. Results are stored as a bps CSV.
+
+    Args:
+        sample (dict): Dictionary containing metadata for the HG00514 sample, must include
+            key 'val_set' with sub-key 'path' pointing to the desired output CSV path.
+        vcf_path (str or Path): Path to nstd152.GRCh38.variant_call.vcf.gz (or uncompressed).
+        force_rerun (bool, optional): If True, regenerate even if the output CSV already exists.
+
+    Saves:
+        CSV file at sample['val_set']['path'] with breakpoint-format variants.
     """
     out_path = Path(sample['val_set']['path'])
 
     if not out_path.exists() or force_rerun:
-        hg00514_vcf_df = pd.read_csv(vcf_path, low_memory=False)
-        hg00514_vcf_df = hg00514_vcf_df[hg00514_vcf_df['Variant Samples'] == 'HG00514']
-        hg00514_svtype_mapping = {
-            'insertion': 'INS',
-            'deletion': 'DEL',
-            'duplication': 'DUP',
-            'inversion': 'INV',
-            'translocation': 'TRA',
-            'complex': 'COMPLEX'
-        }
+        hg00514_vcf = pysam.VariantFile(vcf_path)
+        hg00514_vcf_df, _ = vcfp.parse_vcf_to_df(
+            hg00514_vcf, caller_params=caller_params.hg00514_params
+        )
 
+        # Filter to HG00514 sample and canonical SV types only
         hg00514_vcf_df = hg00514_vcf_df[
-            (hg00514_vcf_df['Variant Samples'] == 'HG00514') &\
-            (hg00514_vcf_df['Assembly Name'] == 'GRCh38 (hg38)') &\
-            (hg00514_vcf_df['Method'].isin(['Sequencing', 'Merging'])) &\
-            (hg00514_vcf_df['Variant Call type'].isin(hg00514_svtype_mapping.keys()))
+            (hg00514_vcf_df['INFO_SAMPLE'] == 'HG00514') &
+            (hg00514_vcf_df['INFO_SVTYPE'].isin(['INS', 'DEL', 'DUP', 'INV']))
         ]
-        hg00514_vcf_df.loc[:, 'CHROM'] = 'chr' + hg00514_vcf_df['Chromosome']
-        hg00514_vcf_df.loc[:, 'INFO_CHR2'] = 'chr' + hg00514_vcf_df['Chromosome']
-        hg00514_vcf_df.loc[:, 'POS'] = hg00514_vcf_df['Start']
-        hg00514_vcf_df.loc[:, 'END'] = hg00514_vcf_df['End']
-        hg00514_vcf_df.loc[:, 'INFO_CIPOS_l'] = hg00514_vcf_df['Outer Start'].fillna(hg00514_vcf_df['Start']).astype(int) - hg00514_vcf_df['Start']
-        hg00514_vcf_df.loc[:, 'INFO_CIPOS_r'] = hg00514_vcf_df['Inner Start'].fillna(hg00514_vcf_df['Start']).astype(int) - hg00514_vcf_df['Start']
-        hg00514_vcf_df.loc[:, 'INFO_CIEND_l'] = hg00514_vcf_df['Inner End'].fillna(hg00514_vcf_df['End']).astype(int) - hg00514_vcf_df['End']
-        hg00514_vcf_df.loc[:, 'INFO_CIEND_r'] = hg00514_vcf_df['Outer End'].fillna(hg00514_vcf_df['End']).astype(int) - hg00514_vcf_df['End']
-        hg00514_vcf_df.loc[:, 'INFO_EVENT'] = hg00514_vcf_df['Variant ID']
-        hg00514_vcf_df.loc[:, 'ID'] = hg00514_vcf_df['Variant ID']
-        hg00514_vcf_df.loc[:, 'INFO_SVLEN'] = np.abs(hg00514_vcf_df['End'] - hg00514_vcf_df['Start'])
-        hg00514_vcf_df.loc[:, 'INFO_SVTYPE'] = hg00514_vcf_df['Variant Call type'].map(hg00514_svtype_mapping)
 
-        hg00514_bp_df = bnds.bnd_to_bp(evts.event_to_bnd(hg00514_vcf_df))
+        # VCF uses bare chromosome numbers ("1") — prepend "chr"
+        hg00514_vcf_df.loc[:, 'CHROM'] = 'chr' + hg00514_vcf_df['CHROM'].astype(str)
+        hg00514_vcf_df.loc[:, 'INFO_CHR2'] = hg00514_vcf_df['CHROM']
+
+        # SVLEN is declared Type=String in this VCF; pysam returns a tuple of strings.
+        # DEL records carry a negative value — take the absolute integer.
+        hg00514_vcf_df.loc[:, 'INFO_SVLEN'] = (
+            hg00514_vcf_df['INFO_SVLEN']
+            .apply(lambda x: abs(int(x[0])) if x is not None else 0)
+        )
+
+        # CIPOS/CIEND are Number=2 Integer tuples; split_cipos/split_ciend handle None
+        # bounds (from imprecise records with "." in one position) via fillna(0).
+        hg00514_vcf_df.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(hg00514_vcf_df['INFO_CIPOS'])
+        hg00514_vcf_df.loc[:, ['INFO_CIEND_l', 'INFO_CIEND_r']] = sv_utils.split_ciend(hg00514_vcf_df['INFO_CIEND'])
+        hg00514_vcf_df = hg00514_vcf_df.drop(columns=['INFO_CIPOS', 'INFO_CIEND', 'INFO_SAMPLE'])
+
+        # Use the VCF variant ID as the event identifier
+        hg00514_vcf_df.loc[:, 'INFO_EVENT'] = hg00514_vcf_df['ID']
+
+        # Convert events to BND representation then to breakpoint pairs
+        hg00514_bnd_df = evts.event_to_bnd(hg00514_vcf_df, bnd2_pos='end')
+        hg00514_bp_df = bnds.bnd_to_bp(hg00514_bnd_df)
         hg00514_bp_df.to_csv(out_path, index=False)
 
 

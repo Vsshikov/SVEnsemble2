@@ -273,8 +273,10 @@ hg002_params = default_params | {
 }
 
 hg00514_params = default_params | {
-    'info_cols_mandatory': ['SVTYPE', 'SVLEN'],
-    'svlen_source': 'svlen'
+    'base_cols': base_cols + ['INFO_END'],
+    'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'CIPOS', 'CIEND', 'SAMPLE'],
+    'svlen_source': 'svlen',
+    'bnd2_pos': 'end'
 }
 
 huddleston_params = default_params | {

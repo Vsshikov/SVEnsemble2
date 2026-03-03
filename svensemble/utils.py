@@ -160,15 +160,21 @@ def create_config_dict(
         callset_names.extend(additional_callsets)
 
     # If a validation set exists for the sample, add it to the config dict.
-    if val_set == 'use_name':
+    if (val_set == 'use_name'):
         if sample_name not in sample_val_sets.keys():
             raise ValueError(f'Validation set not found for sample: {sample_name}')
         val_set = sample_val_sets[sample_name]
+    elif val_set in sample_val_sets.keys():
+        val_set = sample_val_sets[val_set]
     elif isinstance(val_set, dict):
         if all(key in val_set.keys() for key in sample_val_set_template.keys()):
             val_set = val_set
         else:
             raise ValueError(f'Invalid validation set: {val_set}')
+        try:
+            val_set['path'] = Path(val_set['path'])
+        except Exception as e:
+            raise ValueError(f'Invalid validation set path: {val_set['path']}, error: {e}')
     elif val_set is None:
         val_set = None
     else:
