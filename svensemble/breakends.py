@@ -166,6 +166,10 @@ def process_breakend_alt(alt_series: pd.Series) -> pd.DataFrame:
         - insert_seq (str): Any inserted sequence at breakpoint
         - no_mate (bool): Whether breakend has a mate
     """
+    # Use VCF missing-value sentinel "." for NaN entries (handles mixed-type CSV columns)
+    # so that no_mate is set correctly for records with no ALT field
+    alt_series = alt_series.fillna('.').astype(str)
+
     # Regex pattern to parse breakend ALT field format
     bnd_pattern = (
         r'(?P<inserted_seq1>[ACGTN]+)?'  # Optional inserted sequence before breakend

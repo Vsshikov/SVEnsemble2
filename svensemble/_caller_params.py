@@ -359,9 +359,16 @@ sniffles_info_mandatory_cols = [
 # INFO fields from Sniffles2 VCF that will be used for call posterior probability estimation
 sniffles_info_pred_cols = [
     'SUPPORT',
+    'SUPPORT_INLINE',
+    'SUPPORT_SA',
+    'SUPPORT_LONG',
     'VAF',
     'STDEV_POS',
     'STDEV_LEN',
+    'COVERAGE',
+    'COVERAGE_VAR',
+    'AC',
+    'CONSENSUS_SUPPORT',
     'PRECISE',
     'IMPRECISE',
     'NM',
@@ -410,5 +417,10 @@ caller_alt_priority = [
     'gridss',
     'manta_candidate',
     'manta_diploid',
-    'delly'
+    'delly',
+    'sniffles',
+    'survivor'
 ]
+
+# Fill in the rest of the callset order with the remaining callsets
+caller_alt_priority.extend([callset for callset in caller_param_dict.keys() if callset not in caller_alt_priority])

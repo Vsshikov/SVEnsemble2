@@ -1042,15 +1042,29 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
             callset_bps_['FILTER_PASS_bnd2'].astype(bool)
         )
 
+    val_key = sample_config['val_set']['name']
+    if val_key == callset_name:
+        i = 0
+        val_key = f'{val_key}_{i}'
+        if val_key not in caller_params.caller_param_dict:
+            caller_params.caller_param_dict[val_key] = caller_params.caller_param_dict[sample_config['val_set']['name']]
+        else:
+            while val_key in caller_params.caller_param_dict:
+                i += 1
+                val_key = 'val_key'.replace(f'_{i-1}', f'_{i}')
+            caller_params.caller_param_dict[val_key] = caller_params.caller_param_dict[sample_config['val_set']['name']]
+            if i > 1000000:
+                raise ValueError(f'Too many temporary validation set names generated for {val_key}')
+
     matched_ids = chunk_match.inner_join_bps(
         bp_df_dict={
             callset_name: callset_bps_,
-            sample_config['val_set']['name']: val_set_
+            val_key: val_set_
         },
         max_dist=val_match_margin,
         insert_size_threshold=val_match_insert_size_threshold,
         ids_only=True,
-        ignore_size=True
+        ignore_size=False
     )
     callset_bps_.loc[:, 'is_in_val'] = callset_bps_['INFO_EVENT'].isin(matched_ids[f'{callset_name}_INFO_EVENT'])
     cols_to_keep = ['INFO_EVENT', f"{sample_config['callsets'][callset_name]['params']['qual_metric']}", 'is_in_val']
@@ -1069,15 +1083,29 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, tr
     svens_calls_ = svensemble2_bps.copy()
     val_set_ = val_set.copy()
 
+    val_key = sample_config['val_set']['name']
+    if val_key == 'svensemble2':
+        i = 0
+        val_key = f'{val_key}_val_{i}'
+        if val_key not in caller_params.caller_param_dict:
+            caller_params.caller_param_dict[val_key] = caller_params.caller_param_dict[sample_config['val_set']['name']]
+        else:
+            while val_key in caller_params.caller_param_dict:
+                i += 1
+                val_key = f'{val_key}_val_{i}'
+            caller_params.caller_param_dict[val_key] = caller_params.caller_param_dict[sample_config['val_set']['name']]
+            if i > 1000000:
+                raise ValueError(f'Too many temporary validation set names generated for {val_key}')
+
     matched_ids = chunk_match.inner_join_bps(
         bp_df_dict={
             'svensemble2': svens_calls_,
-            sample_config['val_set']['name']: val_set_
+            val_key: val_set_
         },
         max_dist=val_match_margin,
         insert_size_threshold=val_match_insert_size_threshold,
         ids_only=True,
-        ignore_size=True
+        ignore_size=False
     )
 
     svens_calls_.loc[:, 'is_in_val'] = svens_calls_['INFO_EVENT'].isin(matched_ids['svensemble2_INFO_EVENT'])
