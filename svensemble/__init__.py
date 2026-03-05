@@ -3,6 +3,7 @@
 __version__ = "0.0.1"
 
 from . import vcfparse
+from . import vcfwrite
 from . import breakends
 from . import breakpoints
 from . import events
@@ -14,6 +15,7 @@ from . import matched_breakpoints
 
 __all__ = [
     "vcfparse",
+    "vcfwrite",
     "breakends",
     "breakpoints",
     "events",
