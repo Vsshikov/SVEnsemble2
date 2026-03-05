@@ -21,18 +21,14 @@ def concat_bp_dfs(bp_df_dict: dict[str, pd.DataFrame]):
     Sorts the resulting dataframe by chromosome, orientation, and positions of breakends.
     This is necessary for the chunker function to work correctly.
     """
-    bp_df_dict_ = {source: bp_df.copy() for source, bp_df in bp_df_dict.items()}
-    for name, bp_df in bp_df_dict_.items():
-        if bp_df.empty:
-            continue
-        bp_df.loc[:, 'source'] = name
-    bp_df = pd.concat(bp_df_dict_.values())
-    bp_df = bp_df.sort_values(
-        by=['CHROM_bnd1', 'CHROM_bnd2', 'POS_bnd1', 'POS_bnd2']
-    )
+    bp_df = pd.concat([
+        df.assign(source=name)
+        for name, df in bp_df_dict.items()
+        if not df.empty
+    ]).sort_values(by=['CHROM_bnd1', 'CHROM_bnd2', 'POS_bnd1', 'POS_bnd2'])
     return bp_df
 
-def chunker(bp_df: pd.DataFrame, chunk_size: int = 10000):
+def chunker(bp_df: pd.DataFrame, chunk_size: int = 10000, chunk_max_n: int|None = None, chunk_max_n_dist: int|None = None):
     """
     Splits a breakpoints DataFrame into chunks based on chromosome, orientation, and proximity.
 
@@ -47,7 +43,14 @@ def chunker(bp_df: pd.DataFrame, chunk_size: int = 10000):
                           - position of breakend1 and breakend2
         chunk_size (int, optional): Maximum distance in base pairs between
                                    breakpoints to group them together. Defaults to 5000.
-
+        chunk_max_n (int, optional): Requires chunk_max_n_dist to be set. Soft upper limit on the number of breakpoints in a chunk. Defaults to 100.
+                                    If the number of breakpoints in a chunk exceeds this value,
+                                    and the next element is more than chunk_max_n_dist base pairs away,
+                                    the chunk is yielded.
+        chunk_max_n_dist (int, optional): Requires chunk_max_n to be set. Soft upper limit on the distance in base pairs between breakpoints in a chunk. Defaults to None.
+                                    If the number of breakpoints in a chunk exceeds chunk_max_n,
+                                    and the next element is more than chunk_max_n_dist base pairs away,
+                                    the chunk is yielded.
     Yields:
         list: Lists of pandas Series representing chunked breakpoints.
               Each chunk contains breakpoints where bnd1 position is within
@@ -57,6 +60,14 @@ def chunker(bp_df: pd.DataFrame, chunk_size: int = 10000):
         A breakpoint is grouped with the previous one if:
         row['POS_bnd1'] <= previous_row['POS_bnd1'] + chunk_size
     """
+    if (chunk_max_n is not None and chunk_max_n_dist is None) or (chunk_max_n is None and chunk_max_n_dist is not None):
+        raise ValueError("chunk_max_n and chunk_max_n_dist must be set together")
+    if chunk_max_n is not None and chunk_max_n_dist is not None:
+        if chunk_max_n_dist <= 0:
+            raise ValueError("chunk_max_n_dist must be greater than 0")
+        if chunk_max_n <= 0:
+            raise ValueError("chunk_max_n must be greater than 0")
+
     # Get chromosome and orientation identifiers for grouping
     chrom_orientation_labels = bps.get_bp_chroms_orientations(bp_df)
 
@@ -71,6 +82,14 @@ def chunker(bp_df: pd.DataFrame, chunk_size: int = 10000):
             if len(current_chunk) == 0:
                 current_chunk.append(breakpoint_row)
                 continue
+
+            # Check if the chunk has reached the maximum number of breakpoints and can be yielded
+            if chunk_max_n is not None:
+                if len(current_chunk) >= chunk_max_n:
+                    if breakpoint_row['POS_bnd1'] > current_chunk[-1]['POS_bnd1'] + chunk_max_n_dist:
+                        n_chunks += 1
+                        yield current_chunk
+                        current_chunk = [breakpoint_row]
 
             # Check if current breakpoint is within proximity of the last one in chunk
             if breakpoint_row['POS_bnd1'] <= current_chunk[-1]['POS_bnd1'] + chunk_size:
@@ -147,87 +166,68 @@ def _get_zeros(shape: tuple[int, int]) -> np.ndarray:
     return np.zeros(shape, dtype=np.float64)
 
 
-def rel_insert_size_matrix_ref(
-    ref_bp_df: pd.DataFrame,
-    bp_df: pd.DataFrame,
-    insert_size_margin: int = 10,
-    ignore_size: bool = False
-):
-    """
-    Calculate relative insert size matrix between reference breakpoints and other breakpoints.
-    To use insert size, requires 'insert_size' column to be present in the dataframe.
-    Insert sizes must be integers.
-    """
+def rel_insert_size_matrix_ref(ref_bp_df, bp_df, insert_size_margin=30, ignore_size=False):
     if ignore_size:
         return np.ones((len(ref_bp_df), len(bp_df)))
 
-    insert_sizes_ref = pd.Series(index=ref_bp_df.index)
-    insert_sizes_comp = pd.Series(index=bp_df.index)
+    ref_sizes = ref_bp_df['insert_size'].to_numpy(np.float64)[:, np.newaxis]
+    comp_sizes = bp_df['insert_size'].to_numpy(np.float64)[np.newaxis, :]
 
-    # Validate and collect insert sizes
-    for source in ref_bp_df['source'].unique():
-        source_sizes = ref_bp_df[ref_bp_df['source'] == source]['insert_size']
-        if source_sizes.dtype.kind not in 'iu':  # Check if integer or unsigned integer
-            raise TypeError(
-                f"Insert sizes for source {source} must be integers, got {source_sizes.dtype}"
-            )
-        insert_sizes_ref.loc[ref_bp_df['source'] == source] = source_sizes
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ratio = np.where(comp_sizes > 0, ref_sizes / comp_sizes, 0.0)
+        ratio_inv = np.where(ref_sizes > 0, comp_sizes / ref_sizes, 0.0)
 
-    for source in bp_df['source'].unique():
-        source_sizes = bp_df[bp_df['source'] == source]['insert_size']
-        if source_sizes.dtype.kind not in 'iu':  # Check if integer or unsigned integer
-            raise TypeError(
-                f"Insert sizes for source {source} must be integers, got {source_sizes.dtype}"
-            )
-        insert_sizes_comp.loc[bp_df['source'] == source] = source_sizes
-
-    # Create matrix where smaller insert sizes are divided by larger ones
-    # Convert to numpy arrays for broadcasting
-    ref_sizes = insert_sizes_ref.values[:, np.newaxis]  # Shape: (n_ref, 1)
-    comp_sizes = insert_sizes_comp.values[np.newaxis, :]  # Shape: (1, n_comp)
-
-    # Use broadcasting to create division matrices with explicit type handling
-    # Convert to float64 for division to avoid integer division issues
-    # Result shape should be (n_ref, n_comp)
-    out_shape = (ref_sizes.shape[0], comp_sizes.shape[1])
-    insert_matrix1 = np.divide(
-        ref_sizes.astype(np.float64),
-        comp_sizes.astype(np.float64),
-        out=_get_zeros(out_shape),
-        where=comp_sizes > 0
-    )
-    insert_matrix2 = np.divide(
-        comp_sizes.astype(np.float64),
-        ref_sizes.astype(np.float64),
-        out=_get_zeros(out_shape),
-        where=ref_sizes > 0
-    )
-
-    # For each element, ensure we divide smaller by larger
-    insert_matrix = np.minimum(insert_matrix1, insert_matrix2)
-
-    # If both insert sizes are near-zero (within insert_size_margin), set the similarity to 1.0
+    insert_matrix = np.minimum(ratio, ratio_inv)
     both_near_zero = (ref_sizes <= insert_size_margin) & (comp_sizes <= insert_size_margin)
-    insert_matrix = np.where(both_near_zero, 1.0, insert_matrix)
+    return np.where(both_near_zero, 1.0, insert_matrix)
 
-    return insert_matrix
+
+def alt_match_matrix(chunk_df: pd.DataFrame, ins_dup_match: bool = False) -> np.ndarray | None:
+    """
+    Generate a match matrix for breakpoints based on their ALT strings.
+
+
+    Args:
+        chunk_df (pd.DataFrame): DataFrame containing breakpoint data
+        ins_dup_match (bool): Whether to match insertions and duplications to each other
+            enable when matching long and short read calls.
+    Returns:
+        np.ndarray: Match matrix
+    """
+    rel1 = bnds.process_breakend_alt(chunk_df['ALT_bnd1'])['relative_pos'].values
+    rel2 = bnds.process_breakend_alt(chunk_df['ALT_bnd2'])['relative_pos'].values
+    # Fill in the vectors with special value in place of N[ and ]N
+    orientation_mask = np.equal.outer(rel1, rel1) & np.equal.outer(rel2, rel2)
+
+    # Estimate the end pos
+
+    return orientation_mask
+
+
 
 def _get_match_matrix(
     pos_match_matrix: np.ndarray,
     insert_matrix: np.ndarray,
-    triu_mask: np.ndarray
+    alt_match_matrix: np.ndarray,
+    triu_mask: np.ndarray,
+    cross_source_mask: np.ndarray
 ) -> np.ndarray:
-    return pos_match_matrix & insert_matrix & ~triu_mask
+    # insert_matrix may arrive as float (all-ones sentinel) or bool (threshold result);
+    # cast to bool so bitwise-and works uniformly under NumPy 2.x
+    return pos_match_matrix & insert_matrix.astype(bool) & alt_match_matrix & ~triu_mask & cross_source_mask
 
 @lru_cache(maxsize=100)
 def _get_triu_mask(n: int) -> np.ndarray:
-    return np.triu(np.ones(n, dtype=bool))
+    mask = np.triu(np.ones(n, dtype=bool))
+    mask.setflags(write=False)
+    return mask
 
 def get_pairwise_matches(
     zipped_bp_df: pd.DataFrame,
     insert_size_threshold: float = 0.7,
     max_dist: int = 10,
-    ignore_size: bool = False
+    ignore_size: bool = False,
+    ins_dup_match: bool = False
 ) -> list[tuple[tuple[str, str], tuple[str, str]]]:
     """
     Match breakpoints from multiple sources based on position and insert size similarity.
@@ -250,56 +250,31 @@ def get_pairwise_matches(
         col_retain_list.append('svensemble2_insert_size')
     zipped_bp_df_ = zipped_bp_df[col_retain_list].copy()
 
-    # unique_sources = list(zipped_bp_df['source'].unique())
     zipped_bp_df_.loc[:, 'insert_size'] = bps.get_insert_size(zipped_bp_df_)
-
-    # Generate all possible source combinations
-    # source_combinations = [
-    #     f'{source1}_{source2}'
-    #     for source1 in unique_sources
-    #     for source2 in unique_sources
-    # ]
-
-    # Generate combinations between different sources only
-    # source_combinations_diff = [
-    #     f'{source1}_{source2}'
-    #     for source1 in unique_sources
-    #     for source2 in unique_sources
-    #     if source1 != source2
-    # ]
 
     matched_pairs = []
 
-
-
-    for chunk in chunker(zipped_bp_df_):
+    chunk_max_n = 100
+    chunk_max_n_dist = max_dist
+    for chunk in chunker(zipped_bp_df_, chunk_max_n=chunk_max_n, chunk_max_n_dist=chunk_max_n_dist):
         # Skip chunks with insufficient breakpoints or single source
         if len(chunk) <= 1:
             continue
 
         chunk_df = pd.DataFrame(chunk)
-        if len(set(chunk_df['source'])) == 1:
+        if chunk_df['source'].nunique() == 1:
             continue
 
-        # # Create source combination masks
-        # source_masks = {
-        #     source_pair: np.zeros((len(chunk_df), len(chunk_df)), dtype=bool)
-        #     for source_pair in source_combinations
-        # }
+        n = len(chunk_df)
 
-        # # Populate source masks
-        # for i, source1 in enumerate(chunk_df['source'].values):
-        #     for j, source2 in enumerate(chunk_df['source'].values):
-        #         source_masks[f'{source1}_{source2}'][i, j] = True
-
-        # # Calculate matrix for different source breakpoints
-        # sources_matrix = np.sum(
-        #     [
-        #         mask for pair, mask in source_masks.items()
-        #         if pair in source_combinations_diff
-        #     ],
-        #     axis=0
-        # ).astype(bool)
+        # Build cross-source mask: True where row i and column j come from different sources.
+        # Uses the outer-product subtraction trick: start from all-ones and zero out each
+        # source's self-pair block. O(S * n) instead of an O(n²) nested loop.
+        cross_source_mask = np.ones((n, n), dtype=float)
+        for source in np.unique(chunk_df['source'].values):
+            m = chunk_df['source'].values == source
+            cross_source_mask -= np.outer(m, m)
+        cross_source_mask = cross_source_mask.astype(bool)
 
         # Calculate distance matrices
         bp1_matrix = dist_matrix_ref(chunk_df, chunk_df, 'bnd1')
@@ -308,35 +283,23 @@ def get_pairwise_matches(
         # Create position match matrix
         pos_match_matrix = (bp1_matrix <= max_dist) & (bp2_matrix <= max_dist)
 
-        # # Calculate minimum distance matches per source combination
-        # dist_sum_matrix = bp1_matrix + bp2_matrix
-        # dist_sum_matrix[np.triu_indices_from(dist_sum_matrix)] = np.inf
-
-        # is_min_dist_matrix = np.zeros((len(chunk_df), len(chunk_df)), dtype=bool)
-        # for source_pair in source_combinations_diff:
-        #     dist_sum_copy = dist_sum_matrix.copy()
-        #     dist_sum_copy[~source_masks[source_pair]] = np.inf
-
-        #     # Find minimum in each row and column
-        #     row_mins = np.min(dist_sum_copy, axis=1, keepdims=True)
-        #     col_mins = np.min(dist_sum_copy, axis=0, keepdims=True)
-
-        #     # Element is minimum if it equals both row and column minimum
-        #     min_dist_mask = (dist_sum_copy == row_mins) & (dist_sum_copy == col_mins)
-        #     is_min_dist_matrix |= min_dist_mask
-
         # Calculate insert size similarity
-        insert_matrix = (
-            rel_insert_size_matrix_ref(chunk_df, chunk_df, ignore_size=ignore_size)
-            >= insert_size_threshold
-        )
+        if ignore_size:
+            insert_matrix = np.ones((n, n))
+        else:
+            insert_matrix = (
+                rel_insert_size_matrix_ref(chunk_df, chunk_df)
+                >= insert_size_threshold
+            )
 
-        # Use cached triangular matrix
-        n = len(chunk_df)
-        triu_mask = np.triu(np.ones(n, dtype=bool))
+        alt_mask = alt_match_matrix(chunk_df, ins_dup_match=ins_dup_match)
 
-        # Create final match matrix
-        match_matrix = _get_match_matrix(pos_match_matrix, insert_matrix, triu_mask)
+
+        # Use cached triu mask; cross_source_mask already filters same-source pairs
+        triu_mask = _get_triu_mask(n)
+
+        # Create final match matrix (cross-source filter applied inside the matrix)
+        match_matrix = _get_match_matrix(pos_match_matrix, insert_matrix, alt_mask, triu_mask, cross_source_mask)
 
         # Check if any matches exist in the matrix
         if np.any(match_matrix):
@@ -348,7 +311,6 @@ def get_pairwise_matches(
                 [
                     ((sources[i], events[i]), (sources[j], events[j]))
                     for i, j in zip(i_indices, j_indices)
-                    if sources[i] != sources[j]  # only cross-source pairs
                 ]
             )
 
@@ -439,17 +401,15 @@ def build_matched_bp_df(
     # Create a table of {source}_INFO_EVENT entries populated by IDs from the matched_lists
     # This table will be used to join the breakpoint dataframes
     id_table_columns = [f'{source}_INFO_EVENT' for source in bp_df_dict.keys()]
-    id_table = pd.DataFrame(index=range(len(matched_lists)), columns=id_table_columns, dtype='string')
+    id_dict = {col: [pd.NA] * len(matched_lists) for col in id_table_columns}
     for i, matched_list in enumerate(matched_lists):
         sources_seen = set()
         for bp_source, bp_event in matched_list:
             if bp_source in sources_seen:
                 continue
             sources_seen.add(bp_source)
-            id_table.loc[i, f'{bp_source}_INFO_EVENT'] = bp_event
-
-    # Remove empty rows from the id_table
-    id_table = id_table.dropna(axis=0, how='all')
+            id_dict[f'{bp_source}_INFO_EVENT'][i] = bp_event
+    id_table = pd.DataFrame(id_dict, dtype='string')
 
     # Remove rows where the only event is from the reference callset
     if ref_callset is not None:

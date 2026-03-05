@@ -68,8 +68,9 @@ default_event_params = default_params | {
     'info_cols_mandatory': ['CIEND', 'CIPOS', 'CHR2', 'SVLEN', 'SVTYPE']
 }
 
+
+default_training_set = 'delly+manta_diploid'
 training_set_presets = {
-    'default': ['delly', 'manta_diploid'],
     'gridss': ['gridss'],
     'manta_candidate': ['manta_candidate'],
     'manta_diploid': ['manta_diploid'],

@@ -5,7 +5,7 @@ Utility functions for SVEnsemble
 import pandas as pd
 from pathlib import Path
 from collections import defaultdict, abc
-from ._caller_params import caller_param_dict, training_set_presets, default_reference_set
+from ._caller_params import caller_param_dict, training_set_presets, default_reference_set, default_training_set
 from ._sample_params import sample_val_sets, sample_val_set_template, default_model_name
 from ._model_configs import model_configs
 from typing import Dict, Any
@@ -131,14 +131,16 @@ def create_config_dict(
     is_ground_truth: bool = False,
     training_set: str | list[str] = 'default',
     val_set: None | str | dict[str, Any] = None,
-    model_name: str = None,
+    model_name: str | None = None,
     additional_callsets: list[str] | None = None
 ):
     """
     Based on _caller_params, create a config dictionary for the sample.
     """
     if isinstance(training_set, str):
-        if training_set in training_set_presets.keys():
+        if training_set == 'default':
+            _training_sets = {default_training_set: training_set_presets[default_training_set]}
+        elif training_set in training_set_presets.keys():
             _training_sets = {training_set: training_set_presets[training_set]}
         else:
             raise ValueError(f'Invalid training set: {training_set}')
