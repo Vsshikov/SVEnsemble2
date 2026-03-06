@@ -110,3 +110,5 @@ data/HG002/wget-log
 data/HG002/data/wget-log
 UNKNOWN.egg-info/PKG-INFO
 sv_benchmark/funcs.R
+.vscode/settings.json
+TODO
