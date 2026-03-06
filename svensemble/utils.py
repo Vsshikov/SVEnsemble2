@@ -1,11 +1,11 @@
 """
 Utility functions for SVEnsemble
 """
-
+import copy
 import pandas as pd
 from pathlib import Path
 from collections import defaultdict, abc
-from ._caller_params import caller_param_dict, training_set_presets, default_reference_set, default_training_set
+from ._caller_params import caller_param_dict, callset_path_configs, training_set_presets, default_reference_set, default_training_set
 from ._sample_params import sample_val_sets, sample_val_set_template, default_model_name
 from ._model_configs import model_configs
 from typing import Dict, Any
@@ -20,110 +20,26 @@ def update(d, u):
 
 human_chroms = [f'chr{i}' for i in range(1, 23)] + ['chrX', 'chrY', 'chrM']
 
-def _get_gnomad_callset_dict(sample_name: str) -> dict:
-    return defaultdict(str,
-        {
-            'source': 'gnomad',
-            'svensemble_dir': Path(f'data/{sample_name}/svensemble2'),
-            'path': Path(f'data/{sample_name}/{sample_name}.vcf.gz'),
-            'params': caller_param_dict['gnomad']
-        }
-    )
-
-def _get_gridss_callset_dict(sample_name: str) -> dict:
-    return defaultdict(str,
-        {
-            'source': 'gridss',
-            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/gridss/svensemble2'),
-            'path': Path(f'data/{sample_name}/sv_calling/gridss/out/{sample_name}.gridss.vcf'),
-            'params': caller_param_dict['gridss']
-        }
-    )
-
-def _get_manta_candidate_callset_dict(sample_name: str) -> dict:
-    return defaultdict(str,
-        {
-            'source': 'manta_candidate',
-            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/manta/svensemble2'),
-            'path': Path(f'data/{sample_name}/sv_calling/manta/results/variants/candidateSV.vcf.gz'),
-            'params': caller_param_dict['manta_candidate']
-        }
-    )
-
-def _get_manta_diploid_callset_dict(sample_name: str) -> dict:
-    return defaultdict(str,
-        {
-            'source': 'manta_diploid',
-            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/manta/svensemble2'),
-            'path': Path(f'data/{sample_name}/sv_calling/manta/results/variants/diploidSV.vcf.gz'),
-            'params': caller_param_dict['manta_diploid']
-        }
-    )
-
-def _get_delly_callset_dict(sample_name: str) -> dict:
-    return defaultdict(str,
-        {
-            'source': 'delly',
-            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/delly/svensemble2'),
-            'path': Path(f'data/{sample_name}/sv_calling/delly/out/{sample_name}.delly.bcf'),
-            'params': caller_param_dict['delly']
-        }
-    )
-
-def _get_survivor_callset_dict(sample_name: str) -> dict:
-    return defaultdict(str,
-        {
-            'source': 'survivor',
-            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/survivor/svensemble2'),
-            'path': Path(f'data/{sample_name}/sv_calling/survivor/{sample_name}.survivor.vcf'),
-            'params': caller_param_dict['survivor']
-        }
-    )
-
-def _get_gridss_H_callset_dict(sample_name: str) -> dict:
-    return defaultdict(str,
-        {
-            'source': 'gridss',
-            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/gridss/svensemble2'),
-            'path': Path(f'data/{sample_name}/sv_calling/gridss/out/{sample_name}.gridss.vcf'),
-            'params': caller_param_dict['gridss_H']
-        }
-    )
-
-def _get_sniffles_callset_dict(sample_name: str) -> dict:
-    return defaultdict(str,
-        {
-            'source': 'sniffles',
-            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/sniffles/svensemble2'),
-            'path': Path(f'data/{sample_name}/sv_calling/sniffles/out/{sample_name}.long.sniffles.vcf'),
-            'params': caller_param_dict['sniffles']
-        }
-    )
-
-def _get_sniffles_H_callset_dict(sample_name: str) -> dict:
-    return defaultdict(str,
-        {
-            'source': 'sniffles',
-            'svensemble_dir': Path(f'data/{sample_name}/sv_calling/sniffles/svensemble2'),
-            'path': Path(f'data/{sample_name}/sv_calling/sniffles/out/{sample_name}.long.sniffles.vcf'),
-            'params': caller_param_dict['sniffles_H']
-        }
-    )
-
 def _get_caller_callset_dict(sample_name: str, caller_name: str) -> dict:
-    caller_dispatch = {
-        'gnomad': _get_gnomad_callset_dict,
-        'gridss': _get_gridss_callset_dict,
-        'manta_candidate': _get_manta_candidate_callset_dict,
-        'manta_diploid': _get_manta_diploid_callset_dict,
-        'delly': _get_delly_callset_dict,
-        'sniffles': _get_sniffles_callset_dict,
-        'sniffles_H': _get_sniffles_H_callset_dict,
-        'survivor': _get_survivor_callset_dict,
-        'gridss_H': _get_gridss_H_callset_dict
-    }
+    """Build a callset config dict for a given caller and sample.
 
-    return caller_dispatch[caller_name](sample_name)
+    Paths are resolved from callset_path_configs (_caller_params) using sample_name substitution.
+    The params key always matches caller_name, so _H variants (gridss_H, sniffles_H)
+    share paths with their base caller but carry separate parameter sets.
+    """
+    try:
+        source, svensemble_dir_tmpl, path_tmpl = callset_path_configs[caller_name]
+    except KeyError:
+        raise KeyError(
+            f'Unknown caller: {caller_name!r}. '
+            f'Available: {list(callset_path_configs)}'
+        )
+    return defaultdict(str, {
+        'source': source,
+        'svensemble_dir': Path(svensemble_dir_tmpl.format(s=sample_name)),
+        'path': Path(path_tmpl.format(s=sample_name)),
+        'params': copy.deepcopy(caller_param_dict[caller_name]),
+    })
 
 def create_config_dict(
     sample_name: str,

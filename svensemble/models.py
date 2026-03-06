@@ -1,6 +1,7 @@
 """
 PU models for SV call probability estimation.
 """
+import os
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier as RF
 import pandas as pd
@@ -44,10 +45,13 @@ def train_unbiased_rf_for_split(
         )
         return None
 
+    nontrad_kwargs = _model_kwargs.copy()
+    if 'n_estimators' in nontrad_kwargs:
+        nontrad_kwargs['n_estimators'] = min(nontrad_kwargs['n_estimators'], 70)
     rf_nontrad = RF(
         max_features=int(np.sqrt(X.shape[1])),
         random_state=0,
-        **_model_kwargs
+        **nontrad_kwargs
     )
     rf_nontrad_fit = rf_nontrad.fit(X_train, y_train)
     y_nontrad = rf_nontrad_fit.predict(X_val)
@@ -70,11 +74,18 @@ def train_unbiased_rf_for_split(
         1: 2 * clpr / label_prob         # Weight for positive class
     }
 
+    duplessis_kwargs = _model_kwargs.copy()
+    if 'n_jobs' not in duplessis_kwargs:
+        try:
+            n_jobs = len(os.sched_getaffinity(0))
+        except AttributeError:
+            n_jobs = os.cpu_count() or 1
+        duplessis_kwargs['n_jobs'] = n_jobs
     rf_duplessis = RF(
         max_features=int(np.sqrt(X.shape[1])),
         random_state=0,
         class_weight=weight_dict,
-        **_model_kwargs
+        **duplessis_kwargs
     )
 
     rf_duplessis_fit = rf_duplessis.fit(X_train, y_train)
@@ -116,7 +127,8 @@ def train_unbiased_rf(
         match_col='ref_match'
     )
     X_train, X_val, y_train, y_val = skm.train_test_split(
-        X, y, train_size=0.8, random_state=0
+        X, y, train_size=0.8, random_state=0,
+        stratify=y
     )
     training_set_splits = {
         'X': X,

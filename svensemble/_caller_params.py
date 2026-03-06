@@ -414,6 +414,57 @@ caller_param_dict = {
     'gridss_H': gridss_H_params
 }
 
+# Maps each caller_name to (source, svensemble_dir_template, path_template).
+# {s} is substituted with the sample name at call time.
+# _H variants share source+paths with their base caller but reference separate params keys.
+callset_path_configs: dict[str, tuple[str, str, str]] = {
+    'gnomad': (
+        'gnomad',
+        'data/{s}/svensemble2',
+        'data/{s}/{s}.vcf.gz',
+    ),
+    'gridss': (
+        'gridss',
+        'data/{s}/sv_calling/gridss/svensemble2',
+        'data/{s}/sv_calling/gridss/out/{s}.gridss.vcf',
+    ),
+    'gridss_H': (
+        'gridss',
+        'data/{s}/sv_calling/gridss/svensemble2',
+        'data/{s}/sv_calling/gridss/out/{s}.gridss.vcf',
+    ),
+    'manta_candidate': (
+        'manta_candidate',
+        'data/{s}/sv_calling/manta/svensemble2',
+        'data/{s}/sv_calling/manta/results/variants/candidateSV.vcf.gz',
+    ),
+    'manta_diploid': (
+        'manta_diploid',
+        'data/{s}/sv_calling/manta/svensemble2',
+        'data/{s}/sv_calling/manta/results/variants/diploidSV.vcf.gz',
+    ),
+    'delly': (
+        'delly',
+        'data/{s}/sv_calling/delly/svensemble2',
+        'data/{s}/sv_calling/delly/out/{s}.delly.bcf',
+    ),
+    'survivor': (
+        'survivor',
+        'data/{s}/sv_calling/survivor/svensemble2',
+        'data/{s}/sv_calling/survivor/{s}.survivor.vcf',
+    ),
+    'sniffles': (
+        'sniffles',
+        'data/{s}/sv_calling/sniffles/svensemble2',
+        'data/{s}/sv_calling/sniffles/out/{s}.long.sniffles.vcf',
+    ),
+    'sniffles_H': (
+        'sniffles',
+        'data/{s}/sv_calling/sniffles/svensemble2',
+        'data/{s}/sv_calling/sniffles/out/{s}.long.sniffles.vcf',
+    ),
+}
+
 caller_alt_priority = [
     'gridss',
     'manta_candidate',

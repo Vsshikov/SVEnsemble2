@@ -10,6 +10,18 @@ from typing import List
 
 from . import utils
 
+_BND_PATTERN = re.compile(
+        r'(?P<inserted_seq1>[ACGTN]+)?'  # Optional inserted sequence before breakend
+        r'(?P<orientation1>\]|\[)?'       # Breakend orientation (] or [)
+        r'(?P<chr>[^:]+)?'               # Mate chromosome
+        r'(?P<sep>:|\.)+'                # Separator (: for mate, . for no mate)
+        r'(?P<pos>\d+)?'                 # Mate position
+        r'(?P<orientation2>\]|\[)?'       # Closing orientation bracket
+        r'(?P<inserted_seq2>[ACGTN]+)?'  # Optional inserted sequence after breakend
+    )
+
+_BND_ALT_REGRESS = re.compile(r'(^[ATGCNatgcn\.]+[\[\]]$)|(^[\[\]][ATGCNatgcn\.]+$)')
+
 def check_sv_format(vcf_df: pd.DataFrame) -> str | None:
     """
     Checks the format of a VCF DataFrame to determine if it contains breakend or breakpoint notation.
@@ -18,7 +30,7 @@ def check_sv_format(vcf_df: pd.DataFrame) -> str | None:
     """
     bnd_reqs = ['CHROM', 'POS', 'ALT', 'INFO_EVENT', 'INFO_MATEID']
     bnd_reqs_missing = []
-    bnd_alt_regex = re.compile(r'(^[ATGCNatgcn\.]+[\[\]]$)|(^[\[\]][ATGCNatgcn\.]+$)')
+    bnd_alt_regex = _BND_ALT_REGRESS
 
     bp_reqs = ['CHROM_bnd1', 'POS_bnd1', 'ALT_bnd1', 'CHROM_bnd2', 'POS_bnd2', 'ALT_bnd2']
     bp_reqs_missing = []
@@ -171,18 +183,9 @@ def process_breakend_alt(alt_series: pd.Series) -> pd.DataFrame:
     alt_series = alt_series.fillna('.').astype(str)
 
     # Regex pattern to parse breakend ALT field format
-    bnd_pattern = (
-        r'(?P<inserted_seq1>[ACGTN]+)?'  # Optional inserted sequence before breakend
-        r'(?P<orientation1>\]|\[)?'       # Breakend orientation (] or [)
-        r'(?P<chr>[^:]+)?'               # Mate chromosome
-        r'(?P<sep>:|\.)+'                # Separator (: for mate, . for no mate)
-        r'(?P<pos>\d+)?'                 # Mate position
-        r'(?P<orientation2>\]|\[)?'       # Closing orientation bracket
-        r'(?P<inserted_seq2>[ACGTN]+)?'  # Optional inserted sequence after breakend
-    )
 
     # Extract components using regex
-    processed_alt = alt_series.str.extract(bnd_pattern)
+    processed_alt = alt_series.str.extract(_BND_PATTERN)
 
     # Determine relative position of the partner breakend
 

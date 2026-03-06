@@ -1,0 +1,39 @@
+#!/bin/bash
+
+#SBATCH --job-name=severus
+#SBATCH --output=logs/standalone/%x_%j.out
+#SBATCH --error=logs/standalone/%x_%j.err
+#SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=32G
+
+modules="micromamba"
+module purge
+module load $modules
+
+SOURCE_FILE=$1
+source $SOURCE_FILE
+
+ENV_NAME="severus_env"
+YAML_FILE="$SAMPLE_DIR/scripts/envs/severus_env.yaml"
+HASH_MARKER="${HOME}/.cache/${ENV_NAME}.yaml.md5"
+YAML_HASH=$(md5sum "$YAML_FILE" | cut -d' ' -f1)
+
+if [[ "$(cat "$HASH_MARKER" 2>/dev/null)" != "$YAML_HASH" ]]; then
+    micromamba create -y -f "$YAML_FILE" -n "$ENV_NAME"
+    mkdir -p "$(dirname "$HASH_MARKER")"
+    echo "$YAML_HASH" > "$HASH_MARKER"
+fi
+
+WORKDIR="$SAMPLE_DIR/sv_calling/severus"
+INPUT_BAM="$SAMPLE_DIR/aligned_long/${SAMPLE_NAME}.long.minimap.bam"
+
+if [ -n "$VNTR_BED" ]; then
+    VNTR_BED_FLAG="--vntr-bed $VNTR_BED"
+else
+    VNTR_BED_FLAG=""
+fi
+
+micromamba run -n "$ENV_NAME" severus --target-bam $INPUT_BAM \
+    --out-dir $WORKDIR -t ${SLURM_CPUS_PER_TASK} \
+    $VNTR_BED_FLAG

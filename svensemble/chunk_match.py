@@ -10,9 +10,21 @@ import numpy as np
 import pandas as pd
 
 from . import breakpoints as bps
-from . import breakends as bnds
 from . import events as evts
 from . import _caller_params as caller_params
+
+# Maps each BND relative-position string to a unique integer code.
+# Combined code = enc(bnd1) * 4 + enc(bnd2) gives a unique scalar per orientation pair,
+# allowing a single np.equal.outer on integers instead of two on strings.
+_ORIENT_ENCODE: dict[str, int] = {'N[': 0, ']N': 1, 'N]': 2, '[N': 3}
+
+# Combined codes for insertion ('N[', ']N') and tandem-duplication (']N', 'N[') orientations.
+# These are the two SV types that are indistinguishable at short-read resolution and
+# should be allowed to match each other when ins_dup_match=True.
+_INS_DUP_CODES: frozenset[int] = frozenset([
+    _ORIENT_ENCODE['N['] * 4 + _ORIENT_ENCODE[']N'],  # 1  – insertion
+    _ORIENT_ENCODE[']N'] * 4 + _ORIENT_ENCODE['N['],  # 4  – tandem duplication
+])
 
 def concat_bp_dfs(bp_df_dict: dict[str, pd.DataFrame]):
     """
@@ -69,15 +81,15 @@ def chunker(bp_df: pd.DataFrame, chunk_size: int = 10000, chunk_max_n: int|None 
             raise ValueError("chunk_max_n must be greater than 0")
 
     # Get chromosome and orientation identifiers for grouping
-    chrom_orientation_labels = bps.get_bp_chroms_orientations(bp_df)
+    # chrom_orientation_labels = bps.get_bp_chroms_orientations(bp_df)
 
     # Process each chromosome-orientation group separately
     n_chunks = 0
-    for chrom_orientation_key, group in bp_df.groupby(chrom_orientation_labels):
+    for _, group in bp_df.groupby(['CHROM_bnd1', 'CHROM_bnd2']):
         current_chunk = []
 
         # Iterate through each breakpoint in the current group
-        for row_index, breakpoint_row in group.iterrows():
+        for _, breakpoint_row in group.iterrows():
             # Start a new chunk if this is the first breakpoint
             if len(current_chunk) == 0:
                 current_chunk.append(breakpoint_row)
@@ -162,9 +174,6 @@ def dist_matrix_ref(ref_bp_df: pd.DataFrame, bp_df: pd.DataFrame, which_bnd: str
 
     return dists
 
-def _get_zeros(shape: tuple[int, int]) -> np.ndarray:
-    return np.zeros(shape, dtype=np.float64)
-
 
 def rel_insert_size_matrix_ref(ref_bp_df, bp_df, insert_size_margin=30, ignore_size=False):
     if ignore_size:
@@ -182,27 +191,61 @@ def rel_insert_size_matrix_ref(ref_bp_df, bp_df, insert_size_margin=30, ignore_s
     return np.where(both_near_zero, 1.0, insert_matrix)
 
 
-def alt_match_matrix(chunk_df: pd.DataFrame, ins_dup_match: bool = False) -> np.ndarray | None:
+def _extract_relative_pos(alt_series: pd.Series) -> np.ndarray:
+    """Extract BND relative-position strings from an ALT series without full regex parsing.
+
+    relative_pos is determined solely by whether the ALT string starts with a bracket
+    (orientation is to the left of the anchor base → `[N` / `]N`) or with a nucleotide
+    (orientation is to the right → `N[` / `N]`).  A single bracket-extraction regex is
+    an order of magnitude faster than the full process_breakend_alt parse.
+
+    Returns:
+        np.ndarray of str with values in {'N[', ']N', 'N]', '[N'}.
+    """
+    alt = alt_series.fillna('.').astype(str)
+    starts_with_bracket = alt.str[0].isin(['[', ']'])
+    bracket_char = alt.str.extract(r'(\[|\])', expand=False)
+    return np.where(starts_with_bracket, bracket_char + 'N', 'N' + bracket_char)
+
+
+def alt_match_matrix(chunk_df: pd.DataFrame, ins_dup_match: bool = False, match_dist: int = 30) -> np.ndarray:
     """
     Generate a match matrix for breakpoints based on their ALT strings.
 
+    Each (bnd1, bnd2) orientation pair is encoded as a single integer so that the
+    orientation check is a single O(n²) outer-equality on integers rather than two
+    outer-equalities on strings combined with a bitwise AND.
 
     Args:
-        chunk_df (pd.DataFrame): DataFrame containing breakpoint data
-        ins_dup_match (bool): Whether to match insertions and duplications to each other
-            enable when matching long and short read calls.
+        chunk_df (pd.DataFrame): DataFrame containing breakpoint data.
+        ins_dup_match (bool): Whether to allow insertions and tandem-duplications to
+            match each other.  Enable when merging long- and short-read call-sets.
     Returns:
-        np.ndarray: Match matrix
+        np.ndarray: Boolean match matrix of shape (n, n).
     """
-    rel1 = bnds.process_breakend_alt(chunk_df['ALT_bnd1'])['relative_pos'].values
-    rel2 = bnds.process_breakend_alt(chunk_df['ALT_bnd2'])['relative_pos'].values
-    # Fill in the vectors with special value in place of N[ and ]N
-    orientation_mask = np.equal.outer(rel1, rel1) & np.equal.outer(rel2, rel2)
+    rel1 = _extract_relative_pos(chunk_df['ALT_bnd1'])
+    rel2 = _extract_relative_pos(chunk_df['ALT_bnd2'])
 
-    # Estimate the end pos
+    enc1 = pd.Series(rel1).map(_ORIENT_ENCODE).to_numpy(dtype=np.int8, na_value=-1)
+    enc2 = pd.Series(rel2).map(_ORIENT_ENCODE).to_numpy(dtype=np.int8, na_value=-1)
+    combined = enc1 * 4 + enc2
+
+    orientation_mask = np.equal.outer(combined, combined)
+
+    if ins_dup_match:
+        ins_dup_arr = np.isin(combined, list(_INS_DUP_CODES))
+        orientation_mask |= np.logical_and.outer(ins_dup_arr, ins_dup_arr)
 
     return orientation_mask
 
+
+# def ins_dup_match_matrix(chunk_df: pd.DataFrame, match_dist: int = 30) -> np.ndarray:
+#     """
+#     Generate a match matrix for insertions and duplications based on their insert size.
+#     Each entry where the estimated end of a variant via insert_size is within match_dist of the end of another variant
+#     that entry is set to True.
+#     """
+#     est_end_pos_matr =
 
 
 def _get_match_matrix(

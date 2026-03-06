@@ -13,6 +13,23 @@ SAMPLE_DIR=
 # REF_FASTA=$PROJ_DIR/data/hg19/downloads/hg19.fa
 # REF_FASTA=$PROJ_DIR/data/hg38/downloads/hg38.fa
 REF_FASTA=$PROJ_DIR/data/hg38/downloads/hg38.no_decoys.fa
+VNTR_BED=$PROJ_DIR/data/hg38/downloads/human_GRCh38_no_alt_analysis_set.trf.bed.gz
+
+# ========== PIPELINE STEPS ==========
+RUN_BAZAM=
+RUN_BAZAM_LONG=
+RUN_MINIMAP=
+RUN_MINIMAP_LONG=
+RUN_MANTA=
+RUN_GRIDSS=
+RUN_DELLY=
+RUN_SNIFFLES=
+RUN_SURVIVOR=
+RUN_SEVERUS=
+
+RUN_SVENSEMBLE2=
+RUN_BENCHMARK=
+RUN_SHAP=
 
 RERUN=false
 SVENSEMBLE2_RERUN=false # If true, will rerun SVEnsemble2 (only SVEnsemble2 and benchmarking) even if RERUN is false
@@ -70,6 +87,19 @@ SVE_MODELS=(
 #   gridss+manta_candidate, gridss+manta_diploid, gridss+delly,
 #   gridss+manta_candidate+delly, gridss+manta_diploid+delly,
 #   delly+manta_candidate, delly+manta_diploid
+#
+# gridss
+# manta_candidate
+# manta_diploid
+# delly
+# gridss+manta_candidate
+# gridss+manta_diploid
+# gridss+delly
+# gridss+manta_candidate+delly
+# gridss+manta_diploid+delly
+# delly+manta_candidate
+# delly+manta_diploid
+
 SVE_TRAINING_SETS=(
     "delly+manta_diploid"
 )
@@ -83,6 +113,8 @@ SVE_STEP_PREDICT=true
 # Breakpoint matching parameters
 SVE_MATCH_MAX_DIST=200
 SVE_MATCH_INSERT_SIZE_THRESHOLD=0.7
+
+SVE_MEM=32G
 
 # ========== SVEnsemble2 Benchmarking Parameters ==========
 # SV type filter combinations — one benchmark job is submitted per entry.
