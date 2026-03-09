@@ -9,6 +9,7 @@ This module provides preprocessing and matching utilities for SV callsets.
 import os
 import sys
 import pickle
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -16,27 +17,23 @@ import pandas as pd
 import sklearn.model_selection as skm
 from pysam import VariantFile
 
-# Set working directory and sys.path for local svensemble module
-WORKDIR = "/vast/ai_projects/Papenfuss_SVEnsemble2"
-os.chdir(WORKDIR)
-if WORKDIR not in sys.path:
-    sys.path.insert(0, WORKDIR)
 
-import svensemble.vcfparse as vcfp  # noqa: E402
-import svensemble.vcfwrite as vcfw  # noqa: E402
-import svensemble.breakends as bnds  # noqa: E402
-import svensemble.breakpoints as bps  # noqa: E402
-import svensemble.events as evts  # noqa: E402
-import svensemble.caller_specific as caller_specific  # noqa: E402
-import svensemble.utils as sv_utils  # noqa: E402
-import svensemble.chunk_match as chunk_match  # noqa: E402
-import svensemble.matched_breakpoints as mbps  # noqa: E402
-import svensemble.models as models  # noqa: E402
-import svensemble.delly2bnd as delly2bnd  # noqa: E402
-import svensemble._caller_params as caller_params  # noqa: E402
+def _log(msg: str) -> None:
+    """Print a message with an ISO 8601 timestamp prefix."""
+    print(f"{datetime.now().astimezone().isoformat()} {msg}")
 
-
-default_ref_path = Path("/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/hg38.no_decoys.fa")
+from . import vcfparse as vcfp  # noqa: E402
+from . import vcfwrite as vcfw  # noqa: E402
+from . import breakends as bnds  # noqa: E402
+from . import breakpoints as bps  # noqa: E402
+from . import events as evts  # noqa: E402
+from . import caller_specific as caller_specific  # noqa: E402
+from . import utils as sv_utils  # noqa: E402
+from . import chunk_match as chunk_match  # noqa: E402
+from . import matched_breakpoints as mbps  # noqa: E402
+from . import models as models  # noqa: E402
+from . import delly2bnd as delly2bnd  # noqa: E402
+from . import _caller_params as caller_params  # noqa: E402
 
 
 def parse_preprocess_gnomad(
@@ -80,7 +77,7 @@ def parse_preprocess_gnomad(
     gnomad_params = callset['params']
 
     if verbose:
-        print(f"Loading gnomad file {gnomad_path}")
+        _log(f"Loading gnomad file {gnomad_path}")
 
     gnomad_vcf = VariantFile(gnomad_path)
     gnomad_df, gnomad_meta = vcfp.parse_vcf_to_df(
@@ -89,7 +86,7 @@ def parse_preprocess_gnomad(
     )
 
     if verbose:
-        print(f"Preprocessing {gnomad_path}")
+        _log(f"Preprocessing {gnomad_path}")
 
     gnomad_df = caller_specific.gnomad_preprocess(
         gnomad_df,
@@ -98,12 +95,12 @@ def parse_preprocess_gnomad(
     )
 
     if verbose:
-        print(f"Converting variants in {gnomad_path} to breakends")
+        _log(f"Converting variants in {gnomad_path} to breakends")
 
     gnomad_bnd_df = caller_specific.gnomad_event_to_bnd(gnomad_df)
 
     if verbose:
-        print(f"Converting breakends in {gnomad_path} to breakpoints")
+        _log(f"Converting breakends in {gnomad_path} to breakpoints")
 
     gnomad_bp_df = bnds.bnd_to_bp(
         gnomad_bnd_df,
@@ -114,7 +111,7 @@ def parse_preprocess_gnomad(
     # output_path = output_dir / 'gnomad_bps.csv'
 
     # if verbose:
-    #     print(f"Saving breakpoints in {output_path}")
+    #     _log(f"Saving breakpoints in {output_path}")
 
     # if not output_dir.exists():
     #     output_dir.mkdir(parents=True, exist_ok=True)
@@ -122,7 +119,7 @@ def parse_preprocess_gnomad(
     return gnomad_bp_df
 
     # if verbose:
-    #     print(f"Saved breakpoints in {output_path}")
+    #     _log(f"Saved breakpoints in {output_path}")
 
 def parse_preprocess_gridss(
     sample_name: str,
@@ -147,21 +144,21 @@ def parse_preprocess_gridss(
             verbose (bool): If True, print progress messages.
         """
         if verbose:
-            print(f"Loading GRIDSS VCF from {callset['path']}")
+            _log(f"Loading GRIDSS VCF from {callset['path']}")
         gridss_vcf = VariantFile(callset['path'])
         gridss_df, gridss_meta = vcfp.parse_vcf_to_df(
             vcf_file=gridss_vcf,
             caller_params=callset['params']
         )
         if verbose:
-            print("Preprocessing GRIDSS variants")
+            _log("Preprocessing GRIDSS variants")
         gridss_df = caller_specific.gridss_preprocess(
             gridss_df,
             caller_params=callset['params'],
             verbose=verbose
         )
         if verbose:
-            print("Converting GRIDSS breakends to breakpoints")
+            _log("Converting GRIDSS breakends to breakpoints")
         gridss_bp_df = bnds.bnd_to_bp(gridss_df)
 
         # A very small proportion of breakpoints will have different QUAL values for the two breakends
@@ -176,10 +173,10 @@ def parse_preprocess_gridss(
         # output_dir.mkdir(parents=True, exist_ok=True)
         # output_path = output_dir / 'gridss_bps.csv'
         # if verbose:
-        #     print(f"Saving breakpoints to {output_path}")
+        #     _log(f"Saving breakpoints to {output_path}")
         # gridss_bp_df.to_csv(output_path)
         # if verbose:
-        #     print(f"Saved breakpoints in {output_path}")
+        #     _log(f"Saved breakpoints in {output_path}")
         return gridss_bp_df
 
 
@@ -213,34 +210,34 @@ def parse_preprocess_manta_candidate(
             verbose (bool): If True, print progress messages.
         """
         if verbose:
-            print(f"Loading Manta candidate VCF from {callset['path']}")
+            _log(f"Loading Manta candidate VCF from {callset['path']}")
         manta_candidate_vcf = VariantFile(callset['path'])
         manta_candidate_df, manta_candidate_meta = vcfp.parse_vcf_to_df(
             vcf_file=manta_candidate_vcf,
             caller_params=callset['params']
         )
         if verbose:
-            print("Splitting Manta candidate variants into BND/INV and event-only dataframes")
+            _log("Splitting Manta candidate variants into BND/INV and event-only dataframes")
         manta_candidate_bnd_only_df = manta_candidate_df[manta_candidate_df['INFO_SVTYPE'].isin(['BND', 'INV'])]
         manta_candidate_evt_only_df = manta_candidate_df[~manta_candidate_df['INFO_SVTYPE'].isin(['BND', 'INV'])]
         if verbose:
-            print("Preprocessing Manta BND/INV variants")
+            _log("Preprocessing Manta BND/INV variants")
         manta_candidate_bnd_only_df = caller_specific.manta_preprocess_bnds_only(
             manta_candidate_bnd_only_df,
             caller_params=callset['params']
         )
         if verbose:
-            print("Preprocessing Manta event-only variants")
+            _log("Preprocessing Manta event-only variants")
         manta_candidate_evt_only_df = caller_specific.manta_preprocess_evts_only(
             manta_candidate_evt_only_df,
             caller_params=callset['params']
         )
         if verbose:
-            print("Converting Manta event-only variants to breakends")
+            _log("Converting Manta event-only variants to breakends")
         manta_candidate_evt_bnd_df = evts.event_to_bnd(manta_candidate_evt_only_df, bnd2_pos=caller_params.manta_diploid_params['bnd2_pos'])
         manta_candidate_df = pd.concat([manta_candidate_bnd_only_df, manta_candidate_evt_bnd_df], axis=0)
         if verbose:
-            print("Converting Manta breakends to breakpoints")
+            _log("Converting Manta breakends to breakpoints")
         manta_candidate_bp_df = bnds.bnd_to_bp(
             manta_candidate_df,
             force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
@@ -248,10 +245,10 @@ def parse_preprocess_manta_candidate(
         # output_dir.mkdir(parents=True, exist_ok=True)
         # output_path = output_dir / 'manta_candidate_bps.csv'
         # if verbose:
-        #     print(f"Saving breakpoints to {output_path}")
+        #     _log(f"Saving breakpoints to {output_path}")
         # manta_candidate_bp_df.to_csv(output_path)
         # if verbose:
-        #     print(f"Saved breakpoints in {output_path}")
+        #     _log(f"Saved breakpoints in {output_path}")
         return manta_candidate_bp_df
 
     if 'manta_candidate' in workflow_config.get('callsets', {}):
@@ -287,34 +284,34 @@ def parse_preprocess_manta_diploid(
             verbose (bool): If True, print progress messages.
         """
         if verbose:
-            print(f"Loading Manta diploid VCF from {callset['path']}")
+            _log(f"Loading Manta diploid VCF from {callset['path']}")
         manta_diploid_vcf = VariantFile(callset['path'])
         manta_diploid_df, manta_diploid_meta = vcfp.parse_vcf_to_df(
             vcf_file=manta_diploid_vcf,
             caller_params=callset['params']
         )
         if verbose:
-            print("Splitting Manta diploid variants into BND/INV and event-only dataframes")
+            _log("Splitting Manta diploid variants into BND/INV and event-only dataframes")
         manta_bnd_only_df = manta_diploid_df[manta_diploid_df['INFO_SVTYPE'].isin(['BND', 'INV'])]
         manta_evt_only_df = manta_diploid_df[~manta_diploid_df['INFO_SVTYPE'].isin(['BND', 'INV'])]
         if verbose:
-            print("Preprocessing Manta diploid BND/INV variants")
+            _log("Preprocessing Manta diploid BND/INV variants")
         manta_bnd_only_df = caller_specific.manta_preprocess_bnds_only(
             manta_bnd_only_df,
             caller_params=callset['params']
         )
         if verbose:
-            print("Preprocessing Manta diploid event-only variants")
+            _log("Preprocessing Manta diploid event-only variants")
         manta_evt_only_df = caller_specific.manta_preprocess_evts_only(
             manta_evt_only_df,
             caller_params=callset['params']
         )
         if verbose:
-            print("Converting Manta diploid event-only variants to breakends")
+            _log("Converting Manta diploid event-only variants to breakends")
         manta_evt_bnd_df = evts.event_to_bnd(manta_evt_only_df, bnd2_pos=caller_params.manta_diploid_params['bnd2_pos'])
         manta_diploid_df = pd.concat([manta_bnd_only_df, manta_evt_bnd_df], axis=0)
         if verbose:
-            print("Converting Manta diploid breakends to breakpoints")
+            _log("Converting Manta diploid breakends to breakpoints")
         manta_diploid_bp_df = bnds.bnd_to_bp(
             manta_diploid_df,
             force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
@@ -322,10 +319,10 @@ def parse_preprocess_manta_diploid(
         # output_dir.mkdir(parents=True, exist_ok=True)
         # output_path = output_dir / 'manta_diploid_bps.csv'
         # if verbose:
-        #     print(f"Saving breakpoints to {output_path}")
+        #     _log(f"Saving breakpoints to {output_path}")
         # manta_diploid_bp_df.to_csv(output_path)
         # if verbose:
-        #     print(f"Saved breakpoints in {output_path}")
+        #     _log(f"Saved breakpoints in {output_path}")
         return manta_diploid_bp_df
 
     if 'manta_diploid' in workflow_config.get('callsets', {}):
@@ -349,7 +346,7 @@ def parse_preprocess_delly(
         Internal function to process a delly callset and save breakpoints.
         """
         if verbose:
-            print(f"Creating breakpoints from DELLY BND/TRA calls and saving to {callset['svensemble_dir'] / 'delly_bps.csv'}")
+            _log(f"Creating breakpoints from DELLY BND/TRA calls and saving to {callset['svensemble_dir'] / 'delly_bps.csv'}")
 
         if not (temp_dir / 'delly_bnd.tmp.vcf').exists():
             temp_dir.mkdir(parents=True, exist_ok=True)
@@ -361,7 +358,7 @@ def parse_preprocess_delly(
         )
 
         if verbose:
-            print(f"Loading DELLY VCF from {callset['path']}")
+            _log(f"Loading DELLY VCF from {callset['path']}")
         delly_bnd_only_vcf = VariantFile(temp_dir / 'delly_bnd.tmp.vcf')
         delly_bnd_only_df, delly_bnd_only_meta = vcfp.parse_vcf_to_df(
             vcf_file=delly_bnd_only_vcf,
@@ -386,10 +383,10 @@ def parse_preprocess_delly(
 
         # output_path = output_dir / 'delly_bps.csv'
         # if verbose:
-        #     print(f"Saving breakpoints to {output_path}")
+        #     _log(f"Saving breakpoints to {output_path}")
         # delly_bp_df.to_csv(output_path)
         # if verbose:
-        #     print(f"Saved breakpoints in {output_path}")
+        #     _log(f"Saved breakpoints in {output_path}")
         return delly_bp_df
 
     if 'delly' in workflow_config.get('callsets', {}):
@@ -422,37 +419,37 @@ def parse_preprocess_sniffles(
         Internal function to process a Sniffles2 callset and return breakpoints.
         """
         if verbose:
-            print(f"Loading Sniffles2 VCF from {callset['path']}")
+            _log(f"Loading Sniffles2 VCF from {callset['path']}")
         sniffles_vcf = VariantFile(callset['path'])
         sniffles_df, sniffles_meta = vcfp.parse_vcf_to_df(
             vcf_file=sniffles_vcf,
             caller_params=callset['params']
         )
         if verbose:
-            print("Splitting Sniffles2 variants into BND and event-only dataframes")
+            _log("Splitting Sniffles2 variants into BND and event-only dataframes")
         sniffles_bnd_only_df = sniffles_df[sniffles_df['INFO_SVTYPE'] == 'BND']
         sniffles_evt_only_df = sniffles_df[sniffles_df['INFO_SVTYPE'] != 'BND']
         if verbose:
-            print("Preprocessing Sniffles2 BND variants")
+            _log("Preprocessing Sniffles2 BND variants")
         sniffles_bnd_only_df = caller_specific.sniffles_preprocess_bnds_only(
             sniffles_bnd_only_df,
             caller_params=callset['params']
         )
         if verbose:
-            print("Preprocessing Sniffles2 event-only variants")
+            _log("Preprocessing Sniffles2 event-only variants")
         sniffles_evt_only_df = caller_specific.sniffles_preprocess_evts_only(
             sniffles_evt_only_df,
             caller_params=callset['params']
         )
         if verbose:
-            print("Converting Sniffles2 event-only variants to breakends")
+            _log("Converting Sniffles2 event-only variants to breakends")
         sniffles_evt_bnd_df = evts.event_to_bnd(
             sniffles_evt_only_df,
             bnd2_pos=caller_params.sniffles_params['bnd2_pos']
         )
         sniffles_df = pd.concat([sniffles_bnd_only_df, sniffles_evt_bnd_df], axis=0)
         if verbose:
-            print("Converting Sniffles2 breakends to breakpoints")
+            _log("Converting Sniffles2 breakends to breakpoints")
         sniffles_bp_df = bnds.bnd_to_bp(
             sniffles_df,
             force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
@@ -514,17 +511,17 @@ def match_sample_breakpoints(
     add the reference sample breakpoints, perform outer join matching for each training_set specified for sample, and save results.
     """
     if verbose:
-        print("Matching breakpoints for sample...")
+        _log("Matching breakpoints for sample...")
 
     bp_df_dict = {}
 
     # For each callset in the sample, load the breakpoints into bp_df_dict
     for callset_name, callset_config in workflow_config['callsets'].items():
         if verbose:
-            print(f"Loading breakpoints for callset '{callset_name}'...")
+            _log(f"Loading breakpoints for callset '{callset_name}'...")
         bp_df = pd.read_csv(workflow_config['workflow_dir'] / f'{callset_name}.bps.csv', low_memory=False)
         if verbose:
-            print(f"Loaded {len(bp_df)} breakpoints for '{callset_name}'.")
+            _log(f"Loaded {len(bp_df)} breakpoints for '{callset_name}'.")
 
         bp_df_dict[callset_name] = bp_df
 
@@ -536,12 +533,12 @@ def match_sample_breakpoints(
 
     ground_truth_callset_name = list(ground_truth_config['callsets'].keys())[0]
     if verbose:
-        print(f"Loading reference breakpoints for callset '{ground_truth_callset_name}'...")
+        _log(f"Loading reference breakpoints for callset '{ground_truth_callset_name}'...")
     ref_bp_df = pd.read_csv(ground_truth_config['callsets'][ground_truth_callset_name]['svensemble_dir'] / 'bps.csv', low_memory=False)
 
     if verbose:
         if ref_bp_df is not None:
-            print(f"Loaded {len(ref_bp_df)} reference breakpoints for '{ground_truth_callset_name}'.")
+            _log(f"Loaded {len(ref_bp_df)} reference breakpoints for '{ground_truth_callset_name}'.")
         else:
             raise FileNotFoundError(f"No reference breakpoints found for '{ground_truth_callset_name}'.")
 
@@ -551,14 +548,14 @@ def match_sample_breakpoints(
     output_dir = workflow_config['workflow_dir']
     if not output_dir.exists():
         if verbose:
-            print(f"Creating output directory: {output_dir}")
+            _log(f"Creating output directory: {output_dir}")
         output_dir.mkdir(parents=True)
 
 
     # Perform breakpoint matching for each training set specified for sample using chunk_match
     for training_set_name, training_set_callsets in workflow_config['training_sets'].items():
         if verbose:
-            print(f"Performing outer join matching of breakpoints for training set: {training_set_name}...")
+            _log(f"Performing outer join matching of breakpoints for training set: {training_set_name}...")
         matched_bp_df = chunk_match.outer_join_bps(
             bp_df_dict={
                 callset_name: bp_df_dict[callset_name] for callset_name in training_set_callsets + [ground_truth_callset_name]
@@ -568,11 +565,11 @@ def match_sample_breakpoints(
             max_dist=max_dist
         )
         if verbose:
-            print(f"Matching complete. Matched breakpoints: {len(matched_bp_df)}")
+            _log(f"Matching complete. Matched breakpoints: {len(matched_bp_df)}")
         # Save matched breakpoints to CSV
         output_csv_path = output_dir / 'matched_bps.csv'
         if verbose:
-            print(f"Saving matched breakpoints to: {output_csv_path}")
+            _log(f"Saving matched breakpoints to: {output_csv_path}")
         matched_bp_df.to_csv(output_csv_path, index=False)
 
 def pu_train_sample(
@@ -593,18 +590,18 @@ def pu_train_sample(
     training_set_name, training_set_callsets = list(workflow_config['training_sets'].items())[0]
     joint_bp_path = workflow_config['workflow_dir'] / 'matched_bps.csv'
     if verbose:
-        print(f"Loading joint breakpoints from: {joint_bp_path}")
+        _log(f"Loading joint breakpoints from: {joint_bp_path}")
     try:
         joint_bp_df = pd.read_csv(joint_bp_path, low_memory=False)
     except FileNotFoundError:
         if verbose:
-            print(f"Joint breakpoints not found at {joint_bp_path}, loading from {workflow_config['model']['matched_bps_path']}")
+            _log(f"Joint breakpoints not found at {joint_bp_path}, loading from {workflow_config['model']['matched_bps_path']}")
         joint_bp_df = pd.read_csv(workflow_config['model']['matched_bps_path'], low_memory=False)
 
     # Preprocess for PU learning
     if verbose:
-        print("Preprocessing sample for PU learning...")
-        print(f"Reference name: {ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source']}")
+        _log("Preprocessing sample for PU learning...")
+        _log(f"Reference name: {ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source']}")
 
     X, rf_fit = models.train_model(
         joint_bp_df,
@@ -617,13 +614,13 @@ def pu_train_sample(
         # Save the feature matrix to disk
         output_path = workflow_config['workflow_dir'] / 'feature_matrix.csv'
         if verbose:
-            print(f"Saving feature matrix to: {output_path}")
+            _log(f"Saving feature matrix to: {output_path}")
         pd.DataFrame(X).to_csv(output_path, index=True)
     if rf_fit is not None:
         # Save the model to disk
         output_path = workflow_config['workflow_dir'] / 'model.pkl'
         if verbose:
-            print(f"Saving PU model to: {output_path}")
+            _log(f"Saving PU model to: {output_path}")
         with open(output_path, 'wb') as f:
             pickle.dump(rf_fit, f)
     else:
@@ -647,17 +644,17 @@ def pu_predict_sample(
     if not (workflow_config['workflow_dir'] / 'model.pkl').exists():
         raise FileNotFoundError(f"Model dictionary not found at {workflow_config['workflow_dir'] / 'model.pkl'}")
     if verbose:
-        print(f"Loading model from: {workflow_config['workflow_dir'] / 'model.pkl'}")
+        _log(f"Loading model from: {workflow_config['workflow_dir'] / 'model.pkl'}")
     model_fit = pickle.load(open(workflow_config['workflow_dir'] / 'model.pkl', 'rb'))
     if verbose:
-        print(f"Predicting probabilities for {len(X)} breakpoints")
+        _log(f"Predicting probabilities for {len(X)} breakpoints")
 
     # Fill missing features with 0 if any were introduced in training - from other samples or with the model function
     X = X.reindex(columns=model_fit.feature_names_in_, fill_value=0)
 
     y_pred = model_fit.predict_proba(X)[:,1]
     if verbose:
-        print(f"Saving predictions to: {workflow_config['workflow_dir'] / 'predictions.csv'}")
+        _log(f"Saving predictions to: {workflow_config['workflow_dir'] / 'predictions.csv'}")
     y_pred = pd.DataFrame(y_pred, columns=[f'{list(workflow_config['training_sets'].keys())[0]}_{workflow_config['model']['name']}_pred'], index=X.index).reset_index(drop=False)
 
     # Load the matched breakpoints DataFrame
@@ -719,12 +716,12 @@ def svensemble2(
 
     if not workflow_config['workflow_dir'].exists():
         if verbose:
-            print(f"Creating workflow directory: {workflow_config['workflow_dir']}")
+            _log(f"Creating workflow directory: {workflow_config['workflow_dir']}")
         workflow_config['workflow_dir'].mkdir(parents=True)
 
     if not (workflow_config['workflow_dir'] / 'workflow_config.pkl').exists():
         if verbose:
-            print(f"Saving workflow config to: {workflow_config['workflow_dir'] / 'workflow_config.pkl'}")
+            _log(f"Saving workflow config to: {workflow_config['workflow_dir'] / 'workflow_config.pkl'}")
         with open(workflow_config['workflow_dir'] / 'workflow_config.pkl', 'wb') as f:
             pickle.dump(workflow_config, f)
 

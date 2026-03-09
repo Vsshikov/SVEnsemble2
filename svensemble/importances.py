@@ -22,12 +22,8 @@ from sklearn.inspection import permutation_importance
 import sklearn.model_selection as skm
 
 # Set working directory and sys.path for local svensemble module
-WORKDIR = "/vast/ai_projects/Papenfuss_SVEnsemble2"
-os.chdir(WORKDIR)
-if WORKDIR not in sys.path:
-    sys.path.insert(0, WORKDIR)
-
-import svensemble.matched_breakpoints as matchedbps  # noqa: E402
+from . import utils as sv_utils  # noqa: E402
+from . import matched_breakpoints as matchedbps  # noqa: E402
 
 
 def load_svensemble2_val_Xy_from_samples_val_pickles(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, verbose=False):
@@ -149,7 +145,7 @@ def svensemble2_feature_importance(samples_pkl_path, val_dict_pkl_path, sample_n
     """
     # TEMPORARY: DEFAULT OUTPUT DIR
     if output_dir is None:
-        output_dir = '/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/model/figs/featureimportance'
+        output_dir = sv_utils.BASE_DIR / 'model/figs/featureimportance'
         output_png = f'{output_dir}/svensemble2_permutation_importance_{sample_name}_{training_set_name}_{model_name}.png'
         output_csv = f'{output_dir}/svensemble2_permutation_importance_{sample_name}_{training_set_name}_{model_name}.csv'
 

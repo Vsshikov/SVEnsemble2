@@ -18,8 +18,6 @@
 SOURCE_FILE="$1"
 TASK_FILE="$2"
 
-PROJ_DIR="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2"
-
 source "$SOURCE_FILE"
 
 # ─── Per-task logging helper ────────────────────────────────────────────────
@@ -54,7 +52,7 @@ sve_step_flags=""
 module load micromamba
 
 # shellcheck disable=SC2086
-micromamba run -n SVEnsemble2 python "$PROJ_DIR/svensemble/pipeline.py" \
+micromamba run -n SVEnsemble2 python -m svensemble.pipeline \
     --sample_name "$SAMPLE_NAME" \
     --ground_truth_sample_name "$SVE_GROUND_TRUTH_SAMPLE_NAME" \
     --ref_path "$REF_FASTA" \

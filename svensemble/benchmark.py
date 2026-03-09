@@ -14,39 +14,23 @@ from copy import deepcopy
 from pathlib import Path
 import os
 import sys
+import pysam
+
+from . import breakends as bnds
+from . import events as evts
+from . import utils as sv_utils
+from . import _caller_params as caller_params
+from . import _sample_params as sample_params
+from . import vcfparse as vcfp
+from . import chunk_match as chunk_match
+from . import breakpoints as bps
+from . import matched_breakpoints as matchedbps
 
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['ps.fonttype'] = 42
 
 
 
-import pysam
-
-if __name__ == '__main__':
-    # Set working directory and sys.path for local svensemble module
-    WORKDIR = "/vast/ai_projects/Papenfuss_SVEnsemble2"
-    os.chdir(WORKDIR)
-    if WORKDIR not in sys.path:
-        sys.path.insert(0, WORKDIR)
-    import svensemble.breakends as bnds
-    import svensemble.events as evts
-    import svensemble.utils as sv_utils
-    import svensemble._caller_params as caller_params
-    import svensemble._sample_params as sample_params
-    import svensemble.vcfparse as vcfp
-    import svensemble.chunk_match as chunk_match
-    import svensemble.breakpoints as bps
-    import svensemble.matched_breakpoints as matchedbps
-else:
-    from . import breakends as bnds
-    from . import events as evts
-    from . import utils as sv_utils
-    from . import _caller_params as caller_params
-    from . import _sample_params as sample_params
-    from . import vcfparse as vcfp
-    from . import chunk_match as chunk_match
-    from . import breakpoints as bps
-    from . import matched_breakpoints as matchedbps
 
 def load_truth_variants(ref_path):
     """Load reference variants from Kosugi study from BED file

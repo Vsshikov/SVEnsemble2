@@ -1,13 +1,20 @@
 # Python
+__pycache__/
 *.pyc
-*/__pycache__/*
-*.ipynb_checkpoints
+*.pyo
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
 *-checkpoint.ipynb
-*.checkpoint.py
-.jupyter/*
-.local/*
-.cache/*
-.ipython/*
+
+# Environments & caches
+.jupyter/
+.local/
+.cache/
+.ipython/
+.env
+condaenvs/
 
 # Data files
 *.bam
@@ -58,57 +65,58 @@
 *.out
 *.stats
 
-# Other
+# Images & documents
 *.png
+*.pdf
+*.html
+
+# Other binary/generated
 *.bas
 *.so
-*.pdf
 *.zip
-*.html
-*.out
 *.csi
+
+# Editor & OS
 *.swp
 *.swo
 .DS_Store
+.vscode/
+.cursor/
+
+# R
 .Rhistory
 .RData
 .Rproj.user
 *.Rproj
+
+# Workflow engines
 .snakemake/
 .nextflow/
 work/
-.env
 
 # Directories
+data/
 downloads/*
 !downloads/scripts/
-*/data/
-data/
-*/saved/
-*/output/
-SVEnsemble.stornext/*
-*/tmp/
-*/temp/
-*/results/
-*/logs/
-*/saved/
 callers/
 sv_calling/
+SVEnsemble.stornext/
+tmp/
+temp/
+logs/
+saved/
+results/
+output/
+
+# Vendored utilities
 utils/bazam/
 utils/minimap/
 utils/shap-0.49.1/
 utils/shap-master/
 utils/envs/
 utils/apache-ant-1.10.15/
-condaenvs/
 
 # Specific files
 pkg/gridss-2.13.2.tar
-# vast
-# wget-log
-data/HG002/wget-log
-data/HG002/data/wget-log
-UNKNOWN.egg-info/PKG-INFO
 sv_benchmark/funcs.R
-.vscode/settings.json
 TODO

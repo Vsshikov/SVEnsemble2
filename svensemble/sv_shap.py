@@ -34,18 +34,11 @@ import numpy as np
 import pandas as pd
 import shap
 
-if __name__ == '__main__':
-    WORKDIR = "/vast/ai_projects/Papenfuss_SVEnsemble2"
-    os.chdir(WORKDIR)
-    if WORKDIR not in sys.path:
-        sys.path.insert(0, WORKDIR)
-    import svensemble.importances as importances
-    import svensemble.matched_breakpoints as matchedbps
-    import svensemble._caller_params as caller_params
-else:
-    from . import importances
-    from . import matched_breakpoints as matchedbps
-    from . import _caller_params as caller_params
+
+
+from . import importances
+from . import matched_breakpoints as matchedbps
+from . import _caller_params as caller_params
 
 
 # ---------------------------------------------------------------------------

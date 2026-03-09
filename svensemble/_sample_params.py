@@ -19,7 +19,7 @@ sample_val_sets = {
     },
     'NA12878_hg19': {
         'name': 'parikh',
-        'path': Path(f'/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/Parikh_validation/NA12878_metasv_all.hg19.bps.csv'),
+        'path': Path(f'data/Parikh_validation/NA12878_metasv_all.hg19.bps.csv'),
         'meta': {
             'svtypes': ['DEL', 'INS', 'DUP', 'INV']
         }

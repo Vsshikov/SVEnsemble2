@@ -1,46 +1,129 @@
 #!/bin/bash
+# =============================================================================
+# new_data.sh — Scaffold a new sample data directory
+#
+# Creates the full directory tree, symlinks shared scripts and configs, and
+# generates a skeleton sample.sh and default run config for the new sample.
+#
+# Usage:
+#   bash scripts/new_data.sh <SAMPLE_NAME>
+#
+# The script must be run from the project root, or with SVENSEMBLE_BASE_DIR set.
+# =============================================================================
+set -euo pipefail
 
-# Use to generate a new data directory for a new sample
+# --------------- Resolve project root ----------------------------------------
+PROJ_DIR="${SVENSEMBLE_BASE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SCRIPTS_DIR="$PROJ_DIR/scripts/data_scripts"
 
-SAMPLE_NAME=$1
-if [[ "$SAMPLE_NAME" == "" ]]; then
-    echo "Sample name is required"
+# --------------- Validate arguments ------------------------------------------
+if [[ $# -lt 1 || -z "$1" ]]; then
+    echo "Usage: $0 <SAMPLE_NAME>" >&2
     exit 1
 fi
 
-PROJ_DIR="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2"
+SAMPLE_NAME="$1"
 SAMPLE_DIR="$PROJ_DIR/data/$SAMPLE_NAME"
 
 if [[ -d "$SAMPLE_DIR" ]]; then
-    echo "Sample directory already exists"
+    echo "Error: sample directory already exists: $SAMPLE_DIR" >&2
     exit 1
 fi
 
-echo "Creating new data directory for sample: $SAMPLE_NAME"
+echo "Creating sample directory: $SAMPLE_DIR"
 
-mkdir -p $SAMPLE_DIR
+# --------------- Create directory tree ---------------------------------------
+mkdir -p "$SAMPLE_DIR"/{scripts,logs,downloads,preprocessed,aligned,sv_calling}
+mkdir -p "$SAMPLE_DIR/scripts/config/runs"
 
-mkdir -p $SAMPLE_DIR/scripts
-for script in $(ls $PROJ_DIR/scripts/data_scripts); do
-    if [[ "$script" == "master_args.sh" ]]; then
-        cp $PROJ_DIR/scripts/data_scripts/master_args.sh $SAMPLE_DIR/scripts/master_args.sh
-        continue
-    fi
-    ln -s $PROJ_DIR/scripts/data_scripts/$script $SAMPLE_DIR/scripts/$script
+# --------------- Symlink shared batch scripts --------------------------------
+# Only symlink regular files (*.sh) from data_scripts/; skip directories and
+# files that should be sample-specific.
+for script in "$SCRIPTS_DIR"/*.sh; do
+    [[ -f "$script" ]] || continue
+    name="$(basename "$script")"
+    ln -s "$script" "$SAMPLE_DIR/scripts/$name"
 done
 
-# mkdir -p $SAMPLE_DIR/scripts/envs
-# for yaml in $(ls $PROJ_DIR/scripts/data_scripts/envs); do
-#     ln -s $PROJ_DIR/scripts/data_scripts/envs/$yaml $SAMPLE_DIR/scripts/envs/$yaml
-# done
+# --------------- Symlink shared config files ---------------------------------
+# default_run.sh is shared across all samples via symlink.
+ln -s "$SCRIPTS_DIR/config/default_run.sh" "$SAMPLE_DIR/scripts/config/default_run.sh"
 
-mkdir -p $SAMPLE_DIR/logs
-mkdir -p $SAMPLE_DIR/downloads
-mkdir -p $SAMPLE_DIR/preprocessed
+# TEMPLATE.sh gives every sample a quick-copy starting point for new runs.
+ln -s "$SCRIPTS_DIR/config/runs/TEMPLATE.sh" "$SAMPLE_DIR/scripts/config/runs/TEMPLATE.sh"
 
-# Set the default values in the master_args.sh file
-sed -i "s|SAMPLE_NAME=|SAMPLE_NAME=$SAMPLE_NAME|" $SAMPLE_DIR/scripts/master_args.sh
-sed -i "s|SAMPLE_DIR=|SAMPLE_DIR=$SAMPLE_DIR|" $SAMPLE_DIR/scripts/master_args.sh
+# --------------- Generate sample.sh skeleton ---------------------------------
+cat > "$SAMPLE_DIR/scripts/config/sample.sh" <<SAMPLE_EOF
+#!/bin/bash
+# =============================================================================
+# sample.sh — ${SAMPLE_NAME} SAMPLE-LEVEL CONFIGURATION
+#
+# Layer 2 in the config cascade (sourced after default_run.sh).
+# Contains:
+#   - Sample identity (name, directory)
+#   - Input data paths
+#   - Sample-level overrides that apply to ALL runs
+# =============================================================================
 
-echo "New data directory created for sample: $SAMPLE_NAME"
-echo "Sample directory: $SAMPLE_DIR"
+SAMPLE_NAME=${SAMPLE_NAME}
+SAMPLE_DIR="\${PROJ_DIR}/data/\${SAMPLE_NAME}"
+
+# --------------- Input reads ------------------------------------------------
+# Short reads (Illumina)
+READS1_PATH=
+READS2_PATH=
+
+# Long reads (PacBio HiFi / ONT)
+READS_LONG_PATHS=()
+READS_LONG_SOURCE=             # "hifi" or "ont"
+MINIMAP_PRESET=                # "map-hifi" or "map-ont"
+
+# Pre-aligned input (set ONE of these, leave others empty)
+SAM_INPUT=
+CRAM_INPUT=
+CRAM_FASTA=
+CRAM_REF_PATH=
+CRAM_REF_CACHE=
+
+# --------------- Sample-level overrides -------------------------------------
+# Uncomment and modify as needed. Everything else inherits from default_run.sh.
+# SVE_MODELS=("unbiased")
+# SVE_TRAINING_SETS=("gridss" "delly" "manta_diploid")
+# SVE_BENCH_ADDITIONAL_CALLSETS=("survivor")
+SAMPLE_EOF
+
+# --------------- Generate default run config ---------------------------------
+cat > "$SAMPLE_DIR/scripts/config/runs/default.sh" <<RUN_EOF
+#!/bin/bash
+# =============================================================================
+# runs/default.sh — ${SAMPLE_NAME}: default run configuration
+#
+# Edit this file to enable the pipeline steps you need.
+# See TEMPLATE.sh for all available parameters.
+# =============================================================================
+
+_RUN_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+source "\${_RUN_DIR}/../default_run.sh"
+source "\${_RUN_DIR}/../sample.sh"
+unset _RUN_DIR
+
+# --------------- Run-specific overrides -------------------------------------
+# RUN_MANTA=true
+# RUN_GRIDSS=true
+# RUN_DELLY=true
+# RUN_SVENSEMBLE2=true
+# RUN_BENCHMARK=true
+# BENCHMARK=true
+RUN_EOF
+
+echo ""
+echo "Sample scaffolded successfully:"
+echo "  Directory:    $SAMPLE_DIR"
+echo "  Sample config: $SAMPLE_DIR/scripts/config/sample.sh"
+echo "  Default run:   $SAMPLE_DIR/scripts/config/runs/default.sh"
+echo "  Run template:  $SAMPLE_DIR/scripts/config/runs/TEMPLATE.sh (symlink)"
+echo ""
+echo "Next steps:"
+echo "  1. Edit scripts/config/sample.sh — set input read paths"
+echo "  2. Edit scripts/config/runs/default.sh — enable pipeline steps"
+echo "  3. Run: bash scripts/data_scripts/master.sh $SAMPLE_DIR/scripts/config/runs/default.sh"

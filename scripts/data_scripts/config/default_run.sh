@@ -17,7 +17,8 @@
 # =============================================================================
 
 # --------------- Project root -----------------------------------------------
-PROJ_DIR=/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2
+PROJ_DIR="${SVENSEMBLE_BASE_DIR:?Set SVENSEMBLE_BASE_DIR before running}"
+export SVENSEMBLE_BASE_DIR
 
 # --------------- Reference genome files -------------------------------------
 REF_FASTA="${PROJ_DIR}/data/hg38/downloads/hg38.no_decoys.fa"

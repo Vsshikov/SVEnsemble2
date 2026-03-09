@@ -10,8 +10,6 @@ unset _MASTER_DIR _DEFAULT_CFG
 
 [[ -f "$SOURCE_FILE" ]] || { echo "Usage: $0 [<config/runs/*.sh>]  (no default config found at $SOURCE_FILE)" >&2; exit 1; }
 
-PROJ_DIR="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2"
-
 source "$SOURCE_FILE"
 
 SAMPLE_DIR="$PROJ_DIR/data/$SAMPLE_NAME"

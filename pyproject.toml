@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "svensemble"
+version = "0.0.1"
+description = "A toolkit for structural variant ensemble calling"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "pysam",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "shap",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[project.scripts]
+svensemble = "svensemble.pipeline:main"
+benchmark = "svensemble.benchmark:main"

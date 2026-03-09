@@ -1,6 +1,7 @@
 """
 Utility functions for SVEnsemble
 """
+import os
 import copy
 import pandas as pd
 from pathlib import Path
@@ -9,6 +10,16 @@ from ._caller_params import caller_param_dict, callset_path_configs, training_se
 from ._sample_params import sample_val_sets, sample_val_set_template, default_model_name
 from ._model_configs import model_configs
 from typing import Dict, Any
+
+def get_base_dir() -> Path:
+    base = os.environ.get("SVENSEMBLE_BASE_DIR")
+    if base:
+        return Path(base)
+    # Fallback: assume we're running from the project root
+    return Path.cwd()
+
+BASE_DIR = get_base_dir()
+DATA_DIR = BASE_DIR / "data"
 
 def update(d, u):
     for k, v in u.items():
@@ -20,13 +31,15 @@ def update(d, u):
 
 human_chroms = [f'chr{i}' for i in range(1, 23)] + ['chrX', 'chrY', 'chrM']
 
-def _get_caller_callset_dict(sample_name: str, caller_name: str) -> dict:
+def _get_caller_callset_dict(sample_name: str, caller_name: str, base_dir: Path | None = None) -> dict:
     """Build a callset config dict for a given caller and sample.
 
     Paths are resolved from callset_path_configs (_caller_params) using sample_name substitution.
     The params key always matches caller_name, so _H variants (gridss_H, sniffles_H)
     share paths with their base caller but carry separate parameter sets.
     """
+    if base_dir is None:
+        base_dir = BASE_DIR
     try:
         source, svensemble_dir_tmpl, path_tmpl = callset_path_configs[caller_name]
     except KeyError:
@@ -36,8 +49,8 @@ def _get_caller_callset_dict(sample_name: str, caller_name: str) -> dict:
         )
     return defaultdict(str, {
         'source': source,
-        'svensemble_dir': Path(svensemble_dir_tmpl.format(s=sample_name)),
-        'path': Path(path_tmpl.format(s=sample_name)),
+        'svensemble_dir': base_dir / Path(svensemble_dir_tmpl.format(s=sample_name)),
+        'path': base_dir / Path(path_tmpl.format(s=sample_name)),
         'params': copy.deepcopy(caller_param_dict[caller_name]),
     })
 
@@ -48,11 +61,14 @@ def create_config_dict(
     training_set: str | list[str] = 'default',
     val_set: None | str | dict[str, Any] = None,
     model_name: str | None = None,
-    additional_callsets: list[str] | None = None
+    additional_callsets: list[str] | None = None,
+    base_dir: Path | None = None
 ):
     """
     Based on _caller_params, create a config dictionary for the sample.
     """
+    if base_dir is None:
+        base_dir = BASE_DIR
     if isinstance(training_set, str):
         if training_set == 'default':
             _training_sets = {default_training_set: training_set_presets[default_training_set]}
@@ -82,8 +98,12 @@ def create_config_dict(
         if sample_name not in sample_val_sets.keys():
             raise ValueError(f'Validation set not found for sample: {sample_name}')
         val_set = sample_val_sets[sample_name].copy()
+        if not val_set['path'].is_absolute():
+            val_set['path'] = base_dir / val_set['path']
     elif val_set in list(sample_val_sets.keys()):
         val_set = sample_val_sets[val_set].copy()
+        if not val_set['path'].is_absolute():
+            val_set['path'] = base_dir / val_set['path']
     elif isinstance(val_set, dict):
         if all(key in val_set.keys() for key in sample_val_set_template.keys()):
             pass
@@ -91,6 +111,8 @@ def create_config_dict(
             raise ValueError(f'Invalid validation set: {val_set}')
         try:
             val_set['path'] = Path(val_set['path'])
+            if not val_set['path'].is_absolute():
+                val_set['path'] = base_dir / val_set['path']
         except Exception as e:
             raise ValueError(f'Invalid validation set path: {val_set['path']}, error: {e}')
     elif val_set is None:
@@ -124,11 +146,11 @@ def create_config_dict(
     if is_ground_truth:
         config_dict = {
             sample_name: {
-                'sample_dir': Path(f'data/{sample_name}'),
-                'workflow_dir': Path(f'data/{sample_name}/svensemble2'),
+                'sample_dir': base_dir / Path(f'data/{sample_name}'),
+                'workflow_dir': base_dir / Path(f'data/{sample_name}/svensemble2'),
                 'is_reference': True,
                 'callsets': {
-                    sample_name: _get_caller_callset_dict(sample_name, default_reference_set)
+                    sample_name: _get_caller_callset_dict(sample_name, default_reference_set, base_dir=base_dir)
                 }
             }
         }
@@ -139,8 +161,8 @@ def create_config_dict(
     config_dict = {
         sample_name: {
             'sample_name': sample_name,
-            'sample_dir': Path(f'data/{sample_name}'),
-            'workflow_dir': Path(
+            'sample_dir': base_dir / Path(f'data/{sample_name}'),
+            'workflow_dir': base_dir / Path(
                 f'data/{sample_name}/sv_calling/svensemble2/'
                 f'{sample_name}.{model_name}.'
                 f'{training_set_name}'
@@ -148,7 +170,7 @@ def create_config_dict(
             'is_reference': False,
             'callsets': {
                 callset_name: _get_caller_callset_dict(
-                    sample_name, caller_name=callset_name
+                    sample_name, caller_name=callset_name, base_dir=base_dir
                 )
                 for callset_name in callset_names
             },
@@ -169,14 +191,14 @@ def create_config_dict(
     # Specify the path to the matched breakpoints used for training the model
     # If the model uses matched_bps from another workflow
     if 'matched_bps_suffix' in config_dict[sample_name]['model'].keys():
-        config_dict[sample_name]['model']['matched_bps_path'] = Path(
+        config_dict[sample_name]['model']['matched_bps_path'] = base_dir / Path(
                 f'data/{sample_name}/sv_calling/svensemble2/'
                 f'{sample_name}.{config_dict[sample_name]['model']['matched_bps_suffix']}.'
                 f'{training_set_name}'
                 '/matched_bps.csv'
             )
     if 'feature_matrix_suffix' in config_dict[sample_name]['model'].keys():
-        config_dict[sample_name]['model']['feature_matrix_path'] = Path(
+        config_dict[sample_name]['model']['feature_matrix_path'] = base_dir / Path(
                 f'data/{sample_name}/sv_calling/svensemble2/'
                 f'{sample_name}.{config_dict[sample_name]['model']['feature_matrix_suffix']}.'
                 f'{training_set_name}'

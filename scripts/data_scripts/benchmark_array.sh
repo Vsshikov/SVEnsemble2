@@ -20,9 +20,15 @@
 SOURCE_FILE="$1"
 TASK_FILE="$2"
 
-PROJ_DIR="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2"
-
 source "$SOURCE_FILE"
+
+# ─── Per-task logging helper ────────────────────────────────────────────────
+LOG_PREFIX="[${SLURM_ARRAY_JOB_ID:-local}.${SLURM_ARRAY_TASK_ID:-0}]"
+log()  { echo "$(date -Iseconds) $LOG_PREFIX [$1] ${*:2}"; }
+logI() { log INFO  "$@"; }
+logE() { log ERROR "$@"; }
+die()  { logE "$*"; exit 1; }
+# ───────────────────────────────────────────────────────────────────────────
 
 # Read parameters for this task (task file is 0-indexed, sed is 1-indexed).
 # Empty optional fields are written as "." in the task file (see master.sh) so
@@ -32,7 +38,10 @@ IFS=$'\t' read -r SVE_MODEL SVE_TRAINING_SET _svtypes _svlen_lower \
 [[ "$_svtypes"     == "." ]] && _svtypes=""
 [[ "$_svlen_lower" == "." ]] && _svlen_lower=""
 
-echo "$(date): Array task ${SLURM_ARRAY_TASK_ID}: model=${SVE_MODEL} training_set=${SVE_TRAINING_SET} svtypes='${_svtypes}' svlen_lower='${_svlen_lower}'"
+[[ -z "$SVE_MODEL" || -z "$SVE_TRAINING_SET" ]] && \
+    die "Empty task row at index ${SLURM_ARRAY_TASK_ID} in $TASK_FILE"
+
+logI "task=${SLURM_ARRAY_TASK_ID}  model=${SVE_MODEL}  training_set=${SVE_TRAINING_SET}  svtypes='${_svtypes}'  svlen_lower='${_svlen_lower}'"
 
 # Build benchmark flags from sourced config and per-task parameters
 _bench_flags=""
@@ -52,7 +61,7 @@ _bench_flags=""
 module load micromamba
 
 # shellcheck disable=SC2086
-micromamba run -n SVEnsemble2 python "$PROJ_DIR/svensemble/benchmark.py" \
+micromamba run -n SVEnsemble2 python -m svensemble.benchmark \
     --sample_name "$SAMPLE_NAME" \
     --model_name "$SVE_MODEL" \
     --training_sets "$SVE_TRAINING_SET" \
