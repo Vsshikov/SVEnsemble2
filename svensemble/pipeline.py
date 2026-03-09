@@ -1,6 +1,5 @@
 #! /usr/bin/env python3
 
-
 """
 A top-level script to run the SVEnsemble pipeline.
 This module provides preprocessing and matching utilities for SV callsets.
@@ -24,6 +23,7 @@ if WORKDIR not in sys.path:
     sys.path.insert(0, WORKDIR)
 
 import svensemble.vcfparse as vcfp  # noqa: E402
+import svensemble.vcfwrite as vcfw  # noqa: E402
 import svensemble.breakends as bnds  # noqa: E402
 import svensemble.breakpoints as bps  # noqa: E402
 import svensemble.events as evts  # noqa: E402
@@ -496,6 +496,7 @@ def parse_preprocess_sample(
             bp_df = caller_dispatch[callset_name](sample_name, workflow_config, verbose)
             bp_df = bps.common_bps_preprocess(bp_df, workflow_config['callsets'][callset_name]['params'])
             bp_df.to_csv(workflow_config['workflow_dir'] / f'{callset_name}.bps.csv', index=False)
+            vcfw.write_vcf(bp_df, workflow_config['workflow_dir'] / f'{callset_name}.vcf', source=callset_name, sample_name=sample_name)
         else:
             raise ValueError(f"Callset {callset_name} not supported")
 
@@ -669,6 +670,8 @@ def pu_predict_sample(
         y_pred
     )
     svensemble2_calls_df.to_csv(workflow_config['workflow_dir'] / 'svensemble2_calls.csv', index=True)
+    vcfw.write_vcf(svensemble2_calls_df, workflow_config['workflow_dir'] / 'svensemble2_calls.vcf', source='svensemble2', sample_name=sample_name)
+
 
 
 def svensemble2(

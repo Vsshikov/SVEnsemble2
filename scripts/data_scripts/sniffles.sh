@@ -11,8 +11,8 @@ SOURCE_FILE=$1
 
 source $SOURCE_FILE
 
-modules="micromamba"
-module load $modules
+MODULES="micromamba"
+module load $MODULES
 
 ENV_NAME="sniffles2"
 YAML_FILE="$SAMPLE_DIR/scripts/envs/sniffles.yaml"

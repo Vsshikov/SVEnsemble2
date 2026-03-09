@@ -7,9 +7,9 @@
 #SBATCH -c 16
 #SBATCH --mem=32G
 
-modules="samtools"
+MODULES="samtools"
 module purge
-module load ${modules}
+module load ${MODULES}
 
 SOURCE_FILE=$1
 

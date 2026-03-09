@@ -23,16 +23,16 @@ if [[ $# -ne 2 ]]; then
   exit 1
 fi
 
-filelist="$1"
-outdir="$2"
+FILELIST="$1"
+OUTDIR="$2"
 
-mkdir -p "$outdir"
+mkdir -p "$OUTDIR"
 
-echo "Downloading files listed in $filelist to $outdir"
+echo "Downloading files listed in $FILELIST to $OUTDIR"
 
 # Skip the first line (header) using tail
 # shellcheck disable=SC2002
-cat "$filelist" | tail -n +2 | while IFS=$'\t' read -r url1 md5_1 url2 md5_2 _sample_rest; do
+cat "$FILELIST" | tail -n +2 | while IFS=$'\t' read -r url1 md5_1 url2 md5_2 _sample_rest; do
   # Skip empty lines or lines beginning with '#'
   [[ -z "${url1}" || "${url1}" == \#* ]] && continue
 
@@ -45,7 +45,7 @@ cat "$filelist" | tail -n +2 | while IFS=$'\t' read -r url1 md5_1 url2 md5_2 _sa
     [[ -z "${url}" ]] && continue  # Handle missing columns
 
     filename="$(basename "${url}")"
-    dest="${outdir}/${filename}"
+    dest="${OUTDIR}/${filename}"
 
     if [[ -f "${dest}" ]]; then
       echo "[SKIP] ${filename} already exists."

@@ -33,34 +33,34 @@ CALLSET_PATHS=(
 # Also reflect those changes in the CALLSET_PATHS array creating CALLSET_TEMP_PATHS from ls command
 
 # First unzip the gzipped files. They may still be in BCF format after unzipping
-CALLSET_PATHS_UNZIPPED=()
+callset_paths_unzipped=()
 echo "Unzipping gzipped files"
 n_unzipped=0
-for CALLSET_PATH in "${CALLSET_PATHS[@]}"; do
-    if [[ $CALLSET_PATH == *.gz ]]; then
-        gunzip -c $CALLSET_PATH > ${TEMP_VCF_DIR}/$(basename $CALLSET_PATH .gz)
-        CALLSET_PATHS_UNZIPPED+=("${TEMP_VCF_DIR}/$(basename $CALLSET_PATH .gz)")
+for callset_path in "${CALLSET_PATHS[@]}"; do
+    if [[ $callset_path == *.gz ]]; then
+        gunzip -c $callset_path > ${TEMP_VCF_DIR}/$(basename $callset_path .gz)
+        callset_paths_unzipped+=("${TEMP_VCF_DIR}/$(basename $callset_path .gz)")
         n_unzipped=$((n_unzipped + 1))
     else
-        CALLSET_PATHS_UNZIPPED+=($CALLSET_PATH)
+        callset_paths_unzipped+=($callset_path)
     fi
 done
 echo "Unzipping complete, now ${n_unzipped} files in temp directory"
-# Now iterate over CALLSET_PATHS_UNZIPPED and check for BCFs. If found, convert them to VCF
-CALLSET_PATHS_VCFS=()
+# Now iterate over callset_paths_unzipped and check for BCFs. If found, convert them to VCF
+callset_paths_vcfs=()
 echo "Converting BCFs to VCFs"
-for CALLSET_PATH in "${CALLSET_PATHS_UNZIPPED[@]}"; do
-    if [[ $CALLSET_PATH == *.bcf ]]; then
-        bcftools view -O v $CALLSET_PATH > ${TEMP_VCF_DIR}/$(basename $CALLSET_PATH .bcf).vcf
-        CALLSET_PATHS_VCFS+=("${TEMP_VCF_DIR}/$(basename $CALLSET_PATH .bcf).vcf")
+for callset_path in "${callset_paths_unzipped[@]}"; do
+    if [[ $callset_path == *.bcf ]]; then
+        bcftools view -O v $callset_path > ${TEMP_VCF_DIR}/$(basename $callset_path .bcf).vcf
+        callset_paths_vcfs+=("${TEMP_VCF_DIR}/$(basename $callset_path .bcf).vcf")
     else
-        CALLSET_PATHS_VCFS+=($CALLSET_PATH)
+        callset_paths_vcfs+=($callset_path)
     fi
 done
-echo "Conversion complete, ${#CALLSET_PATHS_VCFS[@]} files ready for running survivor"
+echo "Conversion complete, ${#callset_paths_vcfs[@]} files ready for running survivor"
 
 
 # Write the callset paths to a file in the output directory
-printf "%s\n" "${CALLSET_PATHS_VCFS[@]}" > ${OUTPUT_DIR}/${SAMPLE_NAME}.survivor.callsets.txt
+printf "%s\n" "${callset_paths_vcfs[@]}" > ${OUTPUT_DIR}/${SAMPLE_NAME}.survivor.callsets.txt
 
 $SURVIVOR_PATH merge ${OUTPUT_DIR}/${SAMPLE_NAME}.survivor.callsets.txt 1000 2 1 1 0 30 ${OUTPUT_DIR}/${SAMPLE_NAME}.survivor.vcf

@@ -99,7 +99,7 @@ def bnd_to_bp(
 
     # Split into first/second breakends
     grsizes = bnd_df.groupby('INFO_EVENT').transform('size')
-    sorted_bnds = (bnd_df.copy()[grsizes == 2]
+    sorted_bnds = (bnd_df[grsizes == 2]
                    .sort_values(['INFO_EVENT', 'CHROM', 'POS'],
                               key=lambda x: utils.get_chrom_keys(x, chrom_keys=chrom_key_dict))
                    .reset_index(drop=True))
@@ -108,7 +108,7 @@ def bnd_to_bp(
     bnd2 = sorted_bnds.iloc[1::2].reset_index(drop=True)
 
     # Identify columns that are same/different between pairs
-    same_cols_mask = (bnd1 == bnd2).all()
+    same_cols_mask = ((bnd1 == bnd2) | (bnd1.isna() & bnd2.isna())).all()
 
     # If force_diff_cols is provided, exclude those columns from being considered as 'same' columns
     force_diff_cols_mask = bnd1.columns.isin(force_diff_cols)

@@ -7,9 +7,9 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=32G
 
-modules="micromamba"
+MODULES="micromamba"
 module purge
-module load $modules
+module load $MODULES
 
 SOURCE_FILE=$1
 source $SOURCE_FILE
@@ -29,11 +29,11 @@ WORKDIR="$SAMPLE_DIR/sv_calling/severus"
 INPUT_BAM="$SAMPLE_DIR/aligned_long/${SAMPLE_NAME}.long.minimap.bam"
 
 if [ -n "$VNTR_BED" ]; then
-    VNTR_BED_FLAG="--vntr-bed $VNTR_BED"
+    vntr_bed_flag="--vntr-bed $VNTR_BED"
 else
-    VNTR_BED_FLAG=""
+    vntr_bed_flag=""
 fi
 
 micromamba run -n "$ENV_NAME" severus --target-bam $INPUT_BAM \
     --out-dir $WORKDIR -t ${SLURM_CPUS_PER_TASK} \
-    $VNTR_BED_FLAG
+    $vntr_bed_flag

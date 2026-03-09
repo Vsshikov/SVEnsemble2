@@ -17,9 +17,9 @@ if [ ! -d "$SAMPLE_DIR/aligned_long" ]; then
     mkdir -p "$SAMPLE_DIR/aligned_long"
 fi
 
-modules="samtools"
+MODULES="samtools"
 module purge
-module load ${modules}
+module load ${MODULES}
 
 OUT_BAM="$SAMPLE_DIR/aligned_long/${SAMPLE_NAME}.long.minimap.bam"
 

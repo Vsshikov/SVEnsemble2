@@ -8,7 +8,7 @@
 #SBATCH --time=24:00:00
 
 # Load required modules
-modules="samtools"
+MODULES="samtools"
 
 SOURCE_FILE=$1
 source $SOURCE_FILE
@@ -23,7 +23,7 @@ OUTPUT_BCF="${WORKDIR}/out/$(basename "${INPUT_BAM}" .minimap.bam).delly.bcf"
 
 # Prepare environment
 module purge
-module load ${modules}
+module load ${MODULES}
 
 # Create output directory if it doesn't exist
 if [ ! -d "$WORKDIR/out" ]; then

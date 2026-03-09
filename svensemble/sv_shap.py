@@ -1,83 +1,488 @@
 #! /usr/bin/env python3
 
-#SBATCH --job-name=svensemble2_importances
-#SBATCH --output=svensemble2_importances.out
-#SBATCH --error=svensemble2_importances.err
-#SBATCH --time=24:00:00
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=128G
-
 """
-WIP script to compute SHAP values for SVEnsemble2 models.
+Compute and assess SHAP values for SVEnsemble2 models.
+
+Supports two data loading modes:
+  - bench_pkl : from bench_preprocessed pickle (default, uses importances module)
+  - workflow  : from workflow directory (model.pkl + feature_matrix.csv)
+
+Outputs saved to:
+  data/{sample}/sv_calling/svensemble2/shap_values/
+
+Usage:
+    python svensemble/sv_shap.py \\
+        --sample_name NA12878 --training_set delly+manta_diploid --model_name unbiased
+
+    python svensemble/sv_shap.py \\
+        --sample_name NA12878 --training_set delly+manta_diploid --model_name unbiased \\
+        --use_gpu --plot
+
+    python svensemble/sv_shap.py \\
+        --sample_name NA12878 --training_set delly+manta_diploid --model_name unbiased \\
+        --source workflow --max_samples 5000 --plot
 """
 
 import os
 import sys
+import time
 import pickle
-import shap
 from pathlib import Path
-import argparse
+from typing import Optional
 
-parser = argparse.ArgumentParser(description="Compute SHAP values for SVEnsemble2 models.")
-parser.add_argument("--training_set_name", type=str, default="delly+manta_candidate", help="Name of the training set to use")
-parser.add_argument("--sample_name", type=str, default="NA12878_30x", help="Name of the sample to use")
-parser.add_argument("--model_name", type=str, default="unbiased", help="Name of the model to use")
-parser.add_argument("--use_gpu", action="store_true", default=False, help="Whether to use GPU for computation")
-args = parser.parse_args()
+import numpy as np
+import pandas as pd
+import shap
 
-training_set_name = args.training_set_name
-sample_name = args.sample_name
-model_name = args.model_name
-use_gpu = args.use_gpu
-
-
-# Set working directory and sys.path for local svensemble module
-WORKDIR = "/vast/ai_projects/Papenfuss_SVEnsemble2"
-os.chdir(WORKDIR)
-if WORKDIR not in sys.path:
-    sys.path.insert(0, WORKDIR)
-
-import svensemble.importances as importances # noqa: E402
-
-
-training_sets = {
-    'gridss': ['gridss'],
-    'manta_candidate': ['manta_candidate'],
-    'manta_diploid': ['manta_diploid'],
-    'delly': ['delly'],
-    'gridss+manta_candidate': ['gridss', 'manta_candidate'],
-    'gridss+manta_diploid': ['gridss', 'manta_diploid'],
-    'gridss+manta_candidate+delly': ['gridss', 'manta_candidate', 'delly'],
-    'gridss+manta_diploid+delly': ['gridss', 'manta_diploid', 'delly'],
-    'delly+manta_candidate': ['delly', 'manta_candidate'],
-    'delly+manta_diploid': ['delly', 'manta_diploid']
-}
-
-# Shap stuff
-# sample_name = 'NA12878_30x'
-# training_set_name = 'delly+manta_candidate'
-# model_name = 'unbiased'
-
-sample_pkl_path = f'/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/{sample_name}/sv_calling/svensemble2/{sample_name}.{model_name}.bench_preprocessed.pkl'
-# val_dict_pkl_path = f'/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/{sample_name}/sv_calling/svensemble2/{sample_name}.{model_name}.all.50:inf.val_dict.pkl'
-
-
-X, y = importances.load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_path=sample_pkl_path, val_dict_pkl_path=None, training_set_name=training_set_name, all_matches=True, verbose=True)
-
-
-sample = pickle.load(open(sample_pkl_path, 'rb'))
-model = sample['pred_dicts'][training_set_name]['RF_fit']
-
-if use_gpu:
-    explainer = shap.explainers.GPUTreeExplainer(model, X)
+if __name__ == '__main__':
+    WORKDIR = "/vast/ai_projects/Papenfuss_SVEnsemble2"
+    os.chdir(WORKDIR)
+    if WORKDIR not in sys.path:
+        sys.path.insert(0, WORKDIR)
+    import svensemble.importances as importances
+    import svensemble.matched_breakpoints as matchedbps
+    import svensemble._caller_params as caller_params
 else:
-    explainer = shap.explainers.TreeExplainer(model, X)
-shap_values = explainer(X)
+    from . import importances
+    from . import matched_breakpoints as matchedbps
+    from . import _caller_params as caller_params
 
-out_dir = Path(f'/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/{sample_name}/sv_calling/svensemble2/shap_values')
-if not out_dir.exists():
-    os.mkdir(out_dir)
 
-pickle.dump(shap_values, open(out_dir / f'{sample_name}.{model_name}.{training_set_name}.all.50:inf.shap_values.pkl', 'wb'))
+# ---------------------------------------------------------------------------
+# Path resolution
+# ---------------------------------------------------------------------------
+def resolve_shap_paths(
+    sample_name: str,
+    model_name: str,
+    training_set_name: str,
+) -> dict[str, Path]:
+    """Resolve standard SVEnsemble2 paths for SHAP analysis."""
+    base = Path(f'data/{sample_name}/sv_calling/svensemble2')
+    workflow_dir = base / f'{sample_name}.{model_name}.{training_set_name}'
+    return {
+        'base': base,
+        'workflow_dir': workflow_dir,
+        'model_pkl': workflow_dir / 'model.pkl',
+        'feature_matrix': workflow_dir / 'feature_matrix.csv',
+        'bench_pkl': base / f'{sample_name}.{model_name}.bench_preprocessed.pkl',
+        'shap_dir': base / 'shap_values',
+    }
 
-# for sample_name in NA12878 NA12878_30x HG002 CHM13; do for model_name in unbiased unbiased_GT; do for training_set_name in gridss manta_candidate manta_diploid delly gridss+manta_candidate gridss+manta_diploid gridss+manta_candidate+delly gridss+manta_diploid+delly delly+manta_candidate delly+manta_diploid; do sbatch svensemble/sv_shap.py --sample_name $sample_name --training_set_name $training_set_name --model_name $model_name; done; done; done
+
+# ---------------------------------------------------------------------------
+# Feature alignment
+# ---------------------------------------------------------------------------
+def align_features(
+    model,
+    X: pd.DataFrame,
+    verbose: bool = False,
+) -> pd.DataFrame:
+    """
+    Align DataFrame columns with the model's expected feature set.
+
+    Drops extra columns present in *X* but absent from the model, raises
+    if *X* is missing features required by the model, and reorders columns
+    to match ``model.feature_names_in_``.
+    """
+    if not hasattr(model, 'feature_names_in_'):
+        return X
+
+    model_features = set(model.feature_names_in_)
+    data_features = set(X.columns)
+
+    extra = data_features - model_features
+    missing = model_features - data_features
+
+    if extra:
+        if verbose:
+            print(f"Dropping {len(extra)} extra features not in model: "
+                  f"{sorted(extra)[:10]}{'...' if len(extra) > 10 else ''}")
+        X = X.drop(columns=list(extra))
+
+    if missing:
+        raise ValueError(
+            f"Missing {len(missing)} features required by model: {sorted(missing)}"
+        )
+
+    return X[list(model.feature_names_in_)]
+
+
+# ---------------------------------------------------------------------------
+# Data loading
+# ---------------------------------------------------------------------------
+def load_from_bench_pkl(
+    sample_name: str,
+    model_name: str,
+    training_set_name: str,
+    verbose: bool = False,
+) -> tuple:
+    """
+    Load model and feature matrix from bench_preprocessed pickle.
+
+    Returns:
+        (model, X, y) where y is the reference match indicator.
+    """
+    paths = resolve_shap_paths(sample_name, model_name, training_set_name)
+    bench_pkl_path = paths['bench_pkl']
+
+    if not bench_pkl_path.exists():
+        raise FileNotFoundError(
+            f"Bench preprocessed pickle not found: {bench_pkl_path}"
+        )
+
+    if verbose:
+        print(f"Loading from bench_preprocessed pickle: {bench_pkl_path}")
+
+    X, y = importances.load_svensemble2_val_Xy_from_sample_val_pickles(
+        sample_pkl_path=str(bench_pkl_path),
+        val_dict_pkl_path=None,
+        training_set_name=training_set_name,
+        all_matches=True,
+        verbose=verbose,
+    )
+
+    sample = pickle.load(open(bench_pkl_path, 'rb'))
+    model = sample['pred_dicts'][training_set_name]['RF_fit']
+
+    return model, X, y
+
+
+def load_from_workflow(
+    sample_name: str,
+    model_name: str,
+    training_set_name: str,
+    verbose: bool = False,
+) -> tuple:
+    """
+    Load model and feature matrix from the workflow directory.
+
+    Returns:
+        (model, X, y) where y may be None if no ref_match column is present.
+    """
+    paths = resolve_shap_paths(sample_name, model_name, training_set_name)
+    model_path = paths['model_pkl']
+    fm_path = paths['feature_matrix']
+
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model pickle not found: {model_path}")
+    if not fm_path.exists():
+        raise FileNotFoundError(f"Feature matrix not found: {fm_path}")
+
+    if verbose:
+        print(f"Loading model from: {model_path}")
+        print(f"Loading feature matrix from: {fm_path}")
+
+    model = pickle.load(open(model_path, 'rb'))
+    fm = pd.read_csv(fm_path, low_memory=False)
+
+    y = None
+    if 'ref_match' in fm.columns:
+        y = fm['ref_match']
+        fm = fm.drop(columns=['ref_match'])
+
+    X = pd.get_dummies(fm).fillna(0)
+
+    return model, X, y
+
+
+def load_model_and_data(
+    sample_name: str,
+    model_name: str,
+    training_set_name: str,
+    source: str = 'bench_pkl',
+    verbose: bool = False,
+) -> tuple:
+    """
+    Dispatch loader based on *source* and align features with the model.
+
+    Args:
+        source: ``'bench_pkl'`` or ``'workflow'``.
+
+    Returns:
+        (model, X, y)
+    """
+    if source == 'bench_pkl':
+        model, X, y = load_from_bench_pkl(
+            sample_name, model_name, training_set_name, verbose=verbose,
+        )
+    elif source == 'workflow':
+        model, X, y = load_from_workflow(
+            sample_name, model_name, training_set_name, verbose=verbose,
+        )
+    else:
+        raise ValueError(f"Unknown source: {source!r} (expected 'bench_pkl' or 'workflow')")
+
+    X = align_features(model, X, verbose=verbose)
+
+    if verbose:
+        print(f"Feature matrix shape: {X.shape}")
+        if y is not None:
+            print(f"Label distribution: {y.value_counts().to_dict()}")
+
+    return model, X, y
+
+
+# ---------------------------------------------------------------------------
+# SHAP computation
+# ---------------------------------------------------------------------------
+def compute_shap_values(
+    model,
+    X: pd.DataFrame,
+    use_gpu: bool = False,
+    max_samples: Optional[int] = None,
+    verbose: bool = False,
+) -> shap.Explanation:
+    """
+    Compute SHAP values with TreeExplainer.
+
+    Args:
+        model: Trained sklearn-compatible tree model.
+        X: Feature matrix.
+        use_gpu: Use ``shap.explainers.GPUTreeExplainer`` when True.
+        max_samples: If set, subsample *X* to at most this many rows for
+            the background dataset and explanation (useful for large datasets).
+        verbose: Print progress information.
+
+    Returns:
+        ``shap.Explanation`` object.
+    """
+    if max_samples is not None and len(X) > max_samples:
+        if verbose:
+            print(f"Subsampling {len(X)} rows to {max_samples} for SHAP computation")
+        rng = np.random.RandomState(42)
+        idx = rng.choice(len(X), size=max_samples, replace=False)
+        X = X.iloc[sorted(idx)]
+
+    if verbose:
+        explainer_type = "GPUTreeExplainer" if use_gpu else "TreeExplainer"
+        print(f"Creating {explainer_type} (n_features={X.shape[1]}, n_samples={X.shape[0]})")
+
+    start = time.time()
+
+    if use_gpu:
+        explainer = shap.explainers.GPUTreeExplainer(model, X)
+    else:
+        explainer = shap.explainers.TreeExplainer(model, X)
+
+    shap_values = explainer(X)
+    elapsed = time.time() - start
+
+    if verbose:
+        print(f"SHAP computation completed in {elapsed:.1f}s")
+
+    return shap_values
+
+
+# ---------------------------------------------------------------------------
+# SHAP assessment / summary statistics
+# ---------------------------------------------------------------------------
+def summarise_shap_values(
+    shap_values: shap.Explanation,
+    top_n: int = 20,
+) -> pd.DataFrame:
+    """
+    Return a summary DataFrame of mean |SHAP| values per feature.
+
+    For multi-output explanations (e.g. binary RF with two classes) the
+    positive-class output is used.
+    """
+    vals = shap_values.values
+    if vals.ndim == 3:
+        vals = vals[:, :, 1]
+
+    mean_abs = np.abs(vals).mean(axis=0)
+    feature_names = shap_values.feature_names
+
+    summary = (
+        pd.DataFrame({'feature': feature_names, 'mean_abs_shap': mean_abs})
+        .sort_values('mean_abs_shap', ascending=False)
+        .reset_index(drop=True)
+    )
+    return summary.head(top_n) if top_n else summary
+
+
+# ---------------------------------------------------------------------------
+# Plotting helpers
+# ---------------------------------------------------------------------------
+def generate_shap_plots(
+    shap_values: shap.Explanation,
+    output_dir: Path,
+    prefix: str,
+    top_n: int = 20,
+    verbose: bool = False,
+) -> list[Path]:
+    """
+    Generate beeswarm and bar SHAP summary plots.
+
+    Saves to *output_dir* with filenames prefixed by *prefix*.
+    Returns list of saved file paths.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    saved: list[Path] = []
+
+    sv = shap_values
+    if sv.values.ndim == 3:
+        sv = shap_values[:, :, 1]
+
+    # Beeswarm
+    try:
+        fig_bee = plt.figure()
+        shap.plots.beeswarm(sv, max_display=top_n, show=False)
+        bee_path = output_dir / f'{prefix}.beeswarm.png'
+        plt.savefig(bee_path, dpi=150, bbox_inches='tight')
+        plt.close(fig_bee)
+        saved.append(bee_path)
+        if verbose:
+            print(f"Saved beeswarm plot: {bee_path}")
+    except Exception as e:
+        print(f"Warning: beeswarm plot failed: {e}")
+
+    # Bar
+    try:
+        fig_bar = plt.figure()
+        shap.plots.bar(sv, max_display=top_n, show=False)
+        bar_path = output_dir / f'{prefix}.bar.png'
+        plt.savefig(bar_path, dpi=150, bbox_inches='tight')
+        plt.close(fig_bar)
+        saved.append(bar_path)
+        if verbose:
+            print(f"Saved bar plot: {bar_path}")
+    except Exception as e:
+        print(f"Warning: bar plot failed: {e}")
+
+    return saved
+
+
+# ---------------------------------------------------------------------------
+# Main orchestrator
+# ---------------------------------------------------------------------------
+def run_shap_assessment(
+    sample_name: str,
+    model_name: str,
+    training_set_name: str,
+    source: str = 'bench_pkl',
+    use_gpu: bool = False,
+    max_samples: Optional[int] = None,
+    plot: bool = False,
+    top_n: int = 20,
+    verbose: bool = False,
+) -> Path:
+    """
+    End-to-end SHAP assessment: load data, compute, save, and optionally plot.
+
+    Returns:
+        Path to the saved SHAP values pickle.
+    """
+    print(f"{'='*65}")
+    print(f"SHAP assessment: {sample_name} | {model_name} | {training_set_name}")
+    print(f"  source={source}  use_gpu={use_gpu}  max_samples={max_samples}")
+    print(f"{'='*65}")
+
+    # --- Load ---
+    model, X, y = load_model_and_data(
+        sample_name, model_name, training_set_name,
+        source=source, verbose=verbose,
+    )
+
+    # --- Compute ---
+    shap_values = compute_shap_values(
+        model, X, use_gpu=use_gpu, max_samples=max_samples, verbose=verbose,
+    )
+
+    # --- Save ---
+    paths = resolve_shap_paths(sample_name, model_name, training_set_name)
+    shap_dir = paths['shap_dir']
+    shap_dir.mkdir(parents=True, exist_ok=True)
+
+    prefix = f'{sample_name}.{model_name}.{training_set_name}'
+    shap_pkl_path = shap_dir / f'{prefix}.shap_values.pkl'
+    pickle.dump(shap_values, open(shap_pkl_path, 'wb'))
+    print(f"Saved SHAP values: {shap_pkl_path}")
+
+    # --- Summary ---
+    summary = summarise_shap_values(shap_values, top_n=top_n)
+    summary_csv_path = shap_dir / f'{prefix}.shap_summary.csv'
+    summary.to_csv(summary_csv_path, index=False)
+    print(f"Saved SHAP summary (top {top_n}): {summary_csv_path}")
+    print(summary.to_string(index=False))
+
+    # --- Plots ---
+    if plot:
+        generate_shap_plots(
+            shap_values, output_dir=shap_dir, prefix=prefix,
+            top_n=top_n, verbose=verbose,
+        )
+
+    print(f"\nSHAP assessment complete for {prefix}")
+    return shap_pkl_path
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    from argparse import ArgumentParser
+
+    parser = ArgumentParser(
+        description=__doc__,
+        formatter_class=__import__('argparse').RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        '--sample_name', type=str, required=True,
+        help="Sample name (e.g. NA12878, HG002)",
+    )
+    parser.add_argument(
+        '--model_name', type=str, default='unbiased',
+        help="Model name (default: unbiased)",
+    )
+    parser.add_argument(
+        '--training_set', type=str, required=True,
+        help="Training set name (e.g. delly+manta_diploid)",
+    )
+    parser.add_argument(
+        '--source', type=str, default='bench_pkl',
+        choices=['bench_pkl', 'workflow'],
+        help="Data source: 'bench_pkl' (bench_preprocessed pickle) "
+             "or 'workflow' (model.pkl + feature_matrix.csv)",
+    )
+    parser.add_argument(
+        '--use_gpu', action='store_true', default=False,
+        help="Use GPUTreeExplainer (requires CUDA and max_depth <= 31)",
+    )
+    parser.add_argument(
+        '--max_samples', type=int, default=None,
+        help="Subsample to at most N rows for SHAP computation",
+    )
+    parser.add_argument(
+        '--plot', action='store_true', default=False,
+        help="Generate beeswarm and bar summary plots",
+    )
+    parser.add_argument(
+        '--top_n', type=int, default=20,
+        help="Number of top features to display/plot (default: 20)",
+    )
+    parser.add_argument(
+        '--verbose', action='store_true', default=False,
+        help="Print detailed progress information",
+    )
+    args = parser.parse_args()
+
+    training_set_name = args.training_set
+    if training_set_name not in caller_params.training_set_presets:
+        print(f"Warning: training set '{training_set_name}' not in standard presets")
+
+    run_shap_assessment(
+        sample_name=args.sample_name,
+        model_name=args.model_name,
+        training_set_name=training_set_name,
+        source=args.source,
+        use_gpu=args.use_gpu,
+        max_samples=args.max_samples,
+        plot=args.plot,
+        top_n=args.top_n,
+        verbose=args.verbose,
+    )

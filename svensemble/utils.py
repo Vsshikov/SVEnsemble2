@@ -243,11 +243,7 @@ def get_chrom_keys(chrom_series: pd.Series, chrom_keys: dict | None = None) -> p
         chrom_list = ['chr' + str(i) for i in range(1, 23)] + ['chrX', 'chrY', 'chrM']
         chrom_keys = {chrom: idx for idx, chrom in enumerate(chrom_list)}
 
-    try:
-        return chrom_series.apply(lambda x: chrom_keys[x])
-    except KeyError:
-        # Return original if chromosome not in mapping
-        return chrom_series
+    return chrom_series.map(chrom_keys).fillna(chrom_series)
 
 
 def split_cipos(cipos_col: pd.Series, default_cipos: tuple[int, int] = (0, 0)) -> pd.DataFrame:

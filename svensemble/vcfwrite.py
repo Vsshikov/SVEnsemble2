@@ -76,16 +76,17 @@ def _build_header(
         'Description="End position of the variant">'
     )
     header.add_line(
-        '##INFO=<ID=SVLEN,Number=.,Type=Integer,'
-        'Description="Lenght of the structural variant">'
+        '##INFO=<ID=SVLEN,Number=A,Type=Integer,'
+        'Description="Number of inserted, duplicated, inverted, or deleted bases '
+        'for INS, DUP, INV, DEL symbolic alleles">'
     )
     header.add_line(
-        '##INFO=<ID=CIPOS,Number=2,Type=Integer,'
-        'Description="Confidence interval around POS">'
+        '##INFO=<ID=CIPOS,Number=.,Type=Integer,'
+        'Description="Confidence interval around POS for symbolic structural variant representation">'
     )
     header.add_line(
-        '##INFO=<ID=CIEND,Number=2,Type=Integer,'
-        'Description="Confidence interval around END">'
+        '##INFO=<ID=CIEND,Number=.,Type=Integer,'
+        'Description="Confidence interval around the inferred END for symbolic structural variant representation">'
     )
     header.add_line(
         '##INFO=<ID=MATEID,Number=1,Type=String,'
@@ -234,9 +235,10 @@ def _write_bnd_records(
     Each breakpoint row produces two VCF records (one per breakend) linked
     via MATEID and EVENT INFO fields.
     """
-    event_id = str(row['INFO_EVENT'])
-    bnd1_id = f'{event_id}_bnd1'
-    bnd2_id = f'{event_id}_bnd2'
+    raw_event_id = str(row['INFO_EVENT'])
+    event_id = _strip_inv_event_suffix(raw_event_id)
+    bnd1_id = f'{raw_event_id}_bnd1'
+    bnd2_id = f'{raw_event_id}_bnd2'
 
     for bnd_suffix, own_id, mate_id in [
         ('bnd1', bnd1_id, bnd2_id),

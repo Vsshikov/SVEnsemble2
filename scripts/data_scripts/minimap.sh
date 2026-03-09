@@ -16,9 +16,9 @@ if [ ! -d "$SAMPLE_DIR/aligned" ]; then
     mkdir -p "$SAMPLE_DIR/aligned"
 fi
 
-modules="samtools"
+MODULES="samtools"
 module purge
-module load ${modules}
+module load ${MODULES}
 
 output_bam="$SAMPLE_DIR/aligned/${SAMPLE_NAME}.minimap.bam"
 

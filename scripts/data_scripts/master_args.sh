@@ -143,8 +143,8 @@ SVE_BENCH_ADDITIONAL_COLS=FILTER_PASS,FILTER_PASS_bnd1,FILTER_PASS_bnd2
 SVE_BENCH_LIMIT_TO_CALLSETS=
 SVE_BENCH_SKIP_FILTERING=false
 # Custom validation set — overrides the default val set for the sample defined in _sample_params.py.
-# Both must be set together: VAL_SET_NAME is the key in _caller_params.caller_param_dict used to
-# parse the BPS file; VAL_SET_PATH is the absolute path to a preprocessed .bps.csv file.
+# Both must be set together: SVE_BENCH_VAL_SET_NAME is the key in _caller_params.caller_param_dict used to
+# parse the BPS file; SVE_BENCH_VAL_SET_PATH is the absolute path to a preprocessed .bps.csv file.
 # Leave empty to use the default val set for the sample.
 SVE_BENCH_VAL_SET_PATH=
 SVE_BENCH_VAL_SET_NAME=
