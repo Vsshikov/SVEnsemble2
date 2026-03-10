@@ -40,18 +40,19 @@ SNIFFLES_PATH=
 # --------------- Pipeline step flags (all disabled by default) --------------
 # Run configs turn individual flags on; leave unset here so run configs can
 # assign values without worrying about unset-variable errors.
+# NOTE: When adding or removing a caller, also update SVE_CALLSETS below.
 RUN_BAZAM=
 RUN_BAZAM_LONG=
 RUN_MINIMAP=
 RUN_MINIMAP_LONG=
-RUN_MANTA=
-RUN_GRIDSS=
-RUN_DELLY=
+RUN_MANTA=true
+RUN_GRIDSS=true
+RUN_DELLY=true
 RUN_SNIFFLES=
-RUN_SURVIVOR=
+RUN_SURVIVOR=true
 RUN_SEVERUS=
-RUN_SVENSEMBLE2=
-RUN_BENCHMARK=
+RUN_SVENSEMBLE2=true
+RUN_BENCHMARK=true
 RUN_SHAP=
 
 # --------------- Run control ------------------------------------------------
@@ -77,6 +78,23 @@ SVE_MODELS=(
     "unbiased"
 )
 
+# Callsets whose VCFs are parsed into raw breakpoints during the preprocess
+# stage. Every callset referenced in SVE_TRAINING_SETS (directly or as part of
+# a composite name) must appear here, plus any extra callsets needed for
+# benchmarking (e.g. survivor).
+# NOTE: When adding or removing a caller from the pipeline step flags above,
+# update this list accordingly.
+SVE_CALLSETS=(
+    "gridss"
+    "gridss_H"
+    "manta_candidate"
+    "manta_diploid"
+    "delly"
+    # "sniffles"
+    # "sniffles_H"
+    "survivor"
+)
+
 # Default training-set preset list (no sniffles).
 # Available presets: default, gridss, manta_candidate, manta_diploid, delly,
 #   gridss+manta_candidate, gridss+manta_diploid, gridss+delly,
@@ -97,6 +115,17 @@ SVE_TRAINING_SETS=(
     "gridss+manta_diploid+delly"
     "delly+manta_candidate"
     "delly+manta_diploid"
+    # "sniffles"
+    # "sniffles+gridss"
+    # "sniffles+manta_candidate"
+    # "sniffles+manta_diploid"
+    # "sniffles+delly"
+    # "sniffles+manta_candidate+delly"
+    # "sniffles+manta_diploid+delly"
+    # "sniffles+gridss+manta_candidate"
+    # "sniffles+gridss+manta_diploid"
+    # "sniffles+gridss+manta_candidate+delly"
+    # "sniffles+gridss+manta_diploid+delly"
 )
 
 # Pipeline processing steps

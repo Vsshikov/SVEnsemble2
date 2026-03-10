@@ -42,17 +42,37 @@ SACCT_FMT="JobID%-20,JobName%-24,State%-16,ExitCode,Elapsed,MaxRSS"
 
     printf '\n'
 
-    n_failed=$(sacct -j "$(IFS=,; printf '%s' "${JOB_IDS[*]}")" \
-        --format=State --noheader --parsable2 \
+    sacct_data=$(sacct -j "$(IFS=,; printf '%s' "${JOB_IDS[*]}")" \
+        --format=JobID%-20,JobName%-24,State --noheader --parsable2 \
         | grep -v '\.batch' \
         | grep -v '\.extern' \
-        | grep -cviE '^COMPLETED$' || true)
+        | grep -v '\+$' \
+        | cut -d'|' -f2-)
+
+    n_total=$(printf '%s\n' "$sacct_data" | grep -c . || true)
+    n_failed=$(printf '%s\n' "$sacct_data" | grep -cviE 'COMPLETED$' || true)
+
+    # Per-step breakdown
+    printf '  %-24s %8s %8s\n' "STEP" "OK" "FAILED"
+    printf '  %-24s %8s %8s\n' "------------------------" "--------" "--------"
+    printf '%s\n' "$sacct_data" | awk -F'|' '{
+        name=$1; gsub(/^[ \t]+|[ \t]+$/, "", name);
+        state=$2; gsub(/^[ \t]+|[ \t]+$/, "", state);
+        total[name]++;
+        if (state == "COMPLETED") ok[name]++;
+        else fail[name]++;
+    } END {
+        for (name in total)
+            printf "  %-24s %8d %8d\n", name, ok[name]+0, fail[name]+0
+    }' | sort
+
+    printf '\n'
 
     if (( n_failed == 0 )); then
-        printf '  Result: ALL %d jobs COMPLETED successfully.\n' "${#JOB_IDS[@]}"
+        printf '  Result: ALL %d jobs COMPLETED successfully.\n' "$n_total"
     else
         printf '  Result: %d of %d jobs did NOT complete successfully.\n' \
-            "$n_failed" "${#JOB_IDS[@]}"
+            "$n_failed" "$n_total"
     fi
 
     printf '\n'

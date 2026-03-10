@@ -62,36 +62,46 @@ def create_config_dict(
     val_set: None | str | dict[str, Any] = None,
     model_name: str | None = None,
     additional_callsets: list[str] | None = None,
+    callsets: list[str] | None = None,
     base_dir: Path | None = None
 ):
     """
     Based on _caller_params, create a config dictionary for the sample.
+
+    When `callsets` is provided it is used as the exact callset list,
+    bypassing the training-set-derived list and `additional_callsets`.
     """
     if base_dir is None:
         base_dir = BASE_DIR
-    if isinstance(training_set, str):
-        if training_set == 'default':
-            _training_sets = {default_training_set: training_set_presets[default_training_set]}
-        elif training_set in training_set_presets.keys():
-            _training_sets = {training_set: training_set_presets[training_set]}
+
+    if callsets is not None:
+        invalid = [c for c in callsets if c not in caller_param_dict]
+        if invalid:
+            raise ValueError(f'Unknown callsets: {invalid}')
+        callset_names = list(callsets)
+        _training_sets = {default_training_set: training_set_presets[default_training_set]}
+    else:
+        if isinstance(training_set, str):
+            if training_set == 'default':
+                _training_sets = {default_training_set: training_set_presets[default_training_set]}
+            elif training_set in training_set_presets.keys():
+                _training_sets = {training_set: training_set_presets[training_set]}
+            else:
+                raise ValueError(f'Invalid training set: {training_set}')
+        elif isinstance(training_set, list):
+            _training_sets = {f'{'+'.join(training_set)}': training_set}
         else:
             raise ValueError(f'Invalid training set: {training_set}')
-    elif isinstance(training_set, list):
-        _training_sets = {f'{'+'.join(training_set)}': training_set}
-    else:
-        raise ValueError(f'Invalid training set: {training_set}')
 
-    # Training sets are all lists of calleset names
-    # Find all unique callset names in the training sets
-    callset_names = set()
-    for training_set in _training_sets.values():
-        for callset_name in training_set:
-            callset_names.add(callset_name)
-    callset_names = list(callset_names)
-    if isinstance(additional_callsets, list):
-        if any(callset_name not in caller_param_dict.keys() for callset_name in additional_callsets):
-            raise ValueError(f'Invalid extra callsets: {additional_callsets}')
-        callset_names.extend(additional_callsets)
+        callset_names = set()
+        for training_set in _training_sets.values():
+            for callset_name in training_set:
+                callset_names.add(callset_name)
+        callset_names = list(callset_names)
+        if isinstance(additional_callsets, list):
+            if any(callset_name not in caller_param_dict.keys() for callset_name in additional_callsets):
+                raise ValueError(f'Invalid extra callsets: {additional_callsets}')
+            callset_names.extend(additional_callsets)
 
     # If a validation set exists for the sample, add it to the config dict.
     if (val_set == 'use_name'):
@@ -147,6 +157,7 @@ def create_config_dict(
         config_dict = {
             sample_name: {
                 'sample_dir': base_dir / Path(f'data/{sample_name}'),
+                'callset_bps_dir': base_dir / Path(f'data/{sample_name}/callset_bps'),
                 'workflow_dir': base_dir / Path(f'data/{sample_name}/svensemble2'),
                 'is_reference': True,
                 'callsets': {
@@ -162,6 +173,7 @@ def create_config_dict(
         sample_name: {
             'sample_name': sample_name,
             'sample_dir': base_dir / Path(f'data/{sample_name}'),
+            'callset_bps_dir': base_dir / Path(f'data/{sample_name}/sv_calling/callset_bps'),
             'workflow_dir': base_dir / Path(
                 f'data/{sample_name}/sv_calling/svensemble2/'
                 f'{sample_name}.{model_name}.'
@@ -205,8 +217,11 @@ def create_config_dict(
                 '/feature_matrix.csv'
             )
 
+    _additional_set = set(additional_callsets) if isinstance(additional_callsets, list) else set()
     for callset_name in callset_names:
-        if config_dict[sample_name]['callsets'][callset_name]['params']['override_bps_path']:
+        if callset_name in _additional_set:
+            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['callset_bps_dir'] / f'{callset_name}.raw_bps.csv'
+        elif config_dict[sample_name]['callsets'][callset_name]['params']['override_bps_path']:
             config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['sample_dir'] / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
         elif 'bps_suffix' in config_dict[sample_name]['model'].keys():
             config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['sample_dir'] / f'sv_calling/svensemble2/{sample_name}.{config_dict[sample_name]['model']['bps_suffix']}.{training_set_name}' / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']

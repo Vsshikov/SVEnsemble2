@@ -16,9 +16,12 @@ SAMPLE_DIR="$PROJ_DIR/data/$SAMPLE_NAME"
 
 # Initialize the logs directory for this run
 RUN_ID=$(uuidgen)
-LOG_DIR="$SAMPLE_DIR/logs/run/$RUN_ID"
+_timestamp=$(date +%Y-%m-%dT%H-%M)
+_config_name=$(basename "$SOURCE_FILE" .sh)
+LOG_DIR="$SAMPLE_DIR/logs/run/${_timestamp}_${_config_name}_${RUN_ID:0:8}"
+unset _timestamp _config_name
 mkdir -p "$LOG_DIR"
-mkdir -p "$LOG_DIR"/{bazam_sam,bazam_cram,minimap,minimap_long,manta,gridss,delly,sniffles,survivor,svensemble2,benchmark,shap,finalizer}
+mkdir -p "$LOG_DIR"/{bazam_sam,bazam_cram,minimap,minimap_long,manta,gridss,delly,sniffles,survivor,sve_preprocess,svensemble2,benchmark,shap,finalizer}
 cat "$SOURCE_FILE" > "$LOG_DIR/master_args.sh"
 
 touch "$LOG_DIR/run.log"
@@ -51,6 +54,7 @@ minimap_long_id=""
 sniffles_id=""
 severus_id=""
 survivor_id=""
+sve_preprocess_id=""
 sve_array_id=""
 bench_array_id=""
 shap_array_id=""
@@ -76,6 +80,7 @@ submit_job() {
     local job_id
     job_id=$(sbatch --parsable \
         --chdir="$SAMPLE_DIR" \
+        --job-name="${name}_${SAMPLE_NAME}" \
         --output="$LOG_DIR/${name}/%j.out" \
         --error="$LOG_DIR/${name}/%j.err" \
         ${dep_flag:+"$dep_flag"} "$@")
@@ -268,11 +273,26 @@ fi
 
 # Collect all caller job IDs into a single dependency string
 _svensemble_dep_ids=""
-for _id in "$manta_id" "$gridss_id" "$delly_id" "$sniffles_id"; do
+for _id in "$manta_id" "$gridss_id" "$delly_id" "$sniffles_id" "$survivor_id"; do
     [[ -n "$_id" ]] && _svensemble_dep_ids="${_svensemble_dep_ids}:${_id}"
 done
 logI "Caller jobs submitted for $SAMPLE_NAME: ${_svensemble_dep_ids:-none}"
-[[ -n "$_svensemble_dep_ids" ]] && svensemble_dep="--dependency=afterok${_svensemble_dep_ids}" || svensemble_dep=""
+[[ -n "$_svensemble_dep_ids" ]] && caller_dep="--dependency=afterok${_svensemble_dep_ids}" || caller_dep=""
+
+# --- Raw VCF preprocessing (single job, runs once per sample) ---------------
+if [[ "$RUN_SVENSEMBLE2" == "true" ]]; then
+    sve_preprocess_id=$(sbatch --parsable --chdir="$SAMPLE_DIR" $caller_dep \
+        --job-name="preproc_${SAMPLE_NAME}" \
+        --output="$LOG_DIR/sve_preprocess/%j.out" \
+        --error="$LOG_DIR/sve_preprocess/%j.err" \
+        "$SAMPLE_DIR/scripts/preprocess_array.sh" "$SOURCE_FILE")
+    logI "Submitted SVE preprocess job: job_id=$sve_preprocess_id"
+fi
+
+# SVEnsemble2 array depends on caller jobs + preprocess job
+_sve_dep_ids="${_svensemble_dep_ids}"
+[[ -n "$sve_preprocess_id" ]] && _sve_dep_ids="${_sve_dep_ids}:${sve_preprocess_id}"
+[[ -n "$_sve_dep_ids" ]] && svensemble_dep="--dependency=afterok${_sve_dep_ids}" || svensemble_dep=""
 
 # Submit one SLURM array job covering all model × training_set combinations.
 # Each task reads its parameters from a TSV task file via SLURM_ARRAY_TASK_ID.
@@ -302,6 +322,7 @@ if [[ "$RUN_SVENSEMBLE2" == "true" ]]; then
         fi
 
         sve_array_id=$(sbatch --parsable --chdir="$SAMPLE_DIR" $svensemble_dep $sve_mem_flag \
+            --job-name="sve2_${SAMPLE_NAME}" \
             --array=0-$((N_SVE_TASKS - 1)) \
             --output="$LOG_DIR/svensemble2/%A_%a.out" \
             --error="$LOG_DIR/svensemble2/%A_%a.err" \
@@ -316,8 +337,9 @@ fi
 # ========== ========== BENCHMARKING ========== ==========
 
 if [[ "$BENCHMARK" == "true" || "$RUN_BENCHMARK" == "true" ]]; then
-    # Build dependency on all SVEnsemble2 array jobs (afterok waits for every task)
+    # Build dependency on preprocess + all SVEnsemble2 array jobs
     _bench_dep_ids=""
+    [[ -n "$sve_preprocess_id" ]] && _bench_dep_ids=":${sve_preprocess_id}"
     for _id in "${_sve_job_ids[@]}"; do
         [[ -n "$_id" ]] && _bench_dep_ids="${_bench_dep_ids}:${_id}"
     done
@@ -349,6 +371,7 @@ if [[ "$BENCHMARK" == "true" || "$RUN_BENCHMARK" == "true" ]]; then
     cat "$BENCH_TASK_FILE" >> "$LOG_DIR/run.log"
 
     bench_array_id=$(sbatch --parsable --chdir="$SAMPLE_DIR" $bench_dep \
+        --job-name="bench_${SAMPLE_NAME}" \
         --array=0-$((N_BENCH_TASKS - 1)) \
         --output="$LOG_DIR/benchmark/%A_%a.out" \
         --error="$LOG_DIR/benchmark/%A_%a.err" \
@@ -394,6 +417,7 @@ if [[ "$RUN_SHAP" == "true" ]]; then
 
         # shellcheck disable=SC2086
         shap_array_id=$(sbatch --parsable --chdir="$SAMPLE_DIR" $shap_dep \
+            --job-name="shap_${SAMPLE_NAME}" \
             $_shap_sbatch_extra \
             --array=0-$((N_SHAP_TASKS - 1)) \
             --output="$LOG_DIR/shap/%A_%a.out" \
@@ -411,8 +435,8 @@ _all_job_ids=()
 for _id in "$preprocess_sam_id" "$preprocess_cram_id" "$minimap_id" \
            "$manta_id" "$gridss_id" "$delly_id" \
            "$minimap_long_id" "$sniffles_id" "$severus_id" \
-           "$survivor_id" "$sve_array_id" "$bench_array_id" \
-           "$shap_array_id"; do
+           "$survivor_id" "$sve_preprocess_id" "$sve_array_id" \
+           "$bench_array_id" "$shap_array_id"; do
     [[ -n "$_id" ]] && _all_job_ids+=("$_id")
 done
 
@@ -422,6 +446,7 @@ if (( ${#_all_job_ids[@]} > 0 )); then
 
     # shellcheck disable=SC2086
     sbatch --parsable --chdir="$SAMPLE_DIR" $_finalizer_dep \
+        --job-name="final_${SAMPLE_NAME}" \
         --output="$LOG_DIR/finalizer/%j.out" \
         --error="$LOG_DIR/finalizer/%j.err" \
         "$PROJ_DIR/scripts/data_scripts/finalizer.sh" \

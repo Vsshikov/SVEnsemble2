@@ -269,9 +269,8 @@ delly_params = default_params | {
 
 survivor_params = default_event_params | {
     'source': 'survivor',
-    'bps_path': 'sv_calling/survivor/svensemble2/survivor.bps.csv',
+    'bps_path': 'survivor.bps.csv',
     'bnd2_pos': 'end',
-    'override_bps_path': True
 }
 
 svensemble2_params = default_params | {
@@ -318,8 +317,7 @@ huddleston_params = default_params | {
 }
 
 gridss_H_params = gridss_params | {
-    'bps_path': 'sv_calling/gridss/svensemble2/gridss_H_bps.csv',
-    'override_bps_path': True
+    'bps_path': 'gridss_H.bps.csv',
 }
 
 # Parameters for Sniffles2 (long-read SV caller)
@@ -391,8 +389,7 @@ sniffles_params = default_params | {
 
 
 sniffles_H_params = sniffles_params | {
-    'bps_path': 'sv_calling/sniffles/svensemble2/sniffles_H.bps.csv',
-    'override_bps_path': True,
+    'bps_path': 'sniffles_H.bps.csv',
 }
 
 caller_param_dict = {

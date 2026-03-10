@@ -41,7 +41,9 @@ IFS=$'\t' read -r SVE_MODEL SVE_TRAINING_SET \
 
 logI "task=${SLURM_ARRAY_TASK_ID}  model=${SVE_MODEL}  training_set=${SVE_TRAINING_SET}"
 
-# Build step flags from sourced config booleans
+# Build step flags from sourced config booleans.
+# Raw VCF preprocessing is handled by a separate preprocess job (preprocess_array.sh).
+# SVE_STEP_PREPROCESS controls the lightweight model-specific common_bps_preprocess stage.
 sve_step_flags=""
 [[ "$SVE_STEP_PREPROCESS" == "true" ]] && sve_step_flags+=" --preprocess"
 [[ "$SVE_STEP_MATCH"      == "true" ]] && sve_step_flags+=" --match"

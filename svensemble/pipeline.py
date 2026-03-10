@@ -463,18 +463,66 @@ def parse_preprocess_sniffles(
         )
 
 
-def parse_preprocess_sample(
+def parse_preprocess_survivor(
+    sample_name: str,
+    workflow_config: dict,
+    verbose: bool = False
+) -> pd.DataFrame:
+    """
+    Read and preprocess the SURVIVOR consensus VCF for a sample.
+    """
+    if 'survivor' not in workflow_config.get('callsets', {}):
+        return None
+
+    callset = workflow_config['callsets']['survivor']
+    if verbose:
+        _log(f"Loading SURVIVOR VCF from {callset['path']}")
+    survivor_vcf = VariantFile(callset['path'])
+    survivor_df, _ = vcfp.parse_vcf_to_df(
+        vcf_file=survivor_vcf,
+        caller_params=callset['params']
+    )
+    if verbose:
+        _log("Preprocessing SURVIVOR variants")
+    survivor_df.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(survivor_df['INFO_CIPOS'])
+    survivor_df.loc[:, ['INFO_CIEND_l', 'INFO_CIEND_r']] = sv_utils.split_ciend(survivor_df['INFO_CIEND'])
+    survivor_df = survivor_df.drop(columns=['INFO_CIPOS', 'INFO_CIEND'])
+    survivor_df.loc[:, 'INFO_EVENT'] = survivor_df['ID']
+    if verbose:
+        _log("Converting SURVIVOR events to breakends")
+    survivor_bnds = evts.event_to_bnd(survivor_df, bnd2_pos=callset['params']['bnd2_pos'])
+    if verbose:
+        _log("Converting SURVIVOR breakends to breakpoints")
+    survivor_bps = bnds.bnd_to_bp(survivor_bnds)
+    return survivor_bps
+
+
+# Maps derived callset names to (parent_callset, filter_function).
+# Filter functions take a DataFrame and return a filtered DataFrame.
+_derived_callset_config = {
+    'gridss_H': {
+        'parent': 'gridss',
+        'filter': lambda df: df[df['FILTER_PASS_bnd1'].astype(bool) & df['FILTER_PASS_bnd2'].astype(bool)]
+    },
+    'sniffles_H': {
+        'parent': 'sniffles',
+        'filter': lambda df: df[df['FILTER_PASS'].astype(bool)]
+    },
+}
+
+
+def parse_preprocess_raw(
     sample_name: str,
     workflow_config: dict,
     verbose: bool = False
 ) -> None:
     """
-    Read and preprocess the sample.
+    Model-independent stage: parse caller VCFs into breakpoints and write
+    raw (pre-common_bps_preprocess) CSVs to a shared directory.
+    Derived callsets (e.g. gridss_H, sniffles_H) are produced in a second
+    pass after their parent callsets have been written.
 
-    Args:
-        sample_name (str): Name of the sample.
-        workflow_config (dict): Configuration dictionary for the sample.
-        verbose (bool): If True, print progress messages.
+    Output directory: workflow_config['callset_bps_dir']
     """
     caller_dispatch = {
         "gnomad": parse_preprocess_gnomad,
@@ -483,19 +531,95 @@ def parse_preprocess_sample(
         "manta_candidate": parse_preprocess_manta_candidate,
         "delly": parse_preprocess_delly,
         "sniffles": parse_preprocess_sniffles,
+        "survivor": parse_preprocess_survivor,
     }
 
+    callset_bps_dir = workflow_config['callset_bps_dir']
+    if not callset_bps_dir.exists():
+        callset_bps_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pass 1: VCF-based callers
     for callset_name in workflow_config["callsets"].keys():
-        if callset_name in caller_dispatch.keys():
-            # Create the workflow_dir if it doesn't exist
-            if not workflow_config['workflow_dir'].exists():
-                workflow_config['workflow_dir'].mkdir(parents=True, exist_ok=True)
-            bp_df = caller_dispatch[callset_name](sample_name, workflow_config, verbose)
-            bp_df = bps.common_bps_preprocess(bp_df, workflow_config['callsets'][callset_name]['params'])
-            bp_df.to_csv(workflow_config['workflow_dir'] / f'{callset_name}.bps.csv', index=False)
-            vcfw.write_vcf(bp_df, workflow_config['workflow_dir'] / f'{callset_name}.vcf', source=callset_name, sample_name=sample_name)
-        else:
+        if callset_name in _derived_callset_config:
+            continue
+        if callset_name not in caller_dispatch:
             raise ValueError(f"Callset {callset_name} not supported")
+        output_path = callset_bps_dir / f'{callset_name}.raw_bps.csv'
+        if output_path.exists():
+            if verbose:
+                _log(f"Raw breakpoints already exist at {output_path}, skipping")
+            continue
+        vcf_path = Path(workflow_config['callsets'][callset_name]['path'])
+        if not vcf_path.exists():
+            raise FileNotFoundError(
+                f"VCF not found for '{callset_name}' at {vcf_path}. "
+                "If this caller was not run, remove it from SVE_CALLSETS or "
+                "the --callsets argument."
+            )
+        if verbose:
+            _log(f"Parsing callset '{callset_name}' into raw breakpoints")
+        bp_df = caller_dispatch[callset_name](sample_name, workflow_config, verbose)
+        bp_df.to_csv(output_path, index=False)
+        if verbose:
+            _log(f"Saved raw breakpoints to {output_path}")
+
+    # Pass 2: Derived callsets (filtered from parent raw_bps)
+    for callset_name in workflow_config["callsets"].keys():
+        if callset_name not in _derived_callset_config:
+            continue
+        config = _derived_callset_config[callset_name]
+        output_path = callset_bps_dir / f'{callset_name}.raw_bps.csv'
+        if output_path.exists():
+            if verbose:
+                _log(f"Raw breakpoints already exist at {output_path}, skipping")
+            continue
+        parent_path = callset_bps_dir / f'{config["parent"]}.raw_bps.csv'
+        if not parent_path.exists():
+            raise FileNotFoundError(
+                f"Parent callset '{config['parent']}' raw breakpoints not found "
+                f"at {parent_path}. Cannot derive '{callset_name}'."
+            )
+        if verbose:
+            _log(f"Deriving '{callset_name}' from parent '{config['parent']}'")
+        parent_df = pd.read_csv(parent_path, low_memory=False)
+        bp_df = config['filter'](parent_df)
+        if verbose:
+            _log(f"Filtered {len(parent_df)} -> {len(bp_df)} breakpoints for '{callset_name}'")
+        bp_df.to_csv(output_path, index=False)
+        if verbose:
+            _log(f"Saved raw breakpoints to {output_path}")
+
+
+def parse_preprocess_common(
+    sample_name: str,
+    workflow_config: dict,
+    verbose: bool = False
+) -> None:
+    """
+    Model-specific stage: read raw breakpoints from the shared callset_bps
+    directory, apply common_bps_preprocess (which may add model-specific
+    CUSTOM_* columns), and write processed CSVs to the workflow directory.
+    """
+    callset_bps_dir = workflow_config['callset_bps_dir']
+
+    if not workflow_config['workflow_dir'].exists():
+        workflow_config['workflow_dir'].mkdir(parents=True, exist_ok=True)
+
+    for callset_name in workflow_config["callsets"].keys():
+        raw_path = callset_bps_dir / f'{callset_name}.raw_bps.csv'
+        if not raw_path.exists():
+            raise FileNotFoundError(
+                f"Raw breakpoints not found at {raw_path}. "
+                "Run parse_preprocess_raw first."
+            )
+        if verbose:
+            _log(f"Loading raw breakpoints for '{callset_name}' from {raw_path}")
+        bp_df = pd.read_csv(raw_path, low_memory=False)
+        bp_df = bps.common_bps_preprocess(bp_df, workflow_config['callsets'][callset_name]['params'])
+        bp_df.to_csv(workflow_config['workflow_dir'] / f'{callset_name}.bps.csv', index=False)
+        vcfw.write_vcf(bp_df, workflow_config['workflow_dir'] / f'{callset_name}.vcf', source=callset_name, sample_name=sample_name)
+        if verbose:
+            _log(f"Saved processed breakpoints for '{callset_name}' to {workflow_config['workflow_dir']}")
 
 
 def match_sample_breakpoints(
@@ -701,7 +825,7 @@ def svensemble2(
         ref_path: path to the reference genome
         model_name: name of the PU learning model to use
         training_set: training set or sets for model building
-        preprocess: if True, parse and preprocess the samples
+        preprocess: if True, apply model-specific preprocessing (reads from shared callset_bps)
         match: if True, match the breakpoints for each sample
         train: if True, train the PU model
         predict: if True, run predictions on breakpoints
@@ -730,8 +854,7 @@ def svensemble2(
         raise FileNotFoundError(f"Preprocessed truth breakpoints not found for {ground_truth_sample_name}")
 
     if preprocess:
-        # Parse and preprocess the samples
-        parse_preprocess_sample(sample_name=sample_name, workflow_config=workflow_config, verbose=verbose)
+        parse_preprocess_common(sample_name=sample_name, workflow_config=workflow_config, verbose=verbose)
 
     if match:
         match_sample_breakpoints(sample_name=sample_name, workflow_config=workflow_config, ground_truth_config=ground_truth_config, max_dist=match_max_dist, insert_size_threshold=match_insert_size_threshold, verbose=verbose)
@@ -782,10 +905,30 @@ if __name__ == '__main__':
         help="Enable verbose output for progress messages."
     )
     parser.add_argument(
+        '--preprocess_raw',
+        action='store_true',
+        default=False,
+        help="If set, parse caller VCFs into raw breakpoints in the shared callset_bps directory and exit."
+    )
+    parser.add_argument(
+        '--callsets',
+        type=str,
+        nargs='*',
+        default=None,
+        help="Explicit callset list for --preprocess_raw (overrides training-set-derived list)."
+    )
+    parser.add_argument(
+        '--additional_callsets',
+        type=str,
+        nargs='*',
+        default=None,
+        help="Additional callsets to include (e.g. survivor gridss_H sniffles_H)."
+    )
+    parser.add_argument(
         '--preprocess',
         action='store_true',
         default=False,
-        help="If set, perform preprocessing of input samples."
+        help="If set, apply model-specific preprocessing (reads from shared callset_bps)."
     )
     parser.add_argument(
         '--match',
@@ -828,7 +971,22 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    # Run the main SVEnsemble2 pipeline with the provided arguments
+    if args.preprocess_raw:
+        workflow_config = sv_utils.create_config_dict(
+            args.sample_name,
+            ref_path=args.ref_path,
+            model_name=args.model_name,
+            callsets=args.callsets,
+            additional_callsets=args.additional_callsets,
+            is_ground_truth=False
+        )[args.sample_name]
+        parse_preprocess_raw(
+            sample_name=args.sample_name,
+            workflow_config=workflow_config,
+            verbose=args.verbose
+        )
+        sys.exit(0)
+
     svensemble2(
         sample_name=args.sample_name,
         ground_truth_sample_name=args.ground_truth_sample_name,
