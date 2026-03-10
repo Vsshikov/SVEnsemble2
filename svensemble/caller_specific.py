@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from typing import Union, Optional, List, Literal, Dict
+from typing import Union, List, Literal, Dict
 
 from . import events as evts
 from . import utils as sv_utils
@@ -8,24 +8,18 @@ from . import _caller_params
 
 def gridss_preprocess(
     gridss_callset: pd.DataFrame,
-    inplace: bool = False,
     verbose: bool = False,
     caller_params: dict|None = None
-) -> Optional[pd.DataFrame]:
+) -> pd.DataFrame:
     """Preprocess GRIDSS callset by splitting CIPOS values and cleaning columns.
-
-    This function processes GRIDSS variant calls by:
-    1. Splitting the INFO_CIPOS field into separate left and right columns
-    2. Removing the original INFO_CIPOS column to avoid redundancy
 
     Args:
         gridss_callset: DataFrame containing GRIDSS variant calls with INFO_CIPOS field
-        inplace: If True, modify input DataFrame in-place. If False, return new copy.
         verbose: If True, print progress messages during processing
         caller_params: Caller-specific parameters
+
     Returns:
-        If inplace=False: Processed DataFrame with split CIPOS columns
-        If inplace=True: None (modifies input DataFrame in place)
+        Processed DataFrame with split CIPOS columns
 
     Raises:
         KeyError: If INFO_CIPOS column is missing from input DataFrame
@@ -36,33 +30,47 @@ def gridss_preprocess(
     if verbose:
         print("Preprocessing GRIDSS callset...")
 
-    # Create working copy if not modifying in place
-    if not inplace:
-        gridss_callset_ = gridss_callset.copy()
-    else:
-        gridss_callset_ = gridss_callset
+    gridss_callset_ = gridss_callset.copy()
 
-    # Split CIPOS values into left and right confidence intervals
-    if verbose:
-        print("Splitting CIPOS values...")
     gridss_callset_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = (
         sv_utils.split_cipos(gridss_callset_['INFO_CIPOS'])
     )
-
-    # Remove original CIPOS column to avoid redundancy
-    if verbose:
-        print("Dropping INFO_CIPOS column...")
     gridss_callset_ = gridss_callset_.drop(columns=['INFO_CIPOS'])
 
-    # Return processed DataFrame or None based on inplace parameter
-    if not inplace:
-        if verbose:
-            print("Returning processed callset...")
-        return gridss_callset_
-    else:
-        if verbose:
-            print("Successfully modified input callset...")
-        return None
+    return gridss_callset_
+
+
+def gridss_post_bps(bp_df: pd.DataFrame) -> pd.DataFrame:
+    """Post-process GRIDSS breakpoints after bnd_to_bp conversion.
+
+    1. Unifies per-breakend QUAL into a single column (min of the two).
+    2. Unifies per-breakend FILTER_PASS into a single column (AND logic:
+       both breakends must pass) and drops the per-breakend columns.
+
+    Args:
+        bp_df: DataFrame of GRIDSS breakpoints from bnd_to_bp
+
+    Returns:
+        DataFrame with unified QUAL and FILTER_PASS columns
+    """
+    if 'QUAL' not in bp_df.columns:
+        try:
+            bp_df.loc[:, 'QUAL'] = np.min(
+                [bp_df['QUAL_bnd1'], bp_df['QUAL_bnd2']], axis=0
+            )
+        except KeyError:
+            raise KeyError('No QUAL column found in GRIDSS breakpoints')
+
+    if 'FILTER_PASS' not in bp_df.columns and \
+            'FILTER_PASS_bnd1' in bp_df.columns and \
+            'FILTER_PASS_bnd2' in bp_df.columns:
+        bp_df.loc[:, 'FILTER_PASS'] = (
+            bp_df['FILTER_PASS_bnd1'].astype(bool) &
+            bp_df['FILTER_PASS_bnd2'].astype(bool)
+        )
+        bp_df = bp_df.drop(columns=['FILTER_PASS_bnd1', 'FILTER_PASS_bnd2'])
+
+    return bp_df
 
 
 def gnomad_split_evidence(
@@ -153,10 +161,9 @@ def gnomad_preprocess(
     evidence_cipos: Union[Dict[str, int], Literal['default']] = 'default',
     svtypes_retain: Union[str, List[str]] = 'simple',
     filter_pass_only: bool = False,
-    inplace: bool = False,
     verbose: bool = False,
     caller_params: dict|None = None
-) -> pd.DataFrame | None:
+) -> pd.DataFrame:
     """Preprocess gnomAD structural variant callset.
 
     Processes a gnomAD SV callset by:
@@ -171,12 +178,11 @@ def gnomad_preprocess(
         svtypes_retain: Either 'simple' for basic SV types (DEL,DUP,INV,INS),
             or list of specific SV types to include
         filter_pass_only: If True, keep only variants with FILTER=PASS
-        inplace: If True, modify input DataFrame in place
         verbose: If True, print processing information
+        caller_params: Caller-specific parameters
 
     Returns:
-        If inplace=False: Processed DataFrame
-        If inplace=True: None (modifies input in place)
+        Processed DataFrame
 
     Raises:
         NotImplementedError: If unsupported SV types requested
@@ -185,50 +191,37 @@ def gnomad_preprocess(
         print("Preprocessing gnomAD callset...")
     if caller_params is None:
         caller_params = _caller_params.gnomad_params
-    # Define supported SV types
+
     svtypes_supported = caller_params['supported_svtypes']
     if verbose:
         print(f"SV types currently supported: {svtypes_supported}")
 
-    # Define evidence CI sizes
     if evidence_cipos == 'default':
         evidence_cipos = caller_params['method_cipos']
     if verbose:
         print(f"Using default evidence CIPOS: {evidence_cipos}")
 
-    # Validate and set viable SV types
     if svtypes_retain == 'simple':
         svtypes_retain = svtypes_supported
         if verbose:
             print(f"Using default viable SV types: {svtypes_retain}")
     elif all(svtype in svtypes_supported for svtype in svtypes_retain):
-        svtypes_retain = svtypes_retain
         if verbose:
             print(f"Using specified viable SV types: {svtypes_retain}")
     else:
         raise NotImplementedError(f"Supported viable SV types: {svtypes_supported}")
 
-    # Create copies if not modifying in place
-    if not inplace:
-        gnomad_callset_ = gnomad_callset.copy()
-    else:
-        gnomad_callset_ = gnomad_callset
+    gnomad_callset_ = gnomad_callset.copy()
 
-    # Filter to desired SV types
-    if verbose:
-        print(f"Filtering to specified SV types: {svtypes_retain}")
     gnomad_callset_ = gnomad_callset_[
         gnomad_callset_['INFO_SVTYPE'].isin(svtypes_retain)
     ]
 
-    # Some variants may lack CHR2 field
-    # Set it to CHROM for them
     gnomad_callset_.loc[
         gnomad_callset_['INFO_CHR2'].isna(),
         'INFO_CHR2'
     ] = gnomad_callset_['CHROM']
 
-    # Apply FILTER=PASS filter if requested
     if filter_pass_only:
         if verbose:
             print("Filtering to PASS variants only")
@@ -236,7 +229,6 @@ def gnomad_preprocess(
             gnomad_callset_['FILTER_PASS'].astype(bool)
         ]
 
-    # Set confidence intervals for SV start and end based on evidence type
     if verbose:
         print("Setting confidence intervals based on evidence type")
     gnomad_callset_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = gnomad_get_cipos(
@@ -247,55 +239,28 @@ def gnomad_preprocess(
     gnomad_callset_.loc[:, 'INFO_CIEND_l'] = gnomad_callset_['INFO_CIPOS_l']
     gnomad_callset_.loc[:, 'INFO_CIEND_r'] = gnomad_callset_['INFO_CIPOS_r']
 
-    # Set EVENT field to match variant ID
-    if verbose:
-        print("Setting EVENT field to match variant ID")
     gnomad_callset_.loc[:, 'INFO_EVENT'] = gnomad_callset_['ID']
 
-    if not inplace:
-        if verbose:
-            print("Returning processed callset")
-        return gnomad_callset_
-    else:
-        if verbose:
-            print("Successfully modified input callset")
-        gnomad_callset = gnomad_callset_
-        return None
+    return gnomad_callset_
 
 
 def gnomad_event_to_bnd(
     gnomad_callset: pd.DataFrame,
-    inplace: bool = False,
     caller_params: dict|None = None
-) -> Optional[pd.DataFrame]:
+) -> pd.DataFrame:
     """Convert gnomAD event-based SV records to breakend (BND) format.
 
     Args:
         gnomad_callset: DataFrame containing gnomAD structural variants
-        inplace: If True, modify input DataFrame in place. If False, return a copy
-        add_encoding: If True, add BND encoding information to the output
+        caller_params: Caller-specific parameters
 
     Returns:
-        Modified DataFrame if inplace=False, None if inplace=True
+        DataFrame with events converted to breakend format
     """
     if caller_params is None:
         caller_params = _caller_params.gnomad_params
 
-    if not inplace:
-        gnomad_callset_local = gnomad_callset.copy()
-    else:
-        gnomad_callset_local = gnomad_callset
-
-    # Convert events to breakend format
-    gnomad_callset_local = evts.event_to_bnd(
-        gnomad_callset_local
-    )
-
-    if not inplace:
-        return gnomad_callset_local
-    else:
-        gnomad_callset = gnomad_callset_local
-        return None
+    return evts.event_to_bnd(gnomad_callset.copy())
 
 # MANTA
 # Manta callset includes both event and bnd entries
@@ -569,3 +534,92 @@ def sniffles_preprocess_bnds_only(
         caller_params = _caller_params.sniffles_params
 
     return sniffles_preprocess_common(sniffles_df, caller_params)
+
+
+# SURVIVOR
+
+def survivor_preprocess_evts(
+    survivor_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Preprocess SURVIVOR event entries.
+
+    Splits CIPOS/CIEND into left/right columns, drops the originals,
+    and sets INFO_EVENT to the variant ID.
+
+    Args:
+        survivor_df: DataFrame of SURVIVOR variant calls
+        caller_params: Caller-specific parameters (defaults to survivor_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.survivor_params
+
+    df = survivor_df.copy()
+    df.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(df['INFO_CIPOS'])
+    df.loc[:, ['INFO_CIEND_l', 'INFO_CIEND_r']] = sv_utils.split_ciend(df['INFO_CIEND'])
+    df = df.drop(columns=['INFO_CIPOS', 'INFO_CIEND'])
+    df.loc[:, 'INFO_EVENT'] = df['ID']
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Recipe registry for the generic parse_preprocess_vcf dispatcher.
+#
+# Each entry maps a callset name to its preprocessing recipe:
+#   bnd_svtypes   - SV types treated as BNDs for the split.
+#                   None  => entire VCF is BND (no split, no event_to_bnd).
+#                   []    => entire VCF is events (all go through event_to_bnd).
+#                   list  => rows whose INFO_SVTYPE is in the list are BND;
+#                            the rest are events.
+#   preprocess_all  - applied to entire VCF before the BND/event split.
+#   preprocess_bnds - applied to the BND half after the split.
+#   preprocess_evts - applied to the event half after the split.
+#   force_diff_cols - passed to bnd_to_bp (columns that may differ per breakend).
+#   post_bps        - applied to the breakpoint DataFrame after bnd_to_bp.
+# ---------------------------------------------------------------------------
+
+parse_recipes: dict[str, dict] = {
+    'gridss': {
+        'bnd_svtypes': None,
+        'preprocess_all': gridss_preprocess,
+        'preprocess_bnds': None,
+        'preprocess_evts': None,
+        'force_diff_cols': None,
+        'post_bps': gridss_post_bps,
+    },
+    'manta_candidate': {
+        'bnd_svtypes': ['BND', 'INV'],
+        'preprocess_all': None,
+        'preprocess_bnds': manta_preprocess_bnds_only,
+        'preprocess_evts': manta_preprocess_evts_only,
+        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
+        'post_bps': None,
+    },
+    'manta_diploid': {
+        'bnd_svtypes': ['BND', 'INV'],
+        'preprocess_all': None,
+        'preprocess_bnds': manta_preprocess_bnds_only,
+        'preprocess_evts': manta_preprocess_evts_only,
+        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
+        'post_bps': None,
+    },
+    'sniffles': {
+        'bnd_svtypes': ['BND'],
+        'preprocess_all': None,
+        'preprocess_bnds': sniffles_preprocess_bnds_only,
+        'preprocess_evts': sniffles_preprocess_evts_only,
+        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
+        'post_bps': None,
+    },
+    'survivor': {
+        'bnd_svtypes': [],
+        'preprocess_all': None,
+        'preprocess_bnds': None,
+        'preprocess_evts': survivor_preprocess_evts,
+        'force_diff_cols': None,
+        'post_bps': None,
+    },
+}

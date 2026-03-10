@@ -12,9 +12,7 @@ import pickle
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
-import sklearn.model_selection as skm
 from pysam import VariantFile
 
 
@@ -33,7 +31,6 @@ from . import chunk_match as chunk_match  # noqa: E402
 from . import matched_breakpoints as mbps  # noqa: E402
 from . import models as models  # noqa: E402
 from . import delly2bnd as delly2bnd  # noqa: E402
-from . import _caller_params as caller_params  # noqa: E402
 
 
 def parse_preprocess_gnomad(
@@ -107,394 +104,152 @@ def parse_preprocess_gnomad(
         force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
     )
 
-    # output_dir = workflow_config['sample_dir'] / 'svensemble2'
-    # output_path = output_dir / 'gnomad_bps.csv'
-
-    # if verbose:
-    #     _log(f"Saving breakpoints in {output_path}")
-
-    # if not output_dir.exists():
-    #     output_dir.mkdir(parents=True, exist_ok=True)
-
     return gnomad_bp_df
 
-    # if verbose:
-    #     _log(f"Saved breakpoints in {output_path}")
-
-def parse_preprocess_gridss(
-    sample_name: str,
-    workflow_config: dict,
-    verbose: bool = False
-) -> pd.DataFrame:
-    """
-    Read and preprocess the gridss dataset for a sample.
-
-    Args:
-        sample_name (str): Name of the sample.
-        workflow_config (dict): Configuration dictionary for the sample.
-        verbose (bool): If True, print progress messages.
-    """
-    def _process_gridss_callset(callset: dict, verbose: bool = False) -> pd.DataFrame:
-        """
-        Internal function to process a gridss callset and save breakpoints.
-
-        Args:
-            callset (dict): Callset dictionary containing 'path' and 'params'.
-            output_dir (Path): Directory to save the output CSV.
-            verbose (bool): If True, print progress messages.
-        """
-        if verbose:
-            _log(f"Loading GRIDSS VCF from {callset['path']}")
-        gridss_vcf = VariantFile(callset['path'])
-        gridss_df, gridss_meta = vcfp.parse_vcf_to_df(
-            vcf_file=gridss_vcf,
-            caller_params=callset['params']
-        )
-        if verbose:
-            _log("Preprocessing GRIDSS variants")
-        gridss_df = caller_specific.gridss_preprocess(
-            gridss_df,
-            caller_params=callset['params'],
-            verbose=verbose
-        )
-        if verbose:
-            _log("Converting GRIDSS breakends to breakpoints")
-        gridss_bp_df = bnds.bnd_to_bp(gridss_df)
-
-        # A very small proportion of breakpoints will have different QUAL values for the two breakends
-        # If so, the bps_df will have two QUAL columns for each breakend
-        # For now we drop those breakpoints
-        if 'QUAL' not in gridss_bp_df.columns:
-            try:
-                gridss_bp_df.loc[:, 'QUAL'] = np.min([gridss_bp_df['QUAL_bnd1'], gridss_bp_df['QUAL_bnd2']], axis=0)
-            except KeyError:
-                raise KeyError('No QUAL column found in GRIDSS breakpoints')
-
-        # output_dir.mkdir(parents=True, exist_ok=True)
-        # output_path = output_dir / 'gridss_bps.csv'
-        # if verbose:
-        #     _log(f"Saving breakpoints to {output_path}")
-        # gridss_bp_df.to_csv(output_path)
-        # if verbose:
-        #     _log(f"Saved breakpoints in {output_path}")
-        return gridss_bp_df
-
-
-    if 'gridss' in workflow_config.get('callsets', {}):
-        # output_dir = workflow_config['callsets']['gridss']['svensemble_dir']
-        return _process_gridss_callset(
-            callset=workflow_config['callsets']['gridss'],
-            verbose=verbose
-        )
-
-def parse_preprocess_manta_candidate(
-    sample_name: str,
-    workflow_config: dict,
-    verbose: bool = False
-) -> pd.DataFrame:
-    """
-    Read and preprocess the manta candidate dataset for a sample.
-
-    Args:
-        sample_name (str): Name of the sample.
-        workflow_config (dict): Configuration dictionary for the sample.
-        verbose (bool): If True, print progress messages.
-    """
-    def _process_manta_candidate_callset(callset: dict, verbose: bool = False) -> pd.DataFrame:
-        """
-        Internal function to process a manta candidate callset and save breakpoints.
-
-        Args:
-            callset (dict): Callset dictionary containing 'path' and 'params'.
-            output_dir (Path): Directory to save the output CSV.
-            verbose (bool): If True, print progress messages.
-        """
-        if verbose:
-            _log(f"Loading Manta candidate VCF from {callset['path']}")
-        manta_candidate_vcf = VariantFile(callset['path'])
-        manta_candidate_df, manta_candidate_meta = vcfp.parse_vcf_to_df(
-            vcf_file=manta_candidate_vcf,
-            caller_params=callset['params']
-        )
-        if verbose:
-            _log("Splitting Manta candidate variants into BND/INV and event-only dataframes")
-        manta_candidate_bnd_only_df = manta_candidate_df[manta_candidate_df['INFO_SVTYPE'].isin(['BND', 'INV'])]
-        manta_candidate_evt_only_df = manta_candidate_df[~manta_candidate_df['INFO_SVTYPE'].isin(['BND', 'INV'])]
-        if verbose:
-            _log("Preprocessing Manta BND/INV variants")
-        manta_candidate_bnd_only_df = caller_specific.manta_preprocess_bnds_only(
-            manta_candidate_bnd_only_df,
-            caller_params=callset['params']
-        )
-        if verbose:
-            _log("Preprocessing Manta event-only variants")
-        manta_candidate_evt_only_df = caller_specific.manta_preprocess_evts_only(
-            manta_candidate_evt_only_df,
-            caller_params=callset['params']
-        )
-        if verbose:
-            _log("Converting Manta event-only variants to breakends")
-        manta_candidate_evt_bnd_df = evts.event_to_bnd(manta_candidate_evt_only_df, bnd2_pos=caller_params.manta_diploid_params['bnd2_pos'])
-        manta_candidate_df = pd.concat([manta_candidate_bnd_only_df, manta_candidate_evt_bnd_df], axis=0)
-        if verbose:
-            _log("Converting Manta breakends to breakpoints")
-        manta_candidate_bp_df = bnds.bnd_to_bp(
-            manta_candidate_df,
-            force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
-        )
-        # output_dir.mkdir(parents=True, exist_ok=True)
-        # output_path = output_dir / 'manta_candidate_bps.csv'
-        # if verbose:
-        #     _log(f"Saving breakpoints to {output_path}")
-        # manta_candidate_bp_df.to_csv(output_path)
-        # if verbose:
-        #     _log(f"Saved breakpoints in {output_path}")
-        return manta_candidate_bp_df
-
-    if 'manta_candidate' in workflow_config.get('callsets', {}):
-        # output_dir = workflow_config['callsets']['manta_candidate']['svensemble_dir']
-        return _process_manta_candidate_callset(
-            callset=workflow_config['callsets']['manta_candidate'],
-            verbose=verbose
-        )
-
-def parse_preprocess_manta_diploid(
-    sample_name: str,
-    workflow_config: dict,
-    verbose: bool = False
-) -> None:
-    """
-    Read and preprocess the manta diploid dataset for a sample.
-
-    Args:
-        sample_name (str): Name of the sample.
-        workflow_config (dict): Configuration dictionary for the sample.
-        verbose (bool): If True, print progress messages.
-    """
-    def _process_manta_diploid_callset(
-        callset: dict,
-        verbose: bool = False
-    ) -> pd.DataFrame:
-        """
-        Internal function to process a manta diploid callset and save breakpoints.
-
-        Args:
-            callset (dict): Callset dictionary containing 'path' and 'params'.
-            output_dir (Path): Directory to save the output CSV.
-            verbose (bool): If True, print progress messages.
-        """
-        if verbose:
-            _log(f"Loading Manta diploid VCF from {callset['path']}")
-        manta_diploid_vcf = VariantFile(callset['path'])
-        manta_diploid_df, manta_diploid_meta = vcfp.parse_vcf_to_df(
-            vcf_file=manta_diploid_vcf,
-            caller_params=callset['params']
-        )
-        if verbose:
-            _log("Splitting Manta diploid variants into BND/INV and event-only dataframes")
-        manta_bnd_only_df = manta_diploid_df[manta_diploid_df['INFO_SVTYPE'].isin(['BND', 'INV'])]
-        manta_evt_only_df = manta_diploid_df[~manta_diploid_df['INFO_SVTYPE'].isin(['BND', 'INV'])]
-        if verbose:
-            _log("Preprocessing Manta diploid BND/INV variants")
-        manta_bnd_only_df = caller_specific.manta_preprocess_bnds_only(
-            manta_bnd_only_df,
-            caller_params=callset['params']
-        )
-        if verbose:
-            _log("Preprocessing Manta diploid event-only variants")
-        manta_evt_only_df = caller_specific.manta_preprocess_evts_only(
-            manta_evt_only_df,
-            caller_params=callset['params']
-        )
-        if verbose:
-            _log("Converting Manta diploid event-only variants to breakends")
-        manta_evt_bnd_df = evts.event_to_bnd(manta_evt_only_df, bnd2_pos=caller_params.manta_diploid_params['bnd2_pos'])
-        manta_diploid_df = pd.concat([manta_bnd_only_df, manta_evt_bnd_df], axis=0)
-        if verbose:
-            _log("Converting Manta diploid breakends to breakpoints")
-        manta_diploid_bp_df = bnds.bnd_to_bp(
-            manta_diploid_df,
-            force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
-        )
-        # output_dir.mkdir(parents=True, exist_ok=True)
-        # output_path = output_dir / 'manta_diploid_bps.csv'
-        # if verbose:
-        #     _log(f"Saving breakpoints to {output_path}")
-        # manta_diploid_bp_df.to_csv(output_path)
-        # if verbose:
-        #     _log(f"Saved breakpoints in {output_path}")
-        return manta_diploid_bp_df
-
-    if 'manta_diploid' in workflow_config.get('callsets', {}):
-        # output_dir = workflow_config['callsets']['manta_diploid']['svensemble_dir']
-        return _process_manta_diploid_callset(
-            callset=workflow_config['callsets']['manta_diploid'],
-            verbose=verbose
-        )
 
 def parse_preprocess_delly(
     sample_name: str,
     workflow_config: dict,
     verbose: bool = False
-) -> None:
-    """
-    Read and preprocess the delly dataset for a sample.
-    """
-
-    def _process_delly_callset(callset: dict, temp_dir: Path, ref_path: Path, verbose: bool = False) -> pd.DataFrame:
-        """
-        Internal function to process a delly callset and save breakpoints.
-        """
-        if verbose:
-            _log(f"Creating breakpoints from DELLY BND/TRA calls and saving to {callset['svensemble_dir'] / 'delly_bps.csv'}")
-
-        if not (temp_dir / 'delly_bnd.tmp.vcf').exists():
-            temp_dir.mkdir(parents=True, exist_ok=True)
-
-        delly2bnd.delly2bnd_noargparse(
-            vcf=callset['path'],
-            ref=ref_path,
-            out=temp_dir / 'delly_bnd.tmp.vcf'
-        )
-
-        if verbose:
-            _log(f"Loading DELLY VCF from {callset['path']}")
-        delly_bnd_only_vcf = VariantFile(temp_dir / 'delly_bnd.tmp.vcf')
-        delly_bnd_only_df, delly_bnd_only_meta = vcfp.parse_vcf_to_df(
-            vcf_file=delly_bnd_only_vcf,
-            caller_params=callset['params']
-        )
-        delly_bnd_only_df = caller_specific.delly_preprocess_bnds_only(delly_bnd_only_df, caller_params=callset['params'])
-        os.remove(temp_dir / 'delly_bnd.tmp.vcf')
-
-
-        delly_vcf = VariantFile(callset['path'])
-        delly_df, delly_meta = vcfp.parse_vcf_to_df(
-            vcf_file=delly_vcf,
-            caller_params=callset['params']
-        )
-        delly_evt_only_df = delly_df[~delly_df['INFO_SVTYPE'].isin(['BND', 'TRA'])]
-        delly_evt_only_df = caller_specific.delly_preprocess_evts_only(delly_evt_only_df, caller_params=callset['params'])
-        delly_evt_bnd_df = evts.event_to_bnd(delly_evt_only_df, bnd2_pos=caller_params.delly_params['bnd2_pos'])
-
-        delly_bnd_df = pd.concat([delly_evt_bnd_df, delly_bnd_only_df], axis=0)
-
-        delly_bp_df = bnds.bnd_to_bp(delly_bnd_df, force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r'])
-
-        # output_path = output_dir / 'delly_bps.csv'
-        # if verbose:
-        #     _log(f"Saving breakpoints to {output_path}")
-        # delly_bp_df.to_csv(output_path)
-        # if verbose:
-        #     _log(f"Saved breakpoints in {output_path}")
-        return delly_bp_df
-
-    if 'delly' in workflow_config.get('callsets', {}):
-        if 'ref_path' not in workflow_config:
-            raise ValueError("Reference path not found in sample config")
-        # output_dir = workflow_config['callsets']['delly']['svensemble_dir']
-        return _process_delly_callset(
-            callset=workflow_config['callsets']['delly'],
-            temp_dir=workflow_config['workflow_dir'] / 'temp',
-            ref_path=workflow_config['ref_path'],
-            verbose=verbose
-        )
-
-
-def parse_preprocess_sniffles(
-    sample_name: str,
-    workflow_config: dict,
-    verbose: bool = False
 ) -> pd.DataFrame:
-    """
-    Read and preprocess the Sniffles2 dataset for a sample.
+    """Read and preprocess the Delly dataset for a sample.
+
+    Delly requires a custom parser because BND/TRA records are first
+    converted to a standard BND VCF via delly2bnd, then parsed separately
+    from the event records.
 
     Args:
-        sample_name (str): Name of the sample.
-        workflow_config (dict): Configuration dictionary for the sample.
-        verbose (bool): If True, print progress messages.
+        sample_name: Name of the sample.
+        workflow_config: Configuration dictionary for the sample.
+        verbose: If True, print progress messages.
     """
-    def _process_sniffles_callset(callset: dict, verbose: bool = False) -> pd.DataFrame:
-        """
-        Internal function to process a Sniffles2 callset and return breakpoints.
-        """
-        if verbose:
-            _log(f"Loading Sniffles2 VCF from {callset['path']}")
-        sniffles_vcf = VariantFile(callset['path'])
-        sniffles_df, sniffles_meta = vcfp.parse_vcf_to_df(
-            vcf_file=sniffles_vcf,
-            caller_params=callset['params']
-        )
-        if verbose:
-            _log("Splitting Sniffles2 variants into BND and event-only dataframes")
-        sniffles_bnd_only_df = sniffles_df[sniffles_df['INFO_SVTYPE'] == 'BND']
-        sniffles_evt_only_df = sniffles_df[sniffles_df['INFO_SVTYPE'] != 'BND']
-        if verbose:
-            _log("Preprocessing Sniffles2 BND variants")
-        sniffles_bnd_only_df = caller_specific.sniffles_preprocess_bnds_only(
-            sniffles_bnd_only_df,
-            caller_params=callset['params']
-        )
-        if verbose:
-            _log("Preprocessing Sniffles2 event-only variants")
-        sniffles_evt_only_df = caller_specific.sniffles_preprocess_evts_only(
-            sniffles_evt_only_df,
-            caller_params=callset['params']
-        )
-        if verbose:
-            _log("Converting Sniffles2 event-only variants to breakends")
-        sniffles_evt_bnd_df = evts.event_to_bnd(
-            sniffles_evt_only_df,
-            bnd2_pos=caller_params.sniffles_params['bnd2_pos']
-        )
-        sniffles_df = pd.concat([sniffles_bnd_only_df, sniffles_evt_bnd_df], axis=0)
-        if verbose:
-            _log("Converting Sniffles2 breakends to breakpoints")
-        sniffles_bp_df = bnds.bnd_to_bp(
-            sniffles_df,
-            force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
-        )
-        return sniffles_bp_df
+    callset = workflow_config['callsets']['delly']
+    if 'ref_path' not in workflow_config:
+        raise ValueError("Reference path not found in sample config")
+    temp_dir = workflow_config['workflow_dir'] / 'temp'
+    ref_path = workflow_config['ref_path']
 
-    if 'sniffles' in workflow_config.get('callsets', {}):
-        return _process_sniffles_callset(
-            callset=workflow_config['callsets']['sniffles'],
-            verbose=verbose
-        )
+    if not (temp_dir / 'delly_bnd.tmp.vcf').exists():
+        temp_dir.mkdir(parents=True, exist_ok=True)
 
-
-def parse_preprocess_survivor(
-    sample_name: str,
-    workflow_config: dict,
-    verbose: bool = False
-) -> pd.DataFrame:
-    """
-    Read and preprocess the SURVIVOR consensus VCF for a sample.
-    """
-    if 'survivor' not in workflow_config.get('callsets', {}):
-        return None
-
-    callset = workflow_config['callsets']['survivor']
     if verbose:
-        _log(f"Loading SURVIVOR VCF from {callset['path']}")
-    survivor_vcf = VariantFile(callset['path'])
-    survivor_df, _ = vcfp.parse_vcf_to_df(
-        vcf_file=survivor_vcf,
+        _log("Converting DELLY BND/TRA records via delly2bnd")
+    delly2bnd.delly2bnd_noargparse(
+        vcf=callset['path'],
+        ref=ref_path,
+        out=temp_dir / 'delly_bnd.tmp.vcf'
+    )
+
+    if verbose:
+        _log(f"Loading DELLY BND VCF from {temp_dir / 'delly_bnd.tmp.vcf'}")
+    delly_bnd_only_vcf = VariantFile(temp_dir / 'delly_bnd.tmp.vcf')
+    delly_bnd_only_df, _ = vcfp.parse_vcf_to_df(
+        vcf_file=delly_bnd_only_vcf,
         caller_params=callset['params']
     )
+    delly_bnd_only_df = caller_specific.delly_preprocess_bnds_only(
+        delly_bnd_only_df, caller_params=callset['params']
+    )
+    os.remove(temp_dir / 'delly_bnd.tmp.vcf')
+
     if verbose:
-        _log("Preprocessing SURVIVOR variants")
-    survivor_df.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(survivor_df['INFO_CIPOS'])
-    survivor_df.loc[:, ['INFO_CIEND_l', 'INFO_CIEND_r']] = sv_utils.split_ciend(survivor_df['INFO_CIEND'])
-    survivor_df = survivor_df.drop(columns=['INFO_CIPOS', 'INFO_CIEND'])
-    survivor_df.loc[:, 'INFO_EVENT'] = survivor_df['ID']
+        _log(f"Loading DELLY event VCF from {callset['path']}")
+    delly_vcf = VariantFile(callset['path'])
+    delly_df, _ = vcfp.parse_vcf_to_df(
+        vcf_file=delly_vcf,
+        caller_params=callset['params']
+    )
+    delly_evt_only_df = delly_df[~delly_df['INFO_SVTYPE'].isin(['BND', 'TRA'])]
+    delly_evt_only_df = caller_specific.delly_preprocess_evts_only(
+        delly_evt_only_df, caller_params=callset['params']
+    )
     if verbose:
-        _log("Converting SURVIVOR events to breakends")
-    survivor_bnds = evts.event_to_bnd(survivor_df, bnd2_pos=callset['params']['bnd2_pos'])
+        _log("Converting DELLY events to breakends")
+    delly_evt_bnd_df = evts.event_to_bnd(
+        delly_evt_only_df, bnd2_pos=callset['params']['bnd2_pos']
+    )
+
+    delly_bnd_df = pd.concat([delly_evt_bnd_df, delly_bnd_only_df], axis=0)
+
     if verbose:
-        _log("Converting SURVIVOR breakends to breakpoints")
-    survivor_bps = bnds.bnd_to_bp(survivor_bnds)
-    return survivor_bps
+        _log("Converting DELLY breakends to breakpoints")
+    delly_bp_df = bnds.bnd_to_bp(
+        delly_bnd_df, force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
+    )
+    return delly_bp_df
+
+
+def parse_preprocess_vcf(
+    callset_name: str,
+    callset: dict,
+    verbose: bool = False
+) -> pd.DataFrame:
+    """Generic VCF-to-breakpoints preprocessor driven by caller_specific.parse_recipes.
+
+    Handles three VCF layouts via the recipe's bnd_svtypes field:
+      None  - entire VCF is BND (no event_to_bnd step)
+      []    - entire VCF is events (all rows go through event_to_bnd)
+      list  - rows with INFO_SVTYPE in the list are BND; the rest are events
+
+    Args:
+        callset_name: Name of the callset (must be a key in parse_recipes).
+        callset: Callset dict containing 'path' and 'params'.
+        verbose: If True, print progress messages.
+
+    Returns:
+        DataFrame of breakpoints.
+    """
+    recipe = caller_specific.parse_recipes[callset_name]
+
+    if verbose:
+        _log(f"Loading {callset_name} VCF from {callset['path']}")
+    vcf = VariantFile(callset['path'])
+    df, _ = vcfp.parse_vcf_to_df(vcf_file=vcf, caller_params=callset['params'])
+
+    if recipe['preprocess_all']:
+        if verbose:
+            _log(f"Preprocessing all {callset_name} variants")
+        df = recipe['preprocess_all'](df, caller_params=callset['params'])
+
+    bnd_svtypes = recipe['bnd_svtypes']
+
+    if bnd_svtypes is None:
+        # Entire VCF is BND -- go straight to bnd_to_bp
+        bnd_df = df
+    else:
+        if bnd_svtypes:
+            bnd_mask = df['INFO_SVTYPE'].isin(bnd_svtypes)
+            bnd_df = df[bnd_mask]
+            evt_df = df[~bnd_mask]
+        else:
+            bnd_df = pd.DataFrame(columns=df.columns)
+            evt_df = df
+
+        if recipe['preprocess_bnds'] and len(bnd_df) > 0:
+            if verbose:
+                _log(f"Preprocessing {callset_name} BND variants")
+            bnd_df = recipe['preprocess_bnds'](bnd_df, caller_params=callset['params'])
+
+        if recipe['preprocess_evts'] and len(evt_df) > 0:
+            if verbose:
+                _log(f"Preprocessing {callset_name} event variants")
+            evt_df = recipe['preprocess_evts'](evt_df, caller_params=callset['params'])
+
+        if len(evt_df) > 0:
+            if verbose:
+                _log(f"Converting {callset_name} events to breakends")
+            evt_bnd_df = evts.event_to_bnd(evt_df, bnd2_pos=callset['params']['bnd2_pos'])
+            bnd_df = pd.concat([bnd_df, evt_bnd_df], axis=0) if len(bnd_df) > 0 else evt_bnd_df
+
+    if verbose:
+        _log(f"Converting {callset_name} breakends to breakpoints")
+    force_diff = recipe['force_diff_cols']
+    bp_df = bnds.bnd_to_bp(bnd_df, force_diff_cols=force_diff) if force_diff else bnds.bnd_to_bp(bnd_df)
+
+    if recipe['post_bps']:
+        bp_df = recipe['post_bps'](bp_df)
+
+    return bp_df
 
 
 # Maps derived callset names to (parent_callset, filter_function).
@@ -502,7 +257,7 @@ def parse_preprocess_survivor(
 _derived_callset_config = {
     'gridss_H': {
         'parent': 'gridss',
-        'filter': lambda df: df[df['FILTER_PASS_bnd1'].astype(bool) & df['FILTER_PASS_bnd2'].astype(bool)]
+        'filter': lambda df: df[df['FILTER_PASS'].astype(bool)]
     },
     'sniffles_H': {
         'parent': 'sniffles',
@@ -524,14 +279,9 @@ def parse_preprocess_raw(
 
     Output directory: workflow_config['callset_bps_dir']
     """
-    caller_dispatch = {
+    _custom_parsers = {
         "gnomad": parse_preprocess_gnomad,
-        "gridss": parse_preprocess_gridss,
-        "manta_diploid": parse_preprocess_manta_diploid,
-        "manta_candidate": parse_preprocess_manta_candidate,
         "delly": parse_preprocess_delly,
-        "sniffles": parse_preprocess_sniffles,
-        "survivor": parse_preprocess_survivor,
     }
 
     callset_bps_dir = workflow_config['callset_bps_dir']
@@ -542,8 +292,10 @@ def parse_preprocess_raw(
     for callset_name in workflow_config["callsets"].keys():
         if callset_name in _derived_callset_config:
             continue
-        if callset_name not in caller_dispatch:
-            raise ValueError(f"Callset {callset_name} not supported")
+        if callset_name not in _custom_parsers and \
+                callset_name not in caller_specific.parse_recipes:
+            raise ValueError(f"Callset '{callset_name}' has no parser registered "
+                             "(not in caller_specific.parse_recipes or custom parsers)")
         output_path = callset_bps_dir / f'{callset_name}.raw_bps.csv'
         if output_path.exists():
             if verbose:
@@ -558,7 +310,14 @@ def parse_preprocess_raw(
             )
         if verbose:
             _log(f"Parsing callset '{callset_name}' into raw breakpoints")
-        bp_df = caller_dispatch[callset_name](sample_name, workflow_config, verbose)
+        if callset_name in _custom_parsers:
+            bp_df = _custom_parsers[callset_name](sample_name, workflow_config, verbose)
+        else:
+            bp_df = parse_preprocess_vcf(
+                callset_name,
+                workflow_config['callsets'][callset_name],
+                verbose
+            )
         bp_df.to_csv(output_path, index=False)
         if verbose:
             _log(f"Saved raw breakpoints to {output_path}")

@@ -1017,15 +1017,6 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
             callset_bps_['INFO_DOWNSTREAM_PAIR_COUNT'] + \
             callset_bps_['INFO_PAIR_COUNT']
 
-    # GRIDSS stores per-breakend FILTER_PASS columns; unify them into a single FILTER_PASS
-    if 'FILTER_PASS' not in callset_bps_.columns and \
-            'FILTER_PASS_bnd1' in callset_bps_.columns and \
-            'FILTER_PASS_bnd2' in callset_bps_.columns:
-        callset_bps_.loc[:, 'FILTER_PASS'] = (
-            callset_bps_['FILTER_PASS_bnd1'].astype(bool) &
-            callset_bps_['FILTER_PASS_bnd2'].astype(bool)
-        )
-
     val_key = sample_config['val_set']['name']
     if val_key == callset_name:
         i = 0
