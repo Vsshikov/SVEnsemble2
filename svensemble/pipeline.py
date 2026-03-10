@@ -12,6 +12,7 @@ import pickle
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from pysam import VariantFile
 
@@ -532,8 +533,9 @@ def pu_predict_sample(
     if verbose:
         _log(f"Predicting probabilities for {len(X)} breakpoints")
 
-    # Fill missing features with 0 if any were introduced in training - from other samples or with the model function
-    X = X.reindex(columns=model_fit.feature_names_in_, fill_value=0)
+    fillna = workflow_config['model']['training_params'].get('fillna', 0)
+    fill_val = fillna if fillna is not None else np.nan
+    X = X.reindex(columns=model_fit.feature_names_in_, fill_value=fill_val)
 
     y_pred = model_fit.predict_proba(X)[:,1]
     if verbose:

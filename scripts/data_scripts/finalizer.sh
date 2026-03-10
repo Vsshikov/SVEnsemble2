@@ -38,6 +38,10 @@ SACCT_FMT="JobID%-20,JobName%-24,State%-16,ExitCode,Elapsed,MaxRSS"
     | while IFS='|' read -r job_id job_name state exit_code elapsed max_rss; do
         printf '  %-20s %-24s %-16s exit=%-6s %s  %s\n' \
             "$job_id" "$job_name" "$state" "$exit_code" "$elapsed" "$max_rss"
+        if [[ "$state" != "COMPLETED" ]]; then
+            err_file=$(compgen -G "$LOG_DIR"/*/"${job_id}.err" 2>/dev/null | head -1 || true)
+            [[ -n "$err_file" ]] && printf '    └─ %s\n' "$err_file"
+        fi
     done
 
     printf '\n'

@@ -312,6 +312,7 @@ def preprocess_matchedbps_for_pu(
 def get_X_y_from_training_df(
     training_df: pd.DataFrame,
     match_col: str = 'ref_match',
+    fillna: int | float | None = 0,
     verbose: bool = False
 ) -> tuple[pd.DataFrame, pd.Series]:
     """
@@ -320,27 +321,33 @@ def get_X_y_from_training_df(
     This function:
         - Drops the match column (default: 'ref_match') from the input DataFrame.
         - Applies one-hot encoding to categorical columns.
-        - Fills missing values with 0.
+        - Optionally fills missing values (controlled by ``fillna``).
         - Returns the resulting feature matrix X and the target vector y (the match column).
 
     Args:
         training_df (pd.DataFrame): DataFrame containing features and a match column.
         match_col (str): Name of the column indicating reference match (target).
+        fillna (int | float | None): Value to fill NaN with. Set to ``None`` to
+            preserve NaN (e.g. for models with native missing-value support).
         verbose (bool): If True, print information about dropped columns.
 
     Returns:
-        X (pd.DataFrame): Feature matrix after one-hot encoding and NaN filling.
+        X (pd.DataFrame): Feature matrix after one-hot encoding and optional NaN filling.
         y (pd.Series): Target vector (reference match indicator).
     """
     training_df_copy = training_df.copy()
     X = pd.get_dummies(training_df_copy.drop(columns=[match_col]))
-    X = X.fillna(0)
 
-    # Convert all columns to int if possible or float if not
+    if fillna is not None:
+        X = X.fillna(fillna)
+
     for column in X.columns:
-        try:
-            X[column] = X[column].astype(int)
-        except ValueError:
+        if fillna is not None:
+            try:
+                X[column] = X[column].astype(int)
+            except (ValueError, pd.errors.IntCastingNaNError):
+                X[column] = X[column].astype(float)
+        else:
             X[column] = X[column].astype(float)
 
     y = training_df_copy[match_col]

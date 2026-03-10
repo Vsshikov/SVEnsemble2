@@ -26,7 +26,7 @@ from . import utils as sv_utils  # noqa: E402
 from . import matched_breakpoints as matchedbps  # noqa: E402
 
 
-def load_svensemble2_val_Xy_from_samples_val_pickles(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, verbose=False):
+def load_svensemble2_val_Xy_from_samples_val_pickles(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, fillna=0, verbose=False):
     samples = pickle.load(open(samples_pkl_path, 'rb'))
     val_dict = pickle.load(open(val_dict_pkl_path, 'rb'))
 
@@ -42,16 +42,16 @@ def load_svensemble2_val_Xy_from_samples_val_pickles(samples_pkl_path, val_dict_
         verbose=verbose
     )
 
-    return matchedbps.get_X_y_from_training_df(preprocessed_matched_bps, match_col='ref_match')
+    return matchedbps.get_X_y_from_training_df(preprocessed_matched_bps, match_col='ref_match', fillna=fillna)
 
 
-def load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_path, val_dict_pkl_path, training_set_name, all_matches=False, verbose=False):
+def load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_path, val_dict_pkl_path, training_set_name, all_matches=False, fillna=0, verbose=False):
 
     sample = pickle.load(open(sample_pkl_path, 'rb'))
     if val_dict_pkl_path is not None:
         val_dict = pickle.load(open(val_dict_pkl_path, 'rb'))
     elif all_matches:
-        val_dict = None # all matches are used, so no need for val_dict
+        val_dict = None
     else:
         raise ValueError("val_dict_pkl_path is required if all_matches is False")
 
@@ -67,11 +67,11 @@ def load_svensemble2_val_Xy_from_sample_val_pickles(sample_pkl_path, val_dict_pk
         match_sample_name='val',
         training_set_name=training_set_name,
         add_match_ids_to_index=False,
-        ignore_match_errors=all_matches, # ignore match errors if all matches are used
+        ignore_match_errors=all_matches,
         verbose=verbose
     )
 
-    return matchedbps.get_X_y_from_training_df(preprocessed_matched_bps, match_col='ref_match')
+    return matchedbps.get_X_y_from_training_df(preprocessed_matched_bps, match_col='ref_match', fillna=fillna)
 
 
 def svensemble2_permutation_importance(model, X, y, n_repeats=10, random_state=42):
@@ -162,7 +162,8 @@ def svensemble2_feature_importance(samples_pkl_path, val_dict_pkl_path, sample_n
         X, y = load_svensemble2_val_Xy_from_samples_val_pickles(samples_pkl_path, val_dict_pkl_path, sample_name, training_set_name, verbose=verbose)
 
         # Load the trained model + predictions
-        svensemble2_model = pickle.load(open(samples_pkl_path, 'rb'))[sample_name]['pred_dicts'][training_set_name]['RF_fit']
+        pred_dict = pickle.load(open(samples_pkl_path, 'rb'))[sample_name]['pred_dicts'][training_set_name]
+        svensemble2_model = pred_dict.get('model_fit', pred_dict.get('RF_fit'))
 
         # Check if features in the model are the same as the X columns
         # If extra columns present in the dataframe, remove them

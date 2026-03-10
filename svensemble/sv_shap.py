@@ -126,16 +126,23 @@ def load_from_bench_pkl(
     if verbose:
         print(f"Loading from bench_preprocessed pickle: {bench_pkl_path}")
 
+    from . import _model_configs
+    fillna = _model_configs.model_configs.get(model_name, {}).get(
+        'training_params', {},
+    ).get('fillna', 0)
+
     X, y = importances.load_svensemble2_val_Xy_from_sample_val_pickles(
         sample_pkl_path=str(bench_pkl_path),
         val_dict_pkl_path=None,
         training_set_name=training_set_name,
         all_matches=True,
+        fillna=fillna,
         verbose=verbose,
     )
 
     sample = pickle.load(open(bench_pkl_path, 'rb'))
-    model = sample['pred_dicts'][training_set_name]['RF_fit']
+    pred_dict = sample['pred_dicts'][training_set_name]
+    model = pred_dict.get('model_fit', pred_dict.get('RF_fit'))
 
     return model, X, y
 
@@ -173,7 +180,14 @@ def load_from_workflow(
         y = fm['ref_match']
         fm = fm.drop(columns=['ref_match'])
 
-    X = pd.get_dummies(fm).fillna(0)
+    from . import _model_configs
+    fillna = _model_configs.model_configs.get(model_name, {}).get(
+        'training_params', {},
+    ).get('fillna', 0)
+
+    X = pd.get_dummies(fm)
+    if fillna is not None:
+        X = X.fillna(fillna)
 
     return model, X, y
 
