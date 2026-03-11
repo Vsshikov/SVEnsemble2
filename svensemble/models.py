@@ -343,7 +343,7 @@ def train_unbiased_xgb(
     return X, xgb_fit
 
 
-def train_unbiased_concat_xgb(
+def train_unbiased_xgb_concat(
     joint_bp_df: pd.DataFrame,
     workflow_config: dict,
     ground_truth_config: dict,
@@ -351,7 +351,7 @@ def train_unbiased_concat_xgb(
     verbose: bool = False,
 ) -> tuple[pd.DataFrame, XGB | None]:
     """
-    Train an unbiased XGBoost model on a concatenated training set from multiple samples.
+    Train an unbiased XGBoost model with cross-training on one or multiple samples.
     """
     training_set_dfs = []
     for sample in workflow_config['model']['training_params']['function_params']['samples']:
@@ -414,7 +414,7 @@ model_dispatch = {
     'unbiased': train_unbiased_rf,
     'unbiased_concat': train_unbiased_concat_rf,
     'unbiased_xgb': train_unbiased_xgb,
-    'unbiased_concat_xgb': train_unbiased_concat_xgb,
+    'unbiased_xgb_concat': train_unbiased_xgb_concat,
 }
 
 

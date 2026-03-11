@@ -45,6 +45,12 @@ Usage:
         --threshold 0.5 \\
         [--output metrics.csv] \\
         [--verbose]
+
+    # Alternatively, supply CSV paths via a text file (one path per line,
+    # blank lines and lines starting with '#' are ignored):
+    python scripts/compute_metrics.py \\
+        --benchmark_csvs_file paths.txt \\
+        ...
 """
 
 import os
@@ -410,9 +416,14 @@ if __name__ == '__main__':
     )
 
     # --- Input / labelling ------------------------------------------------
-    parser.add_argument(
-        '--benchmark_csvs', type=str, required=True,
+    csv_input = parser.add_mutually_exclusive_group(required=True)
+    csv_input.add_argument(
+        '--benchmark_csvs', type=str, default=None,
         help='Comma-separated list of benchmark CSV paths.'
+    )
+    csv_input.add_argument(
+        '--benchmark_csvs_file', type=str, default=None,
+        help='Path to a text file with one benchmark CSV path per line.'
     )
     parser.add_argument(
         '--labels', type=str, default=None,
@@ -478,7 +489,17 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Parse CSV paths
-    csv_paths = [Path(p.strip()) for p in args.benchmark_csvs.split(sep=',')]
+    if args.benchmark_csvs is not None:
+        csv_paths = [Path(p.strip()) for p in args.benchmark_csvs.split(sep=',')]
+    else:
+        list_file = Path(args.benchmark_csvs_file)
+        if not list_file.exists():
+            raise FileNotFoundError(f"--benchmark_csvs_file not found: {list_file}")
+        csv_paths = [
+            Path(line.strip())
+            for line in list_file.read_text().splitlines()
+            if line.strip() and not line.strip().startswith('#')
+        ]
     for p in csv_paths:
         if not p.exists():
             raise FileNotFoundError(f"Benchmark CSV not found: {p}")
@@ -488,8 +509,8 @@ if __name__ == '__main__':
         labels = [l.strip() for l in args.labels.split(sep=',')]
         if len(labels) != len(csv_paths):
             raise ValueError(
-                f"--labels has {len(labels)} entries but --benchmark_csvs has "
-                f"{len(csv_paths)}"
+                f"--labels has {len(labels)} entries but the benchmark CSV list "
+                f"has {len(csv_paths)}"
             )
     else:
         labels = None

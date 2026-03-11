@@ -110,10 +110,10 @@ unset _RUN_DIR
 # SVE_BENCH_VAL_MATCH_MARGIN=200
 # SVE_BENCH_VAL_MATCH_INSERT_SIZE_THRESHOLD=0.7
 
-# Additional callsets and columns in benchmark output
+# Additional callsets and columns in benchmark output (bash arrays)
 # SVE_BENCH_ADDITIONAL_CALLSETS=("survivor")
-# SVE_BENCH_ADDITIONAL_COLS=FILTER_PASS,FILTER_PASS_bnd1,FILTER_PASS_bnd2
-# SVE_BENCH_LIMIT_TO_CALLSETS=    # Comma-separated; empty = all callsets
+# SVE_BENCH_ADDITIONAL_COLS=("FILTER_PASS" "FILTER_PASS_bnd1" "FILTER_PASS_bnd2")
+# SVE_BENCH_LIMIT_TO_CALLSETS=()  # Empty array = all callsets
 # SVE_BENCH_SKIP_FILTERING=false
 
 # Custom validation set (overrides per-sample default from _sample_params.py)

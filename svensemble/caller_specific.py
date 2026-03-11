@@ -356,13 +356,53 @@ def manta_preprocess_evts_only(manta_df: pd.DataFrame, caller_params: dict|None 
 def manta_preprocess_bnds_only(manta_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
     """
     Preprocessing for Manta BND entries only.
+
+    Manta BND records do not carry an EVENT INFO field; instead each record has
+    a MATEID pointing to its partner.  A shared INFO_EVENT is derived as
+    min(ID, MATEID) so that both mates in a pair produce the same key, which
+    is required by bnd_to_bp for correct pairing.
     """
     manta_df_ = manta_df.copy()
+
+    # Derive shared pairing key from ID and MATEID.
+    # INFO_MATEID is parsed as a one-element tuple; extract the scalar first.
+    mateid_first = manta_df_['INFO_MATEID'].apply(
+        lambda x: x[0] if isinstance(x, (list, tuple)) else x
+    )
+    manta_df_.loc[:, 'INFO_EVENT'] = pd.concat(
+        [manta_df_['ID'], mateid_first], axis=1
+    ).min(axis=1)
+
     manta_df_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(manta_df_['INFO_CIPOS'])
 
+    # INFO_CIEND is not meaningful for BND records (typically None); drop without splitting.
     cols_to_drop = ['INFO_CIPOS', 'INFO_CIEND']
-    manta_df_ = manta_df_.drop(columns=cols_to_drop)
+    manta_df_ = manta_df_.drop(columns=cols_to_drop, errors='ignore')
     return manta_preprocess_common(manta_df_, caller_params)
+
+
+def manta_post_bps(bp_df: pd.DataFrame) -> pd.DataFrame:
+    """Post-process Manta breakpoints after bnd_to_bp conversion.
+
+    Collapses per-breakend pair-count columns into single columns using the
+    mean of both breakends, then drops the per-breakend originals.
+    Columns that were already identical between breakends (and thus kept as a
+    single column by bnd_to_bp) are left untouched.
+    """
+    _PAIR_COUNT_COLS = [
+        'INFO_PAIR_COUNT',
+        'INFO_BND_PAIR_COUNT',
+        'INFO_UPSTREAM_PAIR_COUNT',
+        'INFO_DOWNSTREAM_PAIR_COUNT',
+    ]
+    for col in _PAIR_COUNT_COLS:
+        bnd1 = f'{col}_bnd1'
+        bnd2 = f'{col}_bnd2'
+        if col not in bp_df.columns and bnd1 in bp_df.columns and bnd2 in bp_df.columns:
+            bp_df.loc[:, col] = bp_df[[bnd1, bnd2]].astype(float).mean(axis=1)
+            bp_df = bp_df.drop(columns=[bnd1, bnd2])
+
+    return bp_df
 
 
 def delly_preprocess_common(delly_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
@@ -474,6 +514,16 @@ def sniffles_preprocess_common(
     sniffles_df_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = _sniffles_cipos_from_stdev(
         sniffles_df_['INFO_STDEV_POS']
     )
+
+    # Coverage field includes 5 separate metrics in different parts of the SV
+    sniffles_df_.loc[:, ['INFO_COVERAGE_1', 'INFO_COVERAGE_2', 'INFO_COVERAGE_3', 'INFO_COVERAGE_4', 'INFO_COVERAGE_5']] = (
+        pd.DataFrame(
+            sniffles_df_['INFO_COVERAGE'].tolist(),
+            index=sniffles_df_.index,
+            dtype=float,
+        ).values
+    )
+    sniffles_df_ = sniffles_df_.drop(columns=['INFO_COVERAGE'])
 
     # Sniffles2 reports negative SVLEN for deletions; convert to positive for consistency
     del_mask = sniffles_df_['INFO_SVTYPE'] == 'DEL'
@@ -596,7 +646,7 @@ parse_recipes: dict[str, dict] = {
         'preprocess_bnds': manta_preprocess_bnds_only,
         'preprocess_evts': manta_preprocess_evts_only,
         'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
-        'post_bps': None,
+        'post_bps': manta_post_bps,
     },
     'manta_diploid': {
         'bnd_svtypes': ['BND', 'INV'],
@@ -604,7 +654,7 @@ parse_recipes: dict[str, dict] = {
         'preprocess_bnds': manta_preprocess_bnds_only,
         'preprocess_evts': manta_preprocess_evts_only,
         'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
-        'post_bps': None,
+        'post_bps': manta_post_bps,
     },
     'sniffles': {
         'bnd_svtypes': ['BND'],

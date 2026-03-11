@@ -109,7 +109,7 @@ training_set_list_presets = {
         'delly+manta_candidate',
         'delly+manta_diploid'
     ],
-    'sniffles': [
+    'sniffles_preset': [
         'sniffles',
         'sniffles+gridss',
         'sniffles+manta_candidate',
@@ -213,7 +213,7 @@ gridss_params = default_params | {
 gnomad_params = default_params | {
     'source': 'gnomad',
     'filter_cols': ['PASS'],
-    'info_cols_mandatory': ['EVIDENCE', 'SVTYPE', 'CHR2', 'POS2', 'END', 'END2', 'CPX_INTERVALS', 'SVLEN'],
+    'info_cols_mandatory': ['EVIDENCE', 'SVTYPE', 'CHR2', 'POS2', 'END', 'END2', 'CPX_INTERVALS', 'SVLEN', 'ALGORITHMS', 'AF', 'BOTHSIDES_SUPPORT'],
     'info_cols_pred': [],
     'parse_format': False,
     'svlen_source': 'svlen',
@@ -316,6 +316,14 @@ huddleston_params = default_params | {
     }
 }
 
+hgsvc2_params = default_params | {
+    'info_cols_mandatory': ['SVTYPE', 'SVLEN'],
+    'parse_format': True,
+    'format_cols': ['GT'],
+    'svlen_source': 'svlen',
+    'svlens': (50, np.inf)
+}
+
 gridss_H_params = gridss_params | {
     'bps_path': 'gridss_H.bps.csv',
 }
@@ -353,7 +361,8 @@ sniffles_filters = [
 sniffles_info_mandatory_cols = [
     'SVTYPE',
     'SVLEN',
-    'CHR2'
+    'CHR2',
+    'COVERAGE'
 ]
 # INFO fields from Sniffles2 VCF that will be used for call posterior probability estimation
 sniffles_info_pred_cols = [
@@ -364,7 +373,11 @@ sniffles_info_pred_cols = [
     'VAF',
     'STDEV_POS',
     'STDEV_LEN',
-    'COVERAGE',
+    'COVERAGE_1',
+    'COVERAGE_2',
+    'COVERAGE_3',
+    'COVERAGE_4',
+    'COVERAGE_5',
     'COVERAGE_VAR',
     'AC',
     'CONSENSUS_SUPPORT',
@@ -407,6 +420,7 @@ caller_param_dict = {
     'hg002_val': hg002_params,
     'huddleston': huddleston_params,
     'hg00514_val': hg00514_params,
+    'hgsvc2': hgsvc2_params,
     'survivor': survivor_params,
     'gridss_H': gridss_H_params
 }

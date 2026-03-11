@@ -12,6 +12,7 @@ from . import benchmark
 from . import models
 from . import chunk_match
 from . import matched_breakpoints
+from . import ground_truth
 
 __all__ = [
     "vcfparse",
@@ -23,5 +24,6 @@ __all__ = [
     "benchmark",
     "chunk_match",
     "models",
-    "matched_breakpoints"
+    "matched_breakpoints",
+    "ground_truth",
 ]

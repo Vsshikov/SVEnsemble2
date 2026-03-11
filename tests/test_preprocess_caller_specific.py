@@ -173,6 +173,27 @@ class TestMantaPreprocessBndsOnly:
         result = cs.manta_preprocess_bnds_only(make_manta_bnd_df())
         assert_missing_columns(result, ['INFO_POS2'])
 
+    def test_info_event_derived_from_mateid(self):
+        """INFO_EVENT must be non-null and shared between paired BND records."""
+        df = make_manta_bnd_df(n=4)
+        result = cs.manta_preprocess_bnds_only(df)
+        assert result['INFO_EVENT'].notna().all(), "INFO_EVENT must not be null after preprocessing"
+        # Pairs: (0,1) and (2,3) must share the same INFO_EVENT within each pair.
+        assert result.iloc[0]['INFO_EVENT'] == result.iloc[1]['INFO_EVENT']
+        assert result.iloc[2]['INFO_EVENT'] == result.iloc[3]['INFO_EVENT']
+        assert result.iloc[0]['INFO_EVENT'] != result.iloc[2]['INFO_EVENT']
+
+    def test_info_event_is_min_of_id_and_mateid(self):
+        """Shared key must equal min(ID, MATEID) so bnd_to_bp can form pairs."""
+        df = make_manta_bnd_df(n=2)
+        result = cs.manta_preprocess_bnds_only(df)
+        expected = min('manta_bnd_0', 'manta_bnd_1')
+        assert (result['INFO_EVENT'] == expected).all()
+
+    def test_info_ciend_dropped(self):
+        result = cs.manta_preprocess_bnds_only(make_manta_bnd_df())
+        assert_missing_columns(result, ['INFO_CIEND'])
+
 
 class TestMantaPreprocessCommon:
     def test_format_splitting_enabled(self):

@@ -43,14 +43,22 @@ IFS=$'\t' read -r SVE_MODEL SVE_TRAINING_SET _svtypes _svlen_lower \
 
 logI "task=${SLURM_ARRAY_TASK_ID}  model=${SVE_MODEL}  training_set=${SVE_TRAINING_SET}  svtypes='${_svtypes}'  svlen_lower='${_svlen_lower}'"
 
-# Build benchmark flags from sourced config and per-task parameters
+# Build benchmark flags from sourced config and per-task parameters.
+# Array variables are joined with commas for the Python CLI (which splits on ',').
+_join_csv() { local IFS=,; echo "$*"; }
+
 _bench_flags=""
 [[ -n "$SVE_BENCH_SVLEN_UPPER" ]]                         && _bench_flags+=" --svlen_upper $SVE_BENCH_SVLEN_UPPER"
 [[ -n "$SVE_BENCH_VAL_MATCH_MARGIN" ]]                    && _bench_flags+=" --val_match_margin $SVE_BENCH_VAL_MATCH_MARGIN"
 [[ -n "$SVE_BENCH_VAL_MATCH_INSERT_SIZE_THRESHOLD" ]]     && _bench_flags+=" --val_match_insert_size_threshold $SVE_BENCH_VAL_MATCH_INSERT_SIZE_THRESHOLD"
-[[ -n "$SVE_BENCH_ADDITIONAL_CALLSETS" ]]                 && _bench_flags+=" --additional_callsets $SVE_BENCH_ADDITIONAL_CALLSETS"
-[[ -n "$SVE_BENCH_ADDITIONAL_COLS" ]]                     && _bench_flags+=" --additional_cols $SVE_BENCH_ADDITIONAL_COLS"
-[[ -n "$SVE_BENCH_LIMIT_TO_CALLSETS" ]]                   && _bench_flags+=" --limit_to_callsets $SVE_BENCH_LIMIT_TO_CALLSETS"
+
+_csv=$(_join_csv "${SVE_BENCH_ADDITIONAL_CALLSETS[@]}")
+[[ -n "$_csv" ]]                                          && _bench_flags+=" --additional_callsets $_csv"
+_csv=$(_join_csv "${SVE_BENCH_ADDITIONAL_COLS[@]}")
+[[ -n "$_csv" ]]                                          && _bench_flags+=" --additional_cols $_csv"
+_csv=$(_join_csv "${SVE_BENCH_LIMIT_TO_CALLSETS[@]}")
+[[ -n "$_csv" ]]                                          && _bench_flags+=" --limit_to_callsets $_csv"
+
 [[ "$SVE_BENCH_SKIP_FILTERING" == "true" ]]               && _bench_flags+=" --skip_filtering"
 [[ -n "$SVE_BENCH_VAL_SET_PATH" ]]                        && _bench_flags+=" --val_set_path $SVE_BENCH_VAL_SET_PATH"
 [[ -n "$SVE_BENCH_VAL_SET_NAME" ]]                        && _bench_flags+=" --val_set_name $SVE_BENCH_VAL_SET_NAME"

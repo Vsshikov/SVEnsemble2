@@ -76,6 +76,11 @@ SVE_MEM=32G
 # Default model set — run configs that need additional models override this.
 SVE_MODELS=(
     "unbiased"
+    "unbiased_GT"
+    "unbiased_xgb"
+    "unbiased_xgb_GT"
+    "unbiased_d31"
+    "unbiased_GT_d31"
 )
 
 # Callsets whose VCFs are parsed into raw breakpoints during the preprocess
@@ -160,9 +165,14 @@ SVE_BENCH_VAL_MATCH_INSERT_SIZE_THRESHOLD=0.7
 
 # Extra callsets and columns included in all benchmark outputs.
 # Run configs override these when needed.
-SVE_BENCH_ADDITIONAL_CALLSETS=("survivor")
-SVE_BENCH_ADDITIONAL_COLS=FILTER_PASS,FILTER_PASS_bnd1,FILTER_PASS_bnd2
-SVE_BENCH_LIMIT_TO_CALLSETS=
+SVE_BENCH_ADDITIONAL_CALLSETS=(
+    "survivor"
+    "gridss_H"
+)
+SVE_BENCH_ADDITIONAL_COLS=(
+    "FILTER_PASS"
+)
+SVE_BENCH_LIMIT_TO_CALLSETS=()
 SVE_BENCH_SKIP_FILTERING=false
 
 # Custom validation set override (leave empty to use per-sample default from _sample_params.py).

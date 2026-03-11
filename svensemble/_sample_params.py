@@ -5,6 +5,7 @@ default_model_name = 'unbiased'
 sample_val_set_template = {
     'name': '',
     'path': Path(''),
+    'raw_path': Path(''),
     'meta': {},
     'callset_params': {}
 }
@@ -12,69 +13,87 @@ sample_val_set_template = {
 sample_val_sets = {
     'NA12878': {
         'name': 'kosugi',
-        'path': Path(f'data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bps.csv'),
+        'path': Path('data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bps.csv'),
+        'raw_path': Path('data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bed'),
         'meta': {
             'svtypes': ['DEL', 'INS', 'DUP', 'INV']
         }
     },
     'NA12878_hg19': {
         'name': 'parikh',
-        'path': Path(f'data/Parikh_validation/NA12878_metasv_all.hg19.bps.csv'),
+        'path': Path('data/Parikh_validation/NA12878_metasv_all.hg19.bps.csv'),
+        'raw_path': Path('data/Parikh_validation/NA12878_metasv_all.hg19.bed'),
         'meta': {
             'svtypes': ['DEL', 'INS', 'DUP', 'INV']
         }
     },
     'NA12878_5x_test': {
         'name': 'kosugi',
-        'path': Path(f'data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bps.csv'),
+        'path': Path('data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bps.csv'),
+        'raw_path': Path('data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bed'),
         'meta': {
             'svtypes': ['DEL', 'INS', 'DUP', 'INV']
         }
     },
     'NA12878_8x': {
         'name': 'kosugi',
-        'path': Path(f'data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bps.csv'),
+        'path': Path('data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bps.csv'),
+        'raw_path': Path('data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bed'),
         'meta': {
             'svtypes': ['DEL', 'INS', 'DUP', 'INV']
         }
     },
     # 'CHM13': {
     #     'name': 'chm13_val',
-    #     'path': Path(f'data/CHM13_validation/supporting_variants_for_nstd137.bps.csv')
+    #     'path': Path('data/CHM13_validation/supporting_variants_for_nstd137.bps.csv'),
+    #     'raw_path': Path('data/CHM13_validation/supporting_variants_for_nstd137.csv'),
     # },
     'CHM13': {
         'name': 'huddleston',
-        'path': Path(f'data/CHM13_validation/CHM13_SVs.annotated.bps.csv'),
+        'path': Path('data/CHM13_validation/CHM13_SVs.annotated.bps.csv'),
+        'raw_path': Path('data/CHM13_validation/CHM13_SVs.annotated.vcf'),
         'meta': {
             'svtypes': ['DEL', 'INS', 'INV']
         }
     },
     'HG002': {
         'name': 'hg002_val',
-        'path': Path(f'data/HG002_validation/HG002_validation.bps.csv'),
+        'path': Path('data/HG002_validation/HG002_validation.bps.csv'),
+        'raw_path': Path('data/HG002_validation/HG002_validation.vcf.gz'),
         'meta': {
             'svtypes': ['DEL', 'INS']
         }
     },
     'HG002_30x': {
         'name': 'hg002_val',
-        'path': Path(f'data/HG002_validation/HG002_validation.bps.csv'),
+        'path': Path('data/HG002_validation/HG002_validation.bps.csv'),
+        'raw_path': Path('data/HG002_validation/HG002_validation.vcf.gz'),
         'meta': {
             'svtypes': ['DEL', 'INS']
         }
     },
     'HG00514': {
         'name': 'hg00514_val',
-        'path': Path(f'data/HG00514_validation/HG00514_validation.bps.csv'),
+        'path': Path('data/HG00514_validation/HG00514_validation.bps.csv'),
+        'raw_path': Path('data/HG00514_validation/downloads/nstd152.GRCh38.variant_call.vcf.gz'),
         'meta': {
             'svtypes': ['DEL', 'INS', 'DUP', 'INV']
         }
     },
     'NA12878_long': {
         'name': 'kosugi',
-        'path': Path(f'data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bps.csv'),
+        'path': Path('data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bps.csv'),
+        'raw_path': Path('data/Kosugi_validation/NA12878_DGV-2016_LR-assembly.hg38.bed'),
         'meta': {
             'svtypes': ['DEL', 'INS', 'DUP', 'INV']
+        }
+    },
+    'NA12878_hgsvc2': {
+        'name': 'hgsvc2',
+        'path': Path('data/NA12878_hgsvc2/NA12878_hgsvc2.bps.csv'),
+        'raw_path': Path('data/NA12878_hgsvc2/downloads/variants_freeze4_sv_insdel_alt.vcf.gz'),
+        'meta': {
+            'svtypes': ['DEL', 'INS']
         }
     },
 }

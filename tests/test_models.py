@@ -255,8 +255,8 @@ class TestModelDispatch:
     def test_unbiased_xgb_resolves(self):
         assert models.model_dispatch["unbiased_xgb"] is models.train_unbiased_xgb
 
-    def test_unbiased_concat_xgb_resolves(self):
-        assert models.model_dispatch["unbiased_concat_xgb"] is models.train_unbiased_concat_xgb
+    def test_unbiased_xgb_concat_resolves(self):
+        assert models.model_dispatch["unbiased_xgb_concat"] is models.train_unbiased_xgb_concat
 
     def test_all_dispatch_values_are_callable(self):
         for key, func in models.model_dispatch.items():

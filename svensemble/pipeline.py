@@ -306,8 +306,8 @@ def parse_preprocess_raw(
         if not vcf_path.exists():
             raise FileNotFoundError(
                 f"VCF not found for '{callset_name}' at {vcf_path}. "
-                "If this caller was not run, remove it from SVE_CALLSETS or "
-                "the --callsets argument."
+                "Run the caller for it first or remove it from SVE_CALLSETS "
+                "amd the --callsets argument."
             )
         if verbose:
             _log(f"Parsing callset '{callset_name}' into raw breakpoints")

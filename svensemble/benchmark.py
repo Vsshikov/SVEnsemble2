@@ -768,6 +768,63 @@ def get_truth_count(
     return len(truth_filtered)
 
 
+_val_set_preprocessors = {
+    'kosugi': lambda sample, raw: preprocess_kosugi_val_set(sample, raw),
+    'parikh': lambda sample, raw: preprocess_kosugi_val_set(sample, raw),
+    'hg002_val': lambda sample, raw: preprocess_hg002_val_set(sample, raw),
+    'huddleston': lambda sample, raw: preprocess_huddleston_val_set(sample, raw),
+    'chm13_val': lambda sample, raw: preprocess_chm13_val_set(sample, raw),
+    'hg00514_val': lambda sample, raw: preprocess_hg00514_val_set(sample, raw),
+    'hgsvc2': lambda sample, raw: preprocess_hgsvc2_val_set(sample, raw),
+}
+
+
+def ensure_val_set(sample_config: dict, force_rerun: bool = False) -> Path:
+    """Check that the validation breakpoint CSV exists; generate it if not.
+
+    Args:
+        sample_config: A *single-sample* config dict — the inner dict for one
+            sample as returned by ``create_config_dict(name)[name]``.
+            Must contain a ``'val_set'`` key with ``path``, ``name``, and
+            ``raw_path``.
+        force_rerun: Regenerate even when the output CSV already exists.
+
+    Returns:
+        Path to the (possibly just-created) breakpoint CSV.
+
+    Raises:
+        FileNotFoundError: If the raw input file is missing.
+        KeyError: If no preprocessor is registered for the val set name.
+    """
+    val_cfg = sample_config['val_set']
+    out_path = Path(val_cfg['path'])
+
+    if out_path.exists() and not force_rerun:
+        return out_path
+
+    name = val_cfg['name']
+    if name not in _val_set_preprocessors:
+        raise KeyError(
+            f"No preprocessor registered for val set '{name}'. "
+            f"Available: {list(_val_set_preprocessors)}"
+        )
+
+    raw_path = Path(val_cfg.get('raw_path', ''))
+    if not raw_path.name:
+        raise FileNotFoundError(
+            f"No raw_path configured for val set '{name}' — "
+            "add it to sample_val_sets in _sample_params.py"
+        )
+    if not raw_path.exists():
+        raise FileNotFoundError(
+            f"Raw input for val set '{name}' not found at {raw_path}. "
+            "Download it first."
+        )
+
+    _val_set_preprocessors[name](sample_config, raw_path)
+    return out_path
+
+
 def preprocess_hg002_val_set(sample, vcf_path, force_rerun=False, long_val=False):
     """
     Preprocess the HG002 validation VCF file for benchmarking by parsing, annotating,
@@ -975,6 +1032,67 @@ def preprocess_hg00514_val_set(sample, vcf_path, force_rerun=False):
         hg00514_bnd_df = evts.event_to_bnd(hg00514_vcf_df, bnd2_pos='end')
         hg00514_bp_df = bnds.bnd_to_bp(hg00514_bnd_df)
         hg00514_bp_df.to_csv(out_path, index=False)
+
+
+def preprocess_hgsvc2_val_set(sample, vcf_path, force_rerun=False, sample_name='NA12878'):
+    """
+    Preprocess the HGSVC2 freeze-4 integrated SV callset for benchmarking.
+
+    The HGSVC2 VCF is a multi-sample file (35 genomes).  This function
+    parses it via ``parse_vcf_to_df``, filters for records where
+    *sample_name* carries at least one ALT allele, restricts to canonical
+    chromosomes and DEL/INS types, then converts events to breakpoints.
+
+    Args:
+        sample (dict): Sample config with ``sample['val_set']['path']`` pointing
+            to the desired output CSV.
+        vcf_path (str or Path): Path to ``variants_freeze4_sv_insdel_alt.vcf.gz``.
+        force_rerun (bool, optional): If True, regenerate even if the output exists.
+        sample_name (str, optional): Sample to extract from the multi-sample VCF.
+
+    Saves:
+        CSV file at ``sample['val_set']['path']`` with breakpoint-format variants.
+    """
+    out_path = Path(sample['val_set']['path'])
+
+    if not out_path.exists() or force_rerun:
+        hgsvc2_vcf = pysam.VariantFile(str(vcf_path))
+        hgsvc2_df, _ = vcfp.parse_vcf_to_df(
+            hgsvc2_vcf,
+            caller_params=caller_params.hgsvc2_params,
+            sample_name=sample_name
+        )
+
+        # Filter to records where the sample carries at least one ALT allele
+        hgsvc2_df = hgsvc2_df[
+            hgsvc2_df['SAMPLE_GT'].apply(
+                lambda gt: gt is not None and any(a is not None and a > 0 for a in gt)
+            )
+        ]
+
+        # SVTYPE and SVLEN are per-allele tuples — unpack first element
+        hgsvc2_df.loc[:, 'INFO_SVTYPE'] = hgsvc2_df['INFO_SVTYPE'].apply(
+            lambda x: x[0] if isinstance(x, tuple) else x
+        )
+        hgsvc2_df.loc[:, 'INFO_SVLEN'] = hgsvc2_df['INFO_SVLEN'].apply(
+            lambda x: abs(int(x[0])) if isinstance(x, tuple) else abs(int(x))
+        )
+
+        # Restrict to canonical chromosomes and supported SV types
+        hgsvc2_df = hgsvc2_df[hgsvc2_df['CHROM'].isin(sv_utils.human_chroms)]
+        hgsvc2_df = hgsvc2_df[hgsvc2_df['INFO_SVTYPE'].isin(['DEL', 'INS'])]
+
+        hgsvc2_df.loc[:, 'INFO_CHR2'] = hgsvc2_df['CHROM']
+        hgsvc2_df.loc[:, 'INFO_EVENT'] = hgsvc2_df['ID']
+        hgsvc2_df.loc[:, 'INFO_CIPOS_l'] = -10
+        hgsvc2_df.loc[:, 'INFO_CIPOS_r'] = 10
+        hgsvc2_df.loc[:, 'INFO_CIEND_l'] = -10
+        hgsvc2_df.loc[:, 'INFO_CIEND_r'] = 10
+
+        hgsvc2_bnd_df = evts.event_to_bnd(hgsvc2_df)
+        hgsvc2_bp_df = bnds.bnd_to_bp(hgsvc2_bnd_df)
+
+        hgsvc2_bp_df.to_csv(out_path, index=False)
 
 
 def preprocess_huddleston_val_set(sample, vcf_path, force_rerun=False):

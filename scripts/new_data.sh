@@ -49,8 +49,11 @@ done
 # default_run.sh is shared across all samples via symlink.
 ln -s "$SCRIPTS_DIR/config/default_run.sh" "$SAMPLE_DIR/scripts/config/default_run.sh"
 
-# TEMPLATE.sh gives every sample a quick-copy starting point for new runs.
-ln -s "$SCRIPTS_DIR/config/runs/TEMPLATE.sh" "$SAMPLE_DIR/scripts/config/runs/TEMPLATE.sh"
+# Shared run configs (TEMPLATE, svensemble_full, svensemble_train_predict, etc.)
+for run_cfg in "$SCRIPTS_DIR"/config/runs/*.sh; do
+    [[ -f "$run_cfg" ]] || continue
+    ln -s "$run_cfg" "$SAMPLE_DIR/scripts/config/runs/$(basename "$run_cfg")"
+done
 
 # --------------- Generate sample.sh skeleton ---------------------------------
 cat > "$SAMPLE_DIR/scripts/config/sample.sh" <<SAMPLE_EOF

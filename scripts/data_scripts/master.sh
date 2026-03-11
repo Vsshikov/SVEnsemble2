@@ -5,7 +5,7 @@ set -euo pipefail
 
 _MASTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _DEFAULT_CFG="${_MASTER_DIR}/config/runs/default.sh"
-SOURCE_FILE=$(realpath "${1:-$_DEFAULT_CFG}")
+SOURCE_FILE=$(realpath -s "${1:-$_DEFAULT_CFG}")
 unset _MASTER_DIR _DEFAULT_CFG
 
 [[ -f "$SOURCE_FILE" ]] || { echo "Usage: $0 [<config/runs/*.sh>]  (no default config found at $SOURCE_FILE)" >&2; exit 1; }

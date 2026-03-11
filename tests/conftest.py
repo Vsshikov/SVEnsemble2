@@ -134,18 +134,22 @@ def make_manta_evt_df(n: int = 2) -> pd.DataFrame:
 
 
 def make_manta_bnd_df(n: int = 4) -> pd.DataFrame:
-    """Synthetic Manta BND DataFrame (pairs of breakends)."""
+    """Synthetic Manta BND DataFrame (pairs of breakends).
+
+    Reflects real Manta VCF output: BND records have no EVENT INFO field
+    (INFO_EVENT is None) and carry a MATEID tuple pointing to the partner.
+    manta_preprocess_bnds_only is responsible for deriving INFO_EVENT.
+    """
     rows = []
     for i in range(n):
-        event = f'manta_bnd_event_{i // 2}'
         rows.append({
             'CHROM': 'chr1', 'POS': 2000 + i * 100,
             'ID': f'manta_bnd_{i}', 'REF': 'N',
             'ALT': f'N[chr2:{3000 + i * 100}[',
             'QUAL': 80.0, 'INFO_END': 3000 + i * 100,
             'FILTER_PASS': 1,
-            'INFO_SVTYPE': 'BND', 'INFO_EVENT': event,
-            'INFO_MATEID': f'manta_bnd_{i ^ 1}',
+            'INFO_SVTYPE': 'BND', 'INFO_EVENT': None,
+            'INFO_MATEID': (f'manta_bnd_{i ^ 1}',),
             'INFO_CIPOS': (-3, 3), 'INFO_CIEND': None,
             'INFO_POS2': 0, 'INFO_HOMLEN': (0,),
             'INFO_CHR2': None,

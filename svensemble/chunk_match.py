@@ -291,6 +291,8 @@ def get_pairwise_matches(
         col_retain_list.append('INFO_SVLEN')
     if 'svensemble2_insert_size' in zipped_bp_df.columns:
         col_retain_list.append('svensemble2_insert_size')
+    if not set(col_retain_list).issubset(zipped_bp_df.columns):
+        raise ValueError(f"Some of the required columns are missing from the input dataframe: {set(col_retain_list) - set(zipped_bp_df.columns)}")
     zipped_bp_df_ = zipped_bp_df[col_retain_list].copy()
 
     zipped_bp_df_.loc[:, 'insert_size'] = bps.get_insert_size(zipped_bp_df_)
