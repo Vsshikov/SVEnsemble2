@@ -35,6 +35,7 @@ unset _RUN_DIR
 # RUN_GRIDSS=true                 # Run GRIDSS SV caller
 # RUN_DELLY=true                  # Run Delly SV caller
 # RUN_SNIFFLES=true               # Run Sniffles2 SV caller (long reads)
+# RUN_SNIFFLES_207=true           # Run Sniffles2 v2.0.7 SV caller (long reads)
 # RUN_SEVERUS=true                # Run Severus SV caller (long reads)
 # RUN_SURVIVOR=true               # Run SURVIVOR consensus caller
 # RUN_SVENSEMBLE2=true            # Run SVEnsemble2 pipeline
@@ -75,6 +76,7 @@ unset _RUN_DIR
 #   sniffles, sniffles+gridss, sniffles+manta_candidate, sniffles+manta_diploid,
 #   sniffles+delly, sniffles+manta_candidate+delly, sniffles+manta_diploid+delly,
 #   sniffles+gridss+manta_candidate, sniffles+gridss+manta_diploid
+#   sniffles_207, sniffles_207+gridss, sniffles_207+manta_candidate, etc.
 # SVE_TRAINING_SETS=(
 #     "gridss"
 #     "manta_diploid"
@@ -89,7 +91,7 @@ unset _RUN_DIR
 
 # Breakpoint matching parameters
 # SVE_MATCH_MAX_DIST=200          # Max distance (bp) for breakpoint matching
-# SVE_MATCH_INSERT_SIZE_THRESHOLD=0.7  # Insert size similarity threshold
+# SVE_MATCH_INSERT_DELTA_THRESHOLD=0.7  # Insert size similarity threshold
 
 # --------------- Benchmarking parameters -------------------------------------
 # SV type filter combinations — one benchmark job per entry (Cartesian with SVLEN_LOWER).
@@ -108,7 +110,7 @@ unset _RUN_DIR
 
 # Validation matching
 # SVE_BENCH_VAL_MATCH_MARGIN=200
-# SVE_BENCH_VAL_MATCH_INSERT_SIZE_THRESHOLD=0.7
+# SVE_BENCH_VAL_MATCH_INSERT_DELTA_THRESHOLD=0.7
 
 # Additional callsets and columns in benchmark output (bash arrays)
 # SVE_BENCH_ADDITIONAL_CALLSETS=("survivor")

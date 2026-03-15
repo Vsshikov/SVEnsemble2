@@ -11,8 +11,8 @@ module load micromamba CUDA/11.8
 
 export CUDA_PATH="/stornext/System/data/software/rhel/9/base/nvidia/CUDA/11.8"
 
-training_set_name=$1
-sample_name=$2
-model_name=$3
+TRAINING_SET_NAME=$1
+SAMPLE_NAME=$2
+MODEL_NAME=$3
 
-micromamba run -n SVEnsemble2 python /home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/svensemble/sv_shap.py --training_set_name $training_set_name --sample_name $sample_name --model_name $model_name
+micromamba run -n SVEnsemble2 python /home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/svensemble/sv_shap.py --training_set_name $TRAINING_SET_NAME --sample_name $SAMPLE_NAME --model_name $MODEL_NAME

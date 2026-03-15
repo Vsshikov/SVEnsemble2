@@ -175,20 +175,20 @@ def dist_matrix_ref(ref_bp_df: pd.DataFrame, bp_df: pd.DataFrame, which_bnd: str
     return dists
 
 
-def rel_insert_size_matrix_ref(ref_bp_df, bp_df, insert_size_margin=30, ignore_size=False):
+def rel_insert_delta_matrix_ref(ref_bp_df, bp_df, insert_delta_margin=30, ignore_size=False):
     if ignore_size:
         return np.ones((len(ref_bp_df), len(bp_df)))
 
-    ref_sizes = ref_bp_df['insert_size'].to_numpy(np.float64)[:, np.newaxis]
-    comp_sizes = bp_df['insert_size'].to_numpy(np.float64)[np.newaxis, :]
+    ref_deltas = ref_bp_df['insert_delta'].to_numpy(np.float64)[:, np.newaxis]
+    comp_deltas = bp_df['insert_delta'].to_numpy(np.float64)[np.newaxis, :]
 
     with np.errstate(divide='ignore', invalid='ignore'):
-        ratio = np.where(comp_sizes > 0, ref_sizes / comp_sizes, 0.0)
-        ratio_inv = np.where(ref_sizes > 0, comp_sizes / ref_sizes, 0.0)
+        ratio = np.where(comp_deltas > 0, ref_deltas / comp_deltas, 0.0)
+        ratio_inv = np.where(ref_deltas > 0, comp_deltas / ref_deltas, 0.0)
 
-    insert_matrix = np.minimum(ratio, ratio_inv)
-    both_near_zero = (ref_sizes <= insert_size_margin) & (comp_sizes <= insert_size_margin)
-    return np.where(both_near_zero, 1.0, insert_matrix)
+    delta_matrix = np.minimum(ratio, ratio_inv)
+    both_near_zero = (ref_deltas <= insert_delta_margin) & (comp_deltas <= insert_delta_margin)
+    return np.where(both_near_zero, 1.0, delta_matrix)
 
 
 def _extract_relative_pos(alt_series: pd.Series) -> np.ndarray:
@@ -241,8 +241,8 @@ def alt_match_matrix(chunk_df: pd.DataFrame, ins_dup_match: bool = False, match_
 
 # def ins_dup_match_matrix(chunk_df: pd.DataFrame, match_dist: int = 30) -> np.ndarray:
 #     """
-#     Generate a match matrix for insertions and duplications based on their insert size.
-#     Each entry where the estimated end of a variant via insert_size is within match_dist of the end of another variant
+#     Generate a match matrix for insertions and duplications based on their insert delta.
+#     Each entry where the estimated end of a variant via insert_delta is within match_dist of the end of another variant
 #     that entry is set to True.
 #     """
 #     est_end_pos_matr =
@@ -250,14 +250,14 @@ def alt_match_matrix(chunk_df: pd.DataFrame, ins_dup_match: bool = False, match_
 
 def _get_match_matrix(
     pos_match_matrix: np.ndarray,
-    insert_matrix: np.ndarray,
+    delta_matrix: np.ndarray,
     alt_match_matrix: np.ndarray,
     triu_mask: np.ndarray,
     cross_source_mask: np.ndarray
 ) -> np.ndarray:
-    # insert_matrix may arrive as float (all-ones sentinel) or bool (threshold result);
+    # delta_matrix may arrive as float (all-ones sentinel) or bool (threshold result);
     # cast to bool so bitwise-and works uniformly under NumPy 2.x
-    return pos_match_matrix & insert_matrix.astype(bool) & alt_match_matrix & ~triu_mask & cross_source_mask
+    return pos_match_matrix & delta_matrix.astype(bool) & alt_match_matrix & ~triu_mask & cross_source_mask
 
 @lru_cache(maxsize=100)
 def _get_triu_mask(n: int) -> np.ndarray:
@@ -267,17 +267,21 @@ def _get_triu_mask(n: int) -> np.ndarray:
 
 def get_pairwise_matches(
     zipped_bp_df: pd.DataFrame,
-    insert_size_threshold: float = 0.7,
+    insert_delta_threshold: float = 0.7,
     max_dist: int = 10,
     ignore_size: bool = False,
     ins_dup_match: bool = False
 ) -> list[tuple[tuple[str, str], tuple[str, str]]]:
     """
-    Match breakpoints from multiple sources based on position and insert size similarity.
+    Match breakpoints from multiple sources based on position and insert delta similarity.
+
+    For intra-chromosomal events the insert delta is the net event size
+    ``abs(insert_size - (pos_diff - 1))``; for inter-chromosomal events it
+    equals the raw insert size.
 
     Args:
         zipped_bp_df (pd.DataFrame): DataFrame containing breakpoint data from multiple sources
-        insert_size_threshold (float): Minimum similarity threshold for insert size (0-1)
+        insert_delta_threshold (float): Minimum similarity threshold for insert delta (0-1)
         max_dist (int): Maximum allowed distance between breakpoints
 
     Returns:
@@ -295,7 +299,16 @@ def get_pairwise_matches(
         raise ValueError(f"Some of the required columns are missing from the input dataframe: {set(col_retain_list) - set(zipped_bp_df.columns)}")
     zipped_bp_df_ = zipped_bp_df[col_retain_list].copy()
 
-    zipped_bp_df_.loc[:, 'insert_size'] = bps.get_insert_size(zipped_bp_df_)
+    raw_insert_size = bps.get_insert_size(zipped_bp_df_)
+
+    same_chrom = zipped_bp_df_['CHROM_bnd1'] == zipped_bp_df_['CHROM_bnd2']
+    pos_diff = zipped_bp_df_['POS_bnd2'] - zipped_bp_df_['POS_bnd1']
+
+    insert_delta = raw_insert_size.copy()
+    insert_delta[same_chrom] = np.abs(
+        raw_insert_size[same_chrom] - (pos_diff[same_chrom] - 1)
+    )
+    zipped_bp_df_.loc[:, 'insert_delta'] = insert_delta
 
     matched_pairs = []
 
@@ -328,13 +341,13 @@ def get_pairwise_matches(
         # Create position match matrix
         pos_match_matrix = (bp1_matrix <= max_dist) & (bp2_matrix <= max_dist)
 
-        # Calculate insert size similarity
+        # Calculate insert delta similarity
         if ignore_size:
-            insert_matrix = np.ones((n, n))
+            delta_matrix = np.ones((n, n))
         else:
-            insert_matrix = (
-                rel_insert_size_matrix_ref(chunk_df, chunk_df)
-                >= insert_size_threshold
+            delta_matrix = (
+                rel_insert_delta_matrix_ref(chunk_df, chunk_df)
+                >= insert_delta_threshold
             )
 
         alt_mask = alt_match_matrix(chunk_df, ins_dup_match=ins_dup_match)
@@ -344,7 +357,7 @@ def get_pairwise_matches(
         triu_mask = _get_triu_mask(n)
 
         # Create final match matrix (cross-source filter applied inside the matrix)
-        match_matrix = _get_match_matrix(pos_match_matrix, insert_matrix, alt_mask, triu_mask, cross_source_mask)
+        match_matrix = _get_match_matrix(pos_match_matrix, delta_matrix, alt_mask, triu_mask, cross_source_mask)
 
         # Check if any matches exist in the matrix
         if np.any(match_matrix):
@@ -487,7 +500,7 @@ def build_matched_bp_df(
 def inner_join_bps(
     bp_df_dict: dict[str, pd.DataFrame],
     ref_callset: str | None = None,
-    insert_size_threshold: float = 0.7,
+    insert_delta_threshold: float = 0.7,
     max_dist: int = 10,
     ids_only: bool = False,
     ignore_size: bool = False
@@ -498,8 +511,8 @@ def inner_join_bps(
     Args:
         bp_df_dict (dict[str, pd.DataFrame]): Dictionary mapping source names
         to their breakpoint DataFrames
-        insert_size_threshold (float, optional): Minimum similarity threshold
-        for insert size. Defaults to 0.7.
+        insert_delta_threshold (float, optional): Minimum similarity threshold
+        for insert delta. Defaults to 0.7.
         max_dist (int, optional): Maximum allowed distance between breakpoints. Defaults to 10.
         ids_only (bool, optional): Whether to return only the event IDs. Defaults to False.
     Returns:
@@ -511,7 +524,7 @@ def inner_join_bps(
     # Find all pairwise matches between breakpoints
     matched_pairs = get_pairwise_matches(
         zipped_bp_df,
-        insert_size_threshold=insert_size_threshold,
+        insert_delta_threshold=insert_delta_threshold,
         max_dist=max_dist,
         ignore_size=ignore_size
     )
@@ -527,7 +540,7 @@ def inner_join_bps(
 def outer_join_bps(
     bp_df_dict: dict,
     ref_callset: str | None = None,
-    insert_size_threshold: float = 0.7,
+    insert_delta_threshold: float = 0.7,
     max_dist: int = 200,
     ids_only: bool = False,
     ignore_size: bool = False
@@ -538,7 +551,7 @@ def outer_join_bps(
     Args:
         bp_df_dict (dict): Dictionary mapping caller names to their breakpoint DataFrames.
         ref_callset (str): Name of the reference callset to use for matching.
-        insert_size_threshold (float, optional): Threshold for insert size similarity. Defaults to 0.7.
+        insert_delta_threshold (float, optional): Threshold for insert delta similarity. Defaults to 0.7.
         max_dist (int, optional): Maximum allowed distance between breakpoints to consider a match. Defaults to 200.
         ids_only (bool, optional): Whether to return only the event IDs. Defaults to False.
 
@@ -550,7 +563,7 @@ def outer_join_bps(
     matched_bp_df = inner_join_bps(
         bp_df_dict=bp_df_dict,
         ref_callset=ref_callset,
-        insert_size_threshold=insert_size_threshold,
+        insert_delta_threshold=insert_delta_threshold,
         max_dist=max_dist,
         ids_only=True,
         ignore_size=ignore_size

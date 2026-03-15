@@ -37,7 +37,7 @@ Threshold selection per callset:
 
 Usage:
     python scripts/compute_metrics.py \\
-        --benchmark_csvs a.benchmark.csv,b.benchmark.csv \\
+        --benchmark_csvs a.benchmark.csv,b.benchmark.csv OR (MUTUALLY EXCLUSIVE) --benchmark_csvs_file paths.txt \\
         --labels callerA,svensemble2_B \\
         --sample_name NA12878 \\
         --svtypes DEL,INS \\
@@ -51,6 +51,12 @@ Usage:
     python scripts/compute_metrics.py \\
         --benchmark_csvs_file paths.txt \\
         ...
+
+    # Or pipe paths from find (or any command) via stdin using '-':
+    find data/ -name '*.benchmark.csv' | python scripts/compute_metrics.py \\
+        --benchmark_csvs_file - \\
+        --sample_name NA12878 \\
+        --svtypes DEL,INS
 """
 
 import os
@@ -199,6 +205,11 @@ def compute_metrics(
         Dict with keys: score_col, is_svensemble2, threshold_used, n, n_pos,
         tp, fp, tn, fn, fn_global, precision, recall, f1, auroc, auprc.
         ``fn_global`` and global recall/f1 are ``nan`` when ``n_truth`` is None.
+        AUROC is always computed on callset-level data only (no padding for
+        missed truth variants) so that it measures score ranking quality.
+        When ``n_truth`` is provided, AUPRC accounts for missed truth variants
+        by treating them as positives with score 0, so the recall axis
+        reflects TP / n_truth.
     """
     df = df.copy()
     df = df.dropna(subset=['is_in_val'])
@@ -216,16 +227,35 @@ def compute_metrics(
     filter_pass = df['FILTER_PASS'].astype(int).values if use_filter_pass else None
 
     n_pos = int(y_true.sum())
-    n_neg = len(y_true) - n_pos
 
-    # AUROC — requires both positive and negative labels
-    if n_pos > 0 and n_neg > 0:
+    # When n_truth is known, truth variants absent from the callset must be
+    # included as positives with score 0 so that sklearn curve metrics use the
+    # correct recall denominator (TP / n_truth instead of TP / n_pos).
+    n_missed = max(n_truth - n_pos, 0) if n_truth is not None else 0
+    if n_missed > 0:
+        y_true_global = np.concatenate([y_true, np.ones(n_missed, dtype=int)])
+        y_score_global = np.concatenate([y_score, np.zeros(n_missed)])
+    else:
+        y_true_global = y_true
+        y_score_global = y_score
+
+    n_pos_global = int(y_true_global.sum())
+    n_neg_global = len(y_true_global) - n_pos_global
+
+    # AUROC — computed on callset-level data only (no padding).
+    # Padding with score-0 fake positives for missed truth variants conflates
+    # caller sensitivity with score ranking quality, producing misleading
+    # sub-0.5 values for callsets with low recall.
+    n_pos_callset = int(y_true.sum())
+    n_neg_callset = len(y_true) - n_pos_callset
+    if n_pos_callset > 0 and n_neg_callset > 0:
         auroc = float(roc_auc_score(y_true, y_score))
     else:
         auroc = float('nan')
 
-    # AUPRC — requires at least one positive
-    auprc = float(average_precision_score(y_true, y_score)) if n_pos > 0 else float('nan')
+    # AUPRC — uses global arrays so the recall axis reflects TP / n_truth
+    # rather than TP / n_pos_callset when n_truth is known.
+    auprc = float(average_precision_score(y_true_global, y_score_global)) if n_pos_global > 0 else float('nan')
 
     at_thr = compute_at_threshold(
         y_true, y_score, threshold,
@@ -423,7 +453,8 @@ if __name__ == '__main__':
     )
     csv_input.add_argument(
         '--benchmark_csvs_file', type=str, default=None,
-        help='Path to a text file with one benchmark CSV path per line.'
+        help='Path to a text file with one benchmark CSV path per line.  '
+             'Use "-" to read paths from stdin (e.g. find … | … --benchmark_csvs_file -).'
     )
     parser.add_argument(
         '--labels', type=str, default=None,
@@ -491,6 +522,15 @@ if __name__ == '__main__':
     # Parse CSV paths
     if args.benchmark_csvs is not None:
         csv_paths = [Path(p.strip()) for p in args.benchmark_csvs.split(sep=',')]
+    elif args.benchmark_csvs_file == '-':
+        lines = sys.stdin.read().splitlines()
+        csv_paths = [
+            Path(line.strip())
+            for line in lines
+            if line.strip() and not line.strip().startswith('#')
+        ]
+        if not csv_paths:
+            raise ValueError("No paths received on stdin.")
     else:
         list_file = Path(args.benchmark_csvs_file)
         if not list_file.exists():

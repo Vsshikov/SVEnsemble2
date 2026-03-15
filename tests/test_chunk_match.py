@@ -10,7 +10,7 @@ relative_pos values and chunker groups all chr1 DEL rows together.
 
 Source names ('delly', 'sniffles') must be keys in _caller_params.caller_param_dict
 because get_insert_size dispatches on them.  Both callers use svlen_source='svlen',
-so insert_size is derived from INFO_SVLEN (non-zero only for INFO_SVTYPE='INS').
+so raw insert_size is derived from INFO_SVLEN (non-zero only for INFO_SVTYPE='INS').
 """
 
 import numpy as np
@@ -230,11 +230,11 @@ class TestGetPairwiseMatches:
         pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True)
         assert pairs == []
 
-    def test_insert_size_filter_blocks_dissimilar_ins(self):
+    def test_insert_delta_filter_blocks_dissimilar_ins(self):
         """
         Two INS calls with very different SVLEN should not match when
-        insert_size_threshold=0.7 is applied.
-        insert_size ratio = 100/200 = 0.50 < 0.70 → no match.
+        insert_delta_threshold=0.7 is applied.
+        insert_delta ratio = 101/201 ≈ 0.50 < 0.70 → no match.
         With ignore_size=True the same pair should match.
         """
         df = _df(
@@ -245,21 +245,21 @@ class TestGetPairwiseMatches:
         assert len(pairs_ignored) == 1, "Should match when size is ignored"
 
         pairs_filtered = get_pairwise_matches(
-            df, max_dist=10, ignore_size=False, insert_size_threshold=0.7
+            df, max_dist=10, ignore_size=False, insert_delta_threshold=0.7
         )
         assert len(pairs_filtered) == 0, "Should not match when sizes differ by >30%"
 
-    def test_insert_size_filter_passes_similar_ins(self):
+    def test_insert_delta_filter_passes_similar_ins(self):
         """
         INS calls with similar SVLEN (ratio ≥ 0.7) should still match.
-        100/130 ≈ 0.77 ≥ 0.70 → match expected.
+        insert_delta ratio = 101/131 ≈ 0.77 ≥ 0.70 → match expected.
         """
         df = _df(
             _row('delly',    'ev1', 100, 100, svtype='INS', svlen=100),
             _row('sniffles', 'ev2', 102, 102, svtype='INS', svlen=130),
         )
         pairs = get_pairwise_matches(
-            df, max_dist=10, ignore_size=False, insert_size_threshold=0.7
+            df, max_dist=10, ignore_size=False, insert_delta_threshold=0.7
         )
         assert len(pairs) == 1
 

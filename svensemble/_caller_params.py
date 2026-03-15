@@ -228,6 +228,24 @@ gnomad_params = default_params | {
     'input_path': 'gnomad.vcf.gz'
 }
 
+gnomad_filtered_params = gnomad_params | {
+    'method_cipos': {
+        'SR': 10,
+        'PE': 100,
+    },
+    'bps_path': 'gnomad_filtered.bps.csv',
+    'input_path': 'gnomad_filtered.vcf.gz'
+}
+
+gnomad_pass_params = gnomad_params | {
+    'method_cipos': {
+        'SR': 10,
+        'PE': 100,
+    },
+    'bps_path': 'gnomad_pass.bps.csv',
+    'input_path': 'gnomad_pass.vcf.gz'
+}
+
 manta_candidate_params = default_params | {
     'source': 'manta_candidate',
     'base_cols': base_cols + ['INFO_END'],
@@ -405,8 +423,64 @@ sniffles_H_params = sniffles_params | {
     'bps_path': 'sniffles_H.bps.csv',
 }
 
+# Parameters for Sniffles2 v2.0.7 (Kosugi et al. 2024 version)
+# v2.0.7 has a smaller filter set and different INFO fields compared to v2.7.x
+sniffles_207_filters = [
+    'PASS',
+    'GT',
+    'SUPPORT_MIN',
+    'STDEV_POS',
+    'STDEV_LEN',
+    'SVLEN_MIN',
+    'COV_MIN',
+    'COV_CHANGE',
+    'STRAND',
+    'NM'
+]
+sniffles_207_info_mandatory_cols = [
+    'SVTYPE',
+    'SVLEN',
+    'CHR2',
+    'COVERAGE'
+]
+sniffles_207_info_pred_cols = [
+    'SUPPORT',
+    'SUPPORT_LONG',
+    'AF',
+    'STDEV_POS',
+    'STDEV_LEN',
+    'COVERAGE_1',
+    'COVERAGE_2',
+    'COVERAGE_3',
+    'COVERAGE_4',
+    'COVERAGE_5',
+    'PRECISE',
+    'IMPRECISE',
+    'NM',
+    'SVLEN'
+]
+
+sniffles_207_params = default_params | {
+    'source': 'sniffles_207',
+    'filter_cols': sniffles_207_filters,
+    'info_cols_mandatory': sniffles_207_info_mandatory_cols,
+    'info_cols_pred': sniffles_207_info_pred_cols,
+    'parse_format': True,
+    'format_cols': ['GT', 'GQ', 'DR', 'DV'],
+    'svlen_source': 'svlen',
+    'bps_path': 'sniffles_207.bps.csv',
+    'override_bps_path': False,
+    'bnd2_pos': 'svlen'
+}
+
+sniffles_207_H_params = sniffles_207_params | {
+    'bps_path': 'sniffles_207_H.bps.csv',
+}
+
 caller_param_dict = {
     'gnomad': gnomad_params,
+    'gnomad_filtered': gnomad_filtered_params,
+    'gnomad_pass': gnomad_pass_params,
     'gridss': gridss_params,
     'manta_candidate': manta_candidate_params,
     'manta_diploid': manta_diploid_params,
@@ -422,7 +496,9 @@ caller_param_dict = {
     'hg00514_val': hg00514_params,
     'hgsvc2': hgsvc2_params,
     'survivor': survivor_params,
-    'gridss_H': gridss_H_params
+    'gridss_H': gridss_H_params,
+    'sniffles_207': sniffles_207_params,
+    'sniffles_207_H': sniffles_207_H_params
 }
 
 # Maps each caller_name to (source, svensemble_dir_template, path_template).
@@ -433,6 +509,16 @@ callset_path_configs: dict[str, tuple[str, str, str]] = {
         'gnomad',
         'data/{s}/svensemble2',
         'data/{s}/{s}.vcf.gz',
+    ),
+    'gnomad_filtered': (
+        'gnomad_filtered',
+        'data/{s}/svensemble2',
+        'data/gnomad/gnomad.vcf.gz',
+    ),
+    'gnomad_pass': (
+        'gnomad_pass',
+        'data/{s}/svensemble2',
+        'data/gnomad/gnomad.vcf.gz',
     ),
     'gridss': (
         'gridss',
@@ -473,6 +559,16 @@ callset_path_configs: dict[str, tuple[str, str, str]] = {
         'sniffles',
         'data/{s}/sv_calling/sniffles/svensemble2',
         'data/{s}/sv_calling/sniffles/out/{s}.long.sniffles.vcf',
+    ),
+    'sniffles_207': (
+        'sniffles_207',
+        'data/{s}/sv_calling/sniffles_207/svensemble2',
+        'data/{s}/sv_calling/sniffles_207/out/{s}.long.sniffles_207.vcf',
+    ),
+    'sniffles_207_H': (
+        'sniffles_207',
+        'data/{s}/sv_calling/sniffles_207/svensemble2',
+        'data/{s}/sv_calling/sniffles_207/out/{s}.long.sniffles_207.vcf',
     ),
 }
 

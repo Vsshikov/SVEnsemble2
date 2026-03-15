@@ -9,12 +9,27 @@ This module provides preprocessing and matching utilities for SV callsets.
 import os
 import sys
 import pickle
+import time
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from pysam import VariantFile
+
+
+def _read_csv_with_retry(path: Path, retries: int = 3, **kwargs) -> pd.DataFrame:
+    """Read a CSV with retry on transient I/O errors (e.g. NFS attribute caching)."""
+    for attempt in range(retries):
+        try:
+            return pd.read_csv(path, **kwargs)
+        except (pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+            if attempt == retries - 1:
+                raise
+            wait = 2 ** attempt
+            _log(f"Transient read error on {path} (attempt {attempt + 1}/{retries}): {exc}. Retrying in {wait}s...")
+            time.sleep(wait)
+    return pd.read_csv(path, **kwargs)  # unreachable, satisfies type checker
 
 
 def _log(msg: str) -> None:
@@ -264,6 +279,10 @@ _derived_callset_config = {
         'parent': 'sniffles',
         'filter': lambda df: df[df['FILTER_PASS'].astype(bool)]
     },
+    'sniffles_207_H': {
+        'parent': 'sniffles_207',
+        'filter': lambda df: df[df['FILTER_PASS'].astype(bool)]
+    },
 }
 
 
@@ -387,7 +406,7 @@ def match_sample_breakpoints(
     workflow_config: dict,
     ground_truth_config: dict,
     max_dist: int = 200,
-    insert_size_threshold: float = 0.7,
+    insert_delta_threshold: float = 0.7,
     verbose: bool = False
 ) -> None:
     """
@@ -445,7 +464,7 @@ def match_sample_breakpoints(
                 callset_name: bp_df_dict[callset_name] for callset_name in training_set_callsets + [ground_truth_callset_name]
             },
             ref_callset=ground_truth_callset_name,
-            insert_size_threshold=insert_size_threshold,
+            insert_delta_threshold=insert_delta_threshold,
             max_dist=max_dist
         )
         if verbose:
@@ -476,11 +495,11 @@ def pu_train_sample(
     if verbose:
         _log(f"Loading joint breakpoints from: {joint_bp_path}")
     try:
-        joint_bp_df = pd.read_csv(joint_bp_path, low_memory=False)
+        joint_bp_df = _read_csv_with_retry(joint_bp_path, low_memory=False)
     except FileNotFoundError:
         if verbose:
             _log(f"Joint breakpoints not found at {joint_bp_path}, loading from {workflow_config['model']['matched_bps_path']}")
-        joint_bp_df = pd.read_csv(workflow_config['model']['matched_bps_path'], low_memory=False)
+        joint_bp_df = _read_csv_with_retry(workflow_config['model']['matched_bps_path'], low_memory=False)
 
     # Preprocess for PU learning
     if verbose:
@@ -523,7 +542,7 @@ def pu_predict_sample(
         raise ValueError("Only one training set per workflow is supported")
     if not (workflow_config['model']['feature_matrix_path']).exists():
         raise FileNotFoundError(f"Feature matrix not found at {workflow_config['model']['feature_matrix_path']}")
-    X = pd.read_csv(workflow_config['model']['feature_matrix_path'], low_memory=False)
+    X = _read_csv_with_retry(workflow_config['model']['feature_matrix_path'], low_memory=False)
     X.set_index([f'{callset_name}_INFO_EVENT' for callset_name in workflow_config['callsets'].keys()], inplace=True)
     if not (workflow_config['workflow_dir'] / 'model.pkl').exists():
         raise FileNotFoundError(f"Model dictionary not found at {workflow_config['workflow_dir'] / 'model.pkl'}")
@@ -545,7 +564,7 @@ def pu_predict_sample(
     # Load the matched breakpoints DataFrame
     if not (workflow_config['model']['matched_bps_path']).exists():
         raise FileNotFoundError(f"Matched breakpoints not found at {workflow_config['model']['matched_bps_path']}")
-    matched_bp_df = pd.read_csv(workflow_config['model']['matched_bps_path'], low_memory=False)
+    matched_bp_df = _read_csv_with_retry(workflow_config['model']['matched_bps_path'], low_memory=False)
 
     svensemble2_calls_df = mbps.get_svensemble2_calls(
         matched_bp_df,
@@ -568,7 +587,7 @@ def svensemble2(
     train: bool = True,
     predict: bool = True,
     match_max_dist: int = 100,
-    match_insert_size_threshold: float = 0.7
+    match_insert_delta_threshold: float = 0.7
 ) -> dict:
     """
     Accepts a list of sample names and a data directory.
@@ -591,11 +610,11 @@ def svensemble2(
         train: if True, train the PU model
         predict: if True, run predictions on breakpoints
         match_max_dist: maximum distance for breakpoint matching
-        match_insert_size_threshold: insert size threshold for breakpoint matching
+        match_insert_delta_threshold: insert delta threshold for breakpoint matching
         verbose: if True, print progress messages
     """
     # Create a config dict for the samples using the sample_names
-    workflow_config = sv_utils.create_config_dict(sample_name, ref_path=ref_path, model_name=model_name, training_set=training_set, is_ground_truth=False)[sample_name]
+    workflow_config = sv_utils.create_config_dict(sample_name, ref_path=ref_path, model_name=model_name, training_set=training_set, is_ground_truth=False, ground_truth_name=ground_truth_sample_name)[sample_name]
     # Also create a config dict for the ground truth sample
     ground_truth_config = sv_utils.create_config_dict(ground_truth_sample_name, ref_path=ref_path, is_ground_truth=True)[ground_truth_sample_name]
 
@@ -618,7 +637,7 @@ def svensemble2(
         parse_preprocess_common(sample_name=sample_name, workflow_config=workflow_config, verbose=verbose)
 
     if match:
-        match_sample_breakpoints(sample_name=sample_name, workflow_config=workflow_config, ground_truth_config=ground_truth_config, max_dist=match_max_dist, insert_size_threshold=match_insert_size_threshold, verbose=verbose)
+        match_sample_breakpoints(sample_name=sample_name, workflow_config=workflow_config, ground_truth_config=ground_truth_config, max_dist=match_max_dist, insert_delta_threshold=match_insert_delta_threshold, verbose=verbose)
 
     if train:
         # Train the PU models for each sample
@@ -724,11 +743,11 @@ if __name__ == '__main__':
         help="Maximum distance for breakpoint matching."
     )
     parser.add_argument(
-        '--match_insert_size_threshold',
+        '--match_insert_delta_threshold',
         type=float,
         required=False,
         default=0.7,
-        help="Insert size threshold for breakpoint matching."
+        help="Insert delta threshold for breakpoint matching."
     )
     args = parser.parse_args()
 
@@ -760,7 +779,7 @@ if __name__ == '__main__':
         train=args.train,
         predict=args.predict,
         match_max_dist=args.match_max_dist,
-        match_insert_size_threshold=args.match_insert_size_threshold
+        match_insert_delta_threshold=args.match_insert_delta_threshold
     )
 
 # Unbiased  GT preset

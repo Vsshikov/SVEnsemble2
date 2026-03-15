@@ -245,6 +245,7 @@ def train_unbiased_concat_rf(
     """
     Train an unbiased Random Forest on a concatenated training set from multiple samples.
     """
+    _gt_name = ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source']
     training_set_dfs = []
     for sample in workflow_config['model']['training_params']['function_params']['samples']:
         if sample == workflow_config['sample_name']:
@@ -255,6 +256,7 @@ def train_unbiased_concat_rf(
                 sample,
                 model_name=workflow_config['model']['name'],
                 training_set=training_set_name,
+                ground_truth_name=_gt_name,
             )[sample]
             sample_joint_bp_df = pd.read_csv(
                 sample_workflow_config['model']['matched_bps_path'],
@@ -353,6 +355,7 @@ def train_unbiased_xgb_concat(
     """
     Train an unbiased XGBoost model with cross-training on one or multiple samples.
     """
+    _gt_name = ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source']
     training_set_dfs = []
     for sample in workflow_config['model']['training_params']['function_params']['samples']:
         if sample == workflow_config['sample_name']:
@@ -363,6 +366,7 @@ def train_unbiased_xgb_concat(
                 sample,
                 model_name=workflow_config['model']['name'],
                 training_set=training_set_name,
+                ground_truth_name=_gt_name,
             )[sample]
             sample_joint_bp_df = pd.read_csv(
                 sample_workflow_config['model']['matched_bps_path'],

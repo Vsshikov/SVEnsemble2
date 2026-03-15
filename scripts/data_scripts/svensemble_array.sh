@@ -62,4 +62,4 @@ micromamba run -n SVEnsemble2 python -m svensemble.pipeline \
     --training_set "$SVE_TRAINING_SET" \
     $sve_step_flags \
     --match_max_dist "$SVE_MATCH_MAX_DIST" \
-    --match_insert_size_threshold "$SVE_MATCH_INSERT_SIZE_THRESHOLD"
+    --match_insert_delta_threshold "$SVE_MATCH_INSERT_DELTA_THRESHOLD"

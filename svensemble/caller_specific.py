@@ -664,6 +664,14 @@ parse_recipes: dict[str, dict] = {
         'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
         'post_bps': None,
     },
+    'sniffles_207': {
+        'bnd_svtypes': ['BND'],
+        'preprocess_all': None,
+        'preprocess_bnds': sniffles_preprocess_bnds_only,
+        'preprocess_evts': sniffles_preprocess_evts_only,
+        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
+        'post_bps': None,
+    },
     'survivor': {
         'bnd_svtypes': [],
         'preprocess_all': None,

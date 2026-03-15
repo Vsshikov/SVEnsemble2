@@ -15,6 +15,7 @@ set -euo pipefail
 # --------------- Resolve project root ----------------------------------------
 PROJ_DIR="${SVENSEMBLE_BASE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SCRIPTS_DIR="$PROJ_DIR/scripts/data_scripts"
+SCRATCH_DATA_DIR="/vast/scratch/users/shikov.v/Papenfuss_SVEnsemble2/data"
 
 # --------------- Validate arguments ------------------------------------------
 if [[ $# -lt 1 || -z "$1" ]]; then
@@ -33,8 +34,15 @@ fi
 echo "Creating sample directory: $SAMPLE_DIR"
 
 # --------------- Create directory tree ---------------------------------------
-mkdir -p "$SAMPLE_DIR"/{scripts,logs,downloads,preprocessed,aligned,sv_calling}
+mkdir -p "$SAMPLE_DIR"/{scripts,logs,preprocessed,aligned,sv_calling}
 mkdir -p "$SAMPLE_DIR/scripts/config/runs"
+
+# --------------- Create scratch dirs and symlink ----------------------------
+# downloads/ and temp/ live on scratch to avoid filling the VAST project quota.
+SCRATCH_SAMPLE_DIR="$SCRATCH_DATA_DIR/$SAMPLE_NAME"
+mkdir -p "$SCRATCH_SAMPLE_DIR"/{downloads,temp}
+ln -sn "$SCRATCH_SAMPLE_DIR/downloads" "$SAMPLE_DIR/downloads"
+ln -sn "$SCRATCH_SAMPLE_DIR/temp"      "$SAMPLE_DIR/temp"
 
 # --------------- Symlink shared batch scripts --------------------------------
 # Only symlink regular files (*.sh) from data_scripts/; skip directories and
@@ -42,17 +50,17 @@ mkdir -p "$SAMPLE_DIR/scripts/config/runs"
 for script in "$SCRIPTS_DIR"/*.sh; do
     [[ -f "$script" ]] || continue
     name="$(basename "$script")"
-    ln -s "$script" "$SAMPLE_DIR/scripts/$name"
+    ln -sr "$script" "$SAMPLE_DIR/scripts/$name"
 done
 
 # --------------- Symlink shared config files ---------------------------------
 # default_run.sh is shared across all samples via symlink.
-ln -s "$SCRIPTS_DIR/config/default_run.sh" "$SAMPLE_DIR/scripts/config/default_run.sh"
+ln -sr "$SCRIPTS_DIR/config/default_run.sh" "$SAMPLE_DIR/scripts/config/default_run.sh"
 
 # Shared run configs (TEMPLATE, svensemble_full, svensemble_train_predict, etc.)
 for run_cfg in "$SCRIPTS_DIR"/config/runs/*.sh; do
     [[ -f "$run_cfg" ]] || continue
-    ln -s "$run_cfg" "$SAMPLE_DIR/scripts/config/runs/$(basename "$run_cfg")"
+    ln -sr "$run_cfg" "$SAMPLE_DIR/scripts/config/runs/$(basename "$run_cfg")"
 done
 
 # --------------- Generate sample.sh skeleton ---------------------------------

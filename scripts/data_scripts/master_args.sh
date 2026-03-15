@@ -112,7 +112,7 @@ SVE_STEP_PREDICT=true
 
 # Breakpoint matching parameters
 SVE_MATCH_MAX_DIST=200
-SVE_MATCH_INSERT_SIZE_THRESHOLD=0.7
+SVE_MATCH_INSERT_DELTA_THRESHOLD=0.7
 
 SVE_MEM=32G
 
@@ -134,7 +134,7 @@ SVE_BENCH_SVLEN_LOWER=(
 
 SVE_BENCH_SVLEN_UPPER=
 SVE_BENCH_VAL_MATCH_MARGIN=200
-SVE_BENCH_VAL_MATCH_INSERT_SIZE_THRESHOLD=0.7
+SVE_BENCH_VAL_MATCH_INSERT_DELTA_THRESHOLD=0.7
 # Comma-separated extra callsets to include in benchmark (e.g. survivor)
 SVE_BENCH_ADDITIONAL_CALLSETS=survivor
 # Comma-separated extra columns to retain in benchmark output

@@ -49,6 +49,7 @@ RUN_MANTA=true
 RUN_GRIDSS=true
 RUN_DELLY=true
 RUN_SNIFFLES=
+RUN_SNIFFLES_207=
 RUN_SURVIVOR=true
 RUN_SEVERUS=
 RUN_SVENSEMBLE2=true
@@ -97,6 +98,8 @@ SVE_CALLSETS=(
     "delly"
     # "sniffles"
     # "sniffles_H"
+    # "sniffles_207"
+    # "sniffles_207_H"
     "survivor"
 )
 
@@ -108,6 +111,7 @@ SVE_CALLSETS=(
 #   sniffles, sniffles+gridss, sniffles+manta_candidate, sniffles+manta_diploid,
 #   sniffles+delly, sniffles+manta_candidate+delly, sniffles+manta_diploid+delly,
 #   sniffles+gridss+manta_candidate, sniffles+gridss+manta_diploid, etc.
+#   sniffles_207, sniffles_207+gridss, sniffles_207+manta_candidate, etc.
 SVE_TRAINING_SETS=(
     "gridss"
     "manta_candidate"
@@ -131,6 +135,17 @@ SVE_TRAINING_SETS=(
     # "sniffles+gridss+manta_diploid"
     # "sniffles+gridss+manta_candidate+delly"
     # "sniffles+gridss+manta_diploid+delly"
+    # "sniffles_207"
+    # "sniffles_207+gridss"
+    # "sniffles_207+manta_candidate"
+    # "sniffles_207+manta_diploid"
+    # "sniffles_207+delly"
+    # "sniffles_207+manta_candidate+delly"
+    # "sniffles_207+manta_diploid+delly"
+    # "sniffles_207+gridss+manta_candidate"
+    # "sniffles_207+gridss+manta_diploid"
+    # "sniffles_207+gridss+manta_candidate+delly"
+    # "sniffles_207+gridss+manta_diploid+delly"
 )
 
 # Pipeline processing steps
@@ -141,7 +156,7 @@ SVE_STEP_PREDICT=true
 
 # Breakpoint matching parameters
 SVE_MATCH_MAX_DIST=200
-SVE_MATCH_INSERT_SIZE_THRESHOLD=0.7
+SVE_MATCH_INSERT_DELTA_THRESHOLD=0.7
 
 # --------------- SVEnsemble2 benchmarking parameters -----------------------
 # SV type filter combinations — one benchmark job per entry.
@@ -161,7 +176,7 @@ SVE_BENCH_SVLEN_LOWER=(
 )
 SVE_BENCH_SVLEN_UPPER=
 SVE_BENCH_VAL_MATCH_MARGIN=200
-SVE_BENCH_VAL_MATCH_INSERT_SIZE_THRESHOLD=0.7
+SVE_BENCH_VAL_MATCH_INSERT_DELTA_THRESHOLD=0.7
 
 # Extra callsets and columns included in all benchmark outputs.
 # Run configs override these when needed.
@@ -181,8 +196,12 @@ SVE_BENCH_VAL_SET_NAME=
 
 # --------------- SHAP parameters --------------------------------------------
 SHAP=false
-SVE_SHAP_SOURCE=bench_pkl       # 'bench_pkl' or 'workflow'
 SVE_SHAP_USE_GPU=false          # Requires gpuq partition and max_depth <= 31
+SVE_SHAP_GPU_PARTITION=gpuq
+SVE_SHAP_GPU_GRES="gpu:P100:1"
+SVE_SHAP_MEM=128G               # Override per run; P100 nodes cap at ~113G
+SVE_SHAP_CUDA_PATH="/stornext/System/data/software/rhel/9/base/nvidia/CUDA/11.8"
+SVE_SHAP_SOURCE=                # Source pkl; empty = default (bench_pkl)
 SVE_SHAP_MAX_SAMPLES=           # Subsample rows; empty = all
 SVE_SHAP_PLOT=true
 SVE_SHAP_TOP_N=20

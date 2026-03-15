@@ -21,8 +21,10 @@ module purge
 module load ${MODULES}
 
 output_bam="$SAMPLE_DIR/aligned/${SAMPLE_NAME}.minimap.bam"
+SORT_TMP="$SAMPLE_DIR/temp/samtools_sort_minimap"
+mkdir -p "$(dirname "$SORT_TMP")"
 
-$MINIMAP2_PATH -t 16 -ax sr $REF_FASTA $READS1_PATH $READS2_PATH | samtools sort -@16 -o $output_bam -
+$MINIMAP2_PATH -t 16 -ax sr $REF_FASTA $READS1_PATH $READS2_PATH | samtools sort -@16 -T "$SORT_TMP" -o $output_bam -
 samtools index $output_bam
 
 # Prevent job from finishing until the bam and index files can be found

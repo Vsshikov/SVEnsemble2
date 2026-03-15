@@ -21,7 +21,7 @@ _config_name=$(basename "$SOURCE_FILE" .sh)
 LOG_DIR="$SAMPLE_DIR/logs/run/${_timestamp}_${_config_name}_${RUN_ID:0:8}"
 unset _timestamp _config_name
 mkdir -p "$LOG_DIR"
-mkdir -p "$LOG_DIR"/{bazam_sam,bazam_cram,minimap,minimap_long,manta,gridss,delly,sniffles,survivor,sve_preprocess,svensemble2,benchmark,shap,finalizer}
+mkdir -p "$LOG_DIR"/{bazam_sam,bazam_cram,minimap,minimap_long,manta,gridss,delly,sniffles,sniffles_207,survivor,sve_preprocess,svensemble2,benchmark,shap,finalizer}
 cat "$SOURCE_FILE" > "$LOG_DIR/master_args.sh"
 
 touch "$LOG_DIR/run.log"
@@ -52,6 +52,7 @@ gridss_id=""
 delly_id=""
 minimap_long_id=""
 sniffles_id=""
+sniffles_207_id=""
 severus_id=""
 survivor_id=""
 sve_preprocess_id=""
@@ -115,8 +116,8 @@ require_file "$REF_FASTA"
         "${RERUN:-}" "${SKIP_REALIGNMENT:-}" "${RUN_BAZAM:-}"
     printf "RUN_MANTA=%s  RUN_GRIDSS=%s  RUN_DELLY=%s\n" \
         "${RUN_MANTA:-}" "${RUN_GRIDSS:-}" "${RUN_DELLY:-}"
-    printf "RUN_SNIFFLES=%s  RUN_SEVERUS=%s  RUN_SURVIVOR=%s\n" \
-        "${RUN_SNIFFLES:-}" "${RUN_SEVERUS:-}" "${RUN_SURVIVOR:-}"
+    printf "RUN_SNIFFLES=%s  RUN_SNIFFLES_207=%s  RUN_SEVERUS=%s  RUN_SURVIVOR=%s\n" \
+        "${RUN_SNIFFLES:-}" "${RUN_SNIFFLES_207:-}" "${RUN_SEVERUS:-}" "${RUN_SURVIVOR:-}"
     printf "RUN_SVENSEMBLE2=%s  RUN_BENCHMARK=%s  RUN_SHAP=%s\n" \
         "${RUN_SVENSEMBLE2:-}" "${RUN_BENCHMARK:-}" "${RUN_SHAP:-}"
     printf "SVE_MODELS=(%s)\n"        "${SVE_MODELS[*]:-}"
@@ -246,6 +247,14 @@ if [[ "$RUN_SNIFFLES" == "true" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_c
         "$SAMPLE_DIR/scripts/sniffles.sh" "$SOURCE_FILE")
 fi
 
+if [[ "$RUN_SNIFFLES_207" == "true" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_calling/sniffles_207/out/${SAMPLE_NAME}.long.sniffles_207.vcf" )]]; then
+    if [[ -z "$READS_LONG_PATHS" ]]; then
+        die "READS_LONG_PATHS is not set — required for sniffles_207 (RUN_SNIFFLES_207=true)"
+    fi
+    sniffles_207_id=$(submit_job sniffles_207 "$caller_long_dep" \
+        "$SAMPLE_DIR/scripts/sniffles_207.sh" "$SOURCE_FILE")
+fi
+
 if [[ "$RUN_SEVERUS" == "true" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_calling/severus/out/${SAMPLE_NAME}.long.severus.vcf" )]]; then
     if [[ -z "$READS_LONG_PATHS" ]]; then
         die "READS_LONG_PATHS is not set — required for severus (RUN_SEVERUS=true)"
@@ -273,7 +282,7 @@ fi
 
 # Collect all caller job IDs into a single dependency string
 _svensemble_dep_ids=""
-for _id in "$manta_id" "$gridss_id" "$delly_id" "$sniffles_id" "$survivor_id"; do
+for _id in "$manta_id" "$gridss_id" "$delly_id" "$sniffles_id" "$sniffles_207_id" "$severus_id" "$survivor_id"; do
     [[ -n "$_id" ]] && _svensemble_dep_ids="${_svensemble_dep_ids}:${_id}"
 done
 logI "Caller jobs submitted for $SAMPLE_NAME: ${_svensemble_dep_ids:-none}"
@@ -299,10 +308,15 @@ _sve_dep_ids="${_svensemble_dep_ids}"
 _sve_job_ids=()
 
 if [[ "$RUN_SVENSEMBLE2" == "true" ]]; then
+    _gt_suffix=""
+    if [[ -n "$SVE_GROUND_TRUTH_SAMPLE_NAME" && "$SVE_GROUND_TRUTH_SAMPLE_NAME" != "gnomad" ]]; then
+        _gt_suffix=".gt_${SVE_GROUND_TRUTH_SAMPLE_NAME}"
+    fi
+
     SVE_TASK_FILE="$LOG_DIR/svensemble2/tasks.tsv"
     for sve_model in "${SVE_MODELS[@]}"; do
         for sve_training_set in "${SVE_TRAINING_SETS[@]}"; do
-            if [[ ! -f "$SAMPLE_DIR/sv_calling/svensemble2/${SAMPLE_NAME}.${sve_model}.${sve_training_set}/svensemble2_calls.csv" \
+            if [[ ! -f "$SAMPLE_DIR/sv_calling/svensemble2/${SAMPLE_NAME}.${sve_model}.${sve_training_set}${_gt_suffix}/svensemble2_calls.csv" \
                 || "$SVENSEMBLE2_RERUN" == "true" \
                 || "$RERUN" == "true" ]]; then
                     printf '%s\t%s\n' "$sve_model" "$sve_training_set"
@@ -413,11 +427,12 @@ if [[ "$RUN_SHAP" == "true" ]]; then
 
         # Use GPU partition when requested
         _shap_sbatch_extra=""
-        [[ "$SVE_SHAP_USE_GPU" == "true" ]] && _shap_sbatch_extra="--partition=gpuq --gres=gpu:P100:1"
+        [[ "$SVE_SHAP_USE_GPU" == "true" ]] && _shap_sbatch_extra="--partition=$SVE_SHAP_GPU_PARTITION --gres=$SVE_SHAP_GPU_GRES"
 
         # shellcheck disable=SC2086
         shap_array_id=$(sbatch --parsable --chdir="$SAMPLE_DIR" $shap_dep \
             --job-name="shap_${SAMPLE_NAME}" \
+            --mem="$SVE_SHAP_MEM" \
             $_shap_sbatch_extra \
             --array=0-$((N_SHAP_TASKS - 1)) \
             --output="$LOG_DIR/shap/%A_%a.out" \
@@ -434,13 +449,14 @@ fi
 _all_job_ids=()
 for _id in "$preprocess_sam_id" "$preprocess_cram_id" "$minimap_id" \
            "$manta_id" "$gridss_id" "$delly_id" \
-           "$minimap_long_id" "$sniffles_id" "$severus_id" \
+           "$minimap_long_id" "$sniffles_id" "$sniffles_207_id" "$severus_id" \
            "$survivor_id" "$sve_preprocess_id" "$sve_array_id" \
            "$bench_array_id" "$shap_array_id"; do
     [[ -n "$_id" ]] && _all_job_ids+=("$_id")
 done
 
 if (( ${#_all_job_ids[@]} > 0 )); then
+    printf '%s\n' "${_all_job_ids[@]}" > "$LOG_DIR/job_ids.txt"
     _finalizer_dep_str=$(IFS=:; printf '%s' "${_all_job_ids[*]}")
     _finalizer_dep="--dependency=afterany:${_finalizer_dep_str}"
 

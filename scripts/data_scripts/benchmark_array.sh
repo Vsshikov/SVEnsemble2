@@ -2,8 +2,8 @@
 
 #SBATCH --job-name=svensemble2_benchmark
 #SBATCH --time=10:00:00
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=8G
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=4G
 
 # SLURM array wrapper for SVEnsemble2 benchmark.py.
 # Each array task reads its parameters from a TSV task file using
@@ -50,7 +50,7 @@ _join_csv() { local IFS=,; echo "$*"; }
 _bench_flags=""
 [[ -n "$SVE_BENCH_SVLEN_UPPER" ]]                         && _bench_flags+=" --svlen_upper $SVE_BENCH_SVLEN_UPPER"
 [[ -n "$SVE_BENCH_VAL_MATCH_MARGIN" ]]                    && _bench_flags+=" --val_match_margin $SVE_BENCH_VAL_MATCH_MARGIN"
-[[ -n "$SVE_BENCH_VAL_MATCH_INSERT_SIZE_THRESHOLD" ]]     && _bench_flags+=" --val_match_insert_size_threshold $SVE_BENCH_VAL_MATCH_INSERT_SIZE_THRESHOLD"
+[[ -n "$SVE_BENCH_VAL_MATCH_INSERT_DELTA_THRESHOLD" ]]     && _bench_flags+=" --val_match_insert_delta_threshold $SVE_BENCH_VAL_MATCH_INSERT_DELTA_THRESHOLD"
 
 _csv=$(_join_csv "${SVE_BENCH_ADDITIONAL_CALLSETS[@]}")
 [[ -n "$_csv" ]]                                          && _bench_flags+=" --additional_callsets $_csv"
@@ -62,6 +62,7 @@ _csv=$(_join_csv "${SVE_BENCH_LIMIT_TO_CALLSETS[@]}")
 [[ "$SVE_BENCH_SKIP_FILTERING" == "true" ]]               && _bench_flags+=" --skip_filtering"
 [[ -n "$SVE_BENCH_VAL_SET_PATH" ]]                        && _bench_flags+=" --val_set_path $SVE_BENCH_VAL_SET_PATH"
 [[ -n "$SVE_BENCH_VAL_SET_NAME" ]]                        && _bench_flags+=" --val_set_name $SVE_BENCH_VAL_SET_NAME"
+[[ -n "$SVE_GROUND_TRUTH_SAMPLE_NAME" ]]                  && _bench_flags+=" --ground_truth_name $SVE_GROUND_TRUTH_SAMPLE_NAME"
 [[ "$SVE_VERBOSE"              == "true" ]]               && _bench_flags+=" --verbose"
 [[ -n "$_svtypes" ]]                                      && _bench_flags+=" --svtypes $_svtypes"
 [[ -n "$_svlen_lower" ]]                                  && _bench_flags+=" --svlen_lower $_svlen_lower"

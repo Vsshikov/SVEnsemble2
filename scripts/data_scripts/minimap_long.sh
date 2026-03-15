@@ -5,7 +5,9 @@
 #SBATCH --time=48:00:00
 #SBATCH --ntasks=1
 #SBATCH -c 32
-#SBATCH --mem=80G
+#SBATCH --mem=128G
+
+set -euo pipefail
 
 SOURCE_FILE=$1
 
@@ -22,6 +24,8 @@ module purge
 module load ${MODULES}
 
 OUT_BAM="$SAMPLE_DIR/aligned_long/${SAMPLE_NAME}.long.minimap.bam"
+SORT_TMP="$SAMPLE_DIR/temp/samtools_sort_minimap_long"
+mkdir -p "$(dirname "$SORT_TMP")"
 
 declare -A MINIMAP_SOURCE_MAPPING=(
     ["pacbio"]="map-pb"
@@ -40,7 +44,16 @@ fi
 
 echo "Using minimap2 preset for long reads: $RESOLVED_PRESET"
 
-$MINIMAP2_PATH -t 16 -ax "$RESOLVED_PRESET" $REF_FASTA "${READS_LONG_PATHS[@]}" | samtools sort -@16 -o $OUT_BAM -
+if [[ "${READS_LONG_PATHS[0]}" == *.bam ]]; then
+    echo "Input is BAM — converting to FASTQ before alignment"
+    samtools cat "${READS_LONG_PATHS[@]}" \
+        | samtools fastq - \
+        | $MINIMAP2_PATH -t 16 -ax "$RESOLVED_PRESET" $REF_FASTA - \
+        | samtools sort -m 4G -@16 -T "$SORT_TMP" -o $OUT_BAM -
+else
+    $MINIMAP2_PATH -t 16 -ax "$RESOLVED_PRESET" $REF_FASTA "${READS_LONG_PATHS[@]}" \
+        | samtools sort -m 4G -@16 -T "$SORT_TMP" -o $OUT_BAM -
+fi
 samtools index $OUT_BAM
 
 # Prevent job from finishing until the bam and index files can be found

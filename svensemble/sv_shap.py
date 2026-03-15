@@ -35,7 +35,7 @@ import pandas as pd
 import shap
 
 
-
+from . import utils as sv_utils
 from . import importances
 from . import matched_breakpoints as matchedbps
 from . import _caller_params as caller_params
@@ -50,15 +50,14 @@ def resolve_shap_paths(
     training_set_name: str,
 ) -> dict[str, Path]:
     """Resolve standard SVEnsemble2 paths for SHAP analysis."""
-    base = Path(f'data/{sample_name}/sv_calling/svensemble2')
+    base = sv_utils.DATA_DIR / sample_name / 'sv_calling' / 'svensemble2'
     workflow_dir = base / f'{sample_name}.{model_name}.{training_set_name}'
     return {
         'base': base,
         'workflow_dir': workflow_dir,
         'model_pkl': workflow_dir / 'model.pkl',
         'feature_matrix': workflow_dir / 'feature_matrix.csv',
-        'bench_pkl': base / f'{sample_name}.{model_name}.bench_preprocessed.pkl',
-        'shap_dir': base / 'shap_values',
+        'shap_dir': workflow_dir / 'shap_values',
     }
 
 
@@ -103,49 +102,6 @@ def align_features(
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
-def load_from_bench_pkl(
-    sample_name: str,
-    model_name: str,
-    training_set_name: str,
-    verbose: bool = False,
-) -> tuple:
-    """
-    Load model and feature matrix from bench_preprocessed pickle.
-
-    Returns:
-        (model, X, y) where y is the reference match indicator.
-    """
-    paths = resolve_shap_paths(sample_name, model_name, training_set_name)
-    bench_pkl_path = paths['bench_pkl']
-
-    if not bench_pkl_path.exists():
-        raise FileNotFoundError(
-            f"Bench preprocessed pickle not found: {bench_pkl_path}"
-        )
-
-    if verbose:
-        print(f"Loading from bench_preprocessed pickle: {bench_pkl_path}")
-
-    from . import _model_configs
-    fillna = _model_configs.model_configs.get(model_name, {}).get(
-        'training_params', {},
-    ).get('fillna', 0)
-
-    X, y = importances.load_svensemble2_val_Xy_from_sample_val_pickles(
-        sample_pkl_path=str(bench_pkl_path),
-        val_dict_pkl_path=None,
-        training_set_name=training_set_name,
-        all_matches=True,
-        fillna=fillna,
-        verbose=verbose,
-    )
-
-    sample = pickle.load(open(bench_pkl_path, 'rb'))
-    pred_dict = sample['pred_dicts'][training_set_name]
-    model = pred_dict.get('model_fit', pred_dict.get('RF_fit'))
-
-    return model, X, y
-
 
 def load_from_workflow(
     sample_name: str,
@@ -180,6 +136,10 @@ def load_from_workflow(
         y = fm['ref_match']
         fm = fm.drop(columns=['ref_match'])
 
+    id_cols = [c for c in fm.columns if c.endswith('_INFO_EVENT')]
+    if id_cols:
+        fm = fm.set_index(id_cols)
+
     from . import _model_configs
     fillna = _model_configs.model_configs.get(model_name, {}).get(
         'training_params', {},
@@ -196,7 +156,6 @@ def load_model_and_data(
     sample_name: str,
     model_name: str,
     training_set_name: str,
-    source: str = 'bench_pkl',
     verbose: bool = False,
 ) -> tuple:
     """
@@ -208,16 +167,9 @@ def load_model_and_data(
     Returns:
         (model, X, y)
     """
-    if source == 'bench_pkl':
-        model, X, y = load_from_bench_pkl(
-            sample_name, model_name, training_set_name, verbose=verbose,
-        )
-    elif source == 'workflow':
-        model, X, y = load_from_workflow(
-            sample_name, model_name, training_set_name, verbose=verbose,
-        )
-    else:
-        raise ValueError(f"Unknown source: {source!r} (expected 'bench_pkl' or 'workflow')")
+    model, X, y = load_from_workflow(
+        sample_name, model_name, training_set_name, verbose=verbose,
+    )
 
     X = align_features(model, X, verbose=verbose)
 
@@ -271,7 +223,7 @@ def compute_shap_values(
     else:
         explainer = shap.explainers.TreeExplainer(model, X)
 
-    shap_values = explainer(X)
+    shap_values = explainer(X, check_additivity=not use_gpu)
     elapsed = time.time() - start
 
     if verbose:
@@ -371,7 +323,6 @@ def run_shap_assessment(
     sample_name: str,
     model_name: str,
     training_set_name: str,
-    source: str = 'bench_pkl',
     use_gpu: bool = False,
     max_samples: Optional[int] = None,
     plot: bool = False,
@@ -386,13 +337,13 @@ def run_shap_assessment(
     """
     print(f"{'='*65}")
     print(f"SHAP assessment: {sample_name} | {model_name} | {training_set_name}")
-    print(f"  source={source}  use_gpu={use_gpu}  max_samples={max_samples}")
+    print(f"  use_gpu={use_gpu}  max_samples={max_samples}")
     print(f"{'='*65}")
 
     # --- Load ---
     model, X, y = load_model_and_data(
         sample_name, model_name, training_set_name,
-        source=source, verbose=verbose,
+        verbose=verbose,
     )
 
     # --- Compute ---
@@ -451,12 +402,6 @@ if __name__ == "__main__":
         help="Training set name (e.g. delly+manta_diploid)",
     )
     parser.add_argument(
-        '--source', type=str, default='bench_pkl',
-        choices=['bench_pkl', 'workflow'],
-        help="Data source: 'bench_pkl' (bench_preprocessed pickle) "
-             "or 'workflow' (model.pkl + feature_matrix.csv)",
-    )
-    parser.add_argument(
         '--use_gpu', action='store_true', default=False,
         help="Use GPUTreeExplainer (requires CUDA and max_depth <= 31)",
     )
@@ -486,7 +431,6 @@ if __name__ == "__main__":
         sample_name=args.sample_name,
         model_name=args.model_name,
         training_set_name=training_set_name,
-        source=args.source,
         use_gpu=args.use_gpu,
         max_samples=args.max_samples,
         plot=args.plot,

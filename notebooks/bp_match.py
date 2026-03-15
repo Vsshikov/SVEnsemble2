@@ -60,7 +60,7 @@ for sample_name, sample_config in samples.items():
     matched_bp_df = chunk_match.outer_join_bps(
         bp_df_dict=bp_df_dict,
         ref_callset='gnomad',
-        insert_size_threshold=0.7,
+        insert_delta_threshold=0.7,
         max_dist=200
     )
     if not (sample_config['sample_dir'] / 'sv_calling' / 'svensemble2').exists():

@@ -18,8 +18,9 @@ ENV_NAME="sniffles2"
 YAML_FILE="$SAMPLE_DIR/scripts/envs/sniffles.yaml"
 HASH_MARKER="${HOME}/.cache/${ENV_NAME}.yaml.md5"
 YAML_HASH=$(md5sum "$YAML_FILE" | cut -d' ' -f1)
+ENV_SENTINEL="$(micromamba info --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['envs directories'][0])")/${ENV_NAME}/conda-meta/history"
 
-if [[ "$(cat "$HASH_MARKER" 2>/dev/null)" != "$YAML_HASH" ]]; then
+if [[ "$(cat "$HASH_MARKER" 2>/dev/null)" != "$YAML_HASH" ]] || [[ ! -s "$ENV_SENTINEL" ]]; then
     micromamba create -y -f "$YAML_FILE" -n "$ENV_NAME"
     mkdir -p "$(dirname "$HASH_MARKER")"
     echo "$YAML_HASH" > "$HASH_MARKER"

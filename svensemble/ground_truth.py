@@ -150,6 +150,93 @@ def preprocess_gnomad_ground_truth(
     if verbose:
         print(f"Saved {len(gnomad_bp_df)} breakpoints to {output_path}")
 
+    _write_manifest(
+        output_dir=svensemble_dir,
+        ground_truth_name=ground_truth_name,
+        vcf_path=vcf_path,
+        n_breakpoints=len(gnomad_bp_df),
+        filters=filters,
+        evidence=evidence,
+        svtypes=svtypes,
+        algorithms=algorithms,
+        min_af=min_af,
+        max_af=max_af,
+        svlens=svlens,
+        bothsides_support_only=bothsides_support_only,
+        canonical_chroms_only=canonical_chroms_only,
+    )
+    if verbose:
+        print(f"Wrote manifest and params template to {svensemble_dir}")
+
+
+def _write_manifest(
+    output_dir: Path,
+    ground_truth_name: str,
+    vcf_path: Path,
+    n_breakpoints: int,
+    filters: List[str],
+    evidence: List[str] | None,
+    svtypes: List[str],
+    algorithms: List[str] | None,
+    min_af: float | None,
+    max_af: float | None,
+    svlens: tuple[int, int] | None,
+    bothsides_support_only: bool,
+    canonical_chroms_only: bool,
+) -> None:
+    """Write a human-readable manifest and a _caller_params.py snippet."""
+    from datetime import datetime
+
+    # --- manifest.txt ---
+    lines = [
+        f"ground_truth_name: {ground_truth_name}",
+        f"source_vcf: {vcf_path}",
+        f"created: {datetime.now().isoformat(timespec='seconds')}",
+        f"breakpoints: {n_breakpoints}",
+        "",
+        "# Filters applied",
+        f"filters: {filters}",
+        f"svtypes: {svtypes}",
+        f"evidence: {evidence}",
+        f"algorithms: {algorithms}",
+        f"min_af: {min_af}",
+        f"max_af: {max_af}",
+        f"svlens: {svlens}",
+        f"bothsides_support_only: {bothsides_support_only}",
+        f"canonical_chroms_only: {canonical_chroms_only}",
+    ]
+
+    # --- Reproduction command ---
+    cmd_parts = [
+        "python -m svensemble.ground_truth",
+        f"    --ground_truth_name {ground_truth_name}",
+    ]
+    if filters and filters != ['PASS']:
+        cmd_parts.append(f"    --filters {','.join(filters)}")
+    if evidence:
+        cmd_parts.append(f"    --evidence {','.join(evidence)}")
+    if svtypes:
+        cmd_parts.append(f"    --svtypes {','.join(svtypes)}")
+    if algorithms:
+        cmd_parts.append(f"    --algorithms {','.join(algorithms)}")
+    if min_af is not None:
+        cmd_parts.append(f"    --min_af {min_af}")
+    if max_af is not None:
+        cmd_parts.append(f"    --max_af {max_af}")
+    if svlens:
+        cmd_parts.append(f"    --svlen_lower {svlens[0]}")
+        if svlens[1] != np.inf:
+            cmd_parts.append(f"    --svlen_upper {svlens[1]}")
+    if bothsides_support_only:
+        cmd_parts.append("    --bothsides_support_only")
+    if not canonical_chroms_only:
+        cmd_parts.append("    --no_canonical_chroms")
+    cmd_parts.append("    --verbose")
+    lines.append("")
+    lines.append("# Reproduce with:")
+    lines.append(" \\\n".join(cmd_parts))
+    (output_dir / 'manifest.txt').write_text('\n'.join(lines) + '\n')
+
 
 def _apply_filters(
     df: pd.DataFrame,

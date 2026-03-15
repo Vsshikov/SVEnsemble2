@@ -1117,7 +1117,7 @@ def preprocess_huddleston_val_set(sample, vcf_path, force_rerun=False):
         huddleston_bp_df.to_csv(out_path, index=False)
 
 
-def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, val_match_margin=300, val_match_insert_size_threshold=0.7, additional_cols: None | List[str] = None, verbose=True):
+def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True):
     """
     Given dataframes of a callset and a validation set, match them and return a dataframe with the following columns:
     INFO_EVENT, {qual_metric}, is_in_val, INFO_INFERRED_SVTYPE, {FILTER_PASS}
@@ -1155,7 +1155,7 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
             val_key: val_set_
         },
         max_dist=val_match_margin,
-        insert_size_threshold=val_match_insert_size_threshold,
+        insert_delta_threshold=val_match_insert_delta_threshold,
         ids_only=True,
         ignore_size=False
     )
@@ -1172,7 +1172,7 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
 
 
 
-def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name, model_name, val_match_margin=300, val_match_insert_size_threshold=0.7, additional_cols: None | List[str] = None, verbose=True):
+def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name, model_name, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True):
     svens_calls_ = svensemble2_bps.copy()
     val_set_ = val_set.copy()
 
@@ -1196,7 +1196,7 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, tr
             val_key: val_set_
         },
         max_dist=val_match_margin,
-        insert_size_threshold=val_match_insert_size_threshold,
+        insert_delta_threshold=val_match_insert_delta_threshold,
         ids_only=True,
         ignore_size=False
     )
@@ -1267,11 +1267,12 @@ def benchmark_model(
     val_set_path=None,
     training_sets: List[str] | str | None = None,
     val_match_margin: int = 300,
-    val_match_insert_size_threshold: float = 0.7,
+    val_match_insert_delta_threshold: float = 0.5,
     skip_filtering: bool = False,
     additional_cols: None | List[str] = None,
     additional_callsets: None | List[str] = None,
     limit_to_callsets: None | List[str] = None,
+    ground_truth_name: str | None = None,
     verbose=False
 ):
     """
@@ -1359,7 +1360,8 @@ def benchmark_model(
             training_set=training_set_name,
             val_set=val_set_arg,
             model_name=model_name,
-            additional_callsets=additional_callsets
+            additional_callsets=additional_callsets,
+            ground_truth_name=ground_truth_name
         )[sample_name])
 
     # Get a list of callsets to load
@@ -1442,7 +1444,7 @@ def benchmark_model(
             sample_config=callset_config_dict,
             callset_name=callset_name,
             val_match_margin=val_match_margin,
-            val_match_insert_size_threshold=val_match_insert_size_threshold,
+            val_match_insert_delta_threshold=val_match_insert_delta_threshold,
             additional_cols=additional_cols,
             verbose=verbose
         )
@@ -1476,7 +1478,7 @@ def benchmark_model(
             training_set_name=svensemble2_preds_to_load.replace('svensemble2_', ''),
             model_name=model_name,
             val_match_margin=val_match_margin,
-            val_match_insert_size_threshold=val_match_insert_size_threshold,
+            val_match_insert_delta_threshold=val_match_insert_delta_threshold,
             additional_cols=additional_cols,
             verbose=verbose
         )
@@ -1505,11 +1507,12 @@ if __name__ == "__main__":
     parser.add_argument('--val_set_name', type=str, default=None)
     parser.add_argument('--training_sets', type=str, default='default')
     parser.add_argument('--val_match_margin', type=int, default=300)
-    parser.add_argument('--val_match_insert_size_threshold', type=float, default=0.7)
+    parser.add_argument('--val_match_insert_delta_threshold', type=float, default=0.5)
     parser.add_argument('--skip_filtering', action='store_true', default=False)
     parser.add_argument('--additional_cols', type=str, default=None)
     parser.add_argument('--additional_callsets', type=str, default=None)
     parser.add_argument('--limit_to_callsets', type=str, default=None)
+    parser.add_argument('--ground_truth_name', type=str, default=None)
     parser.add_argument('--verbose', action='store_true', default=False)
     args = parser.parse_args()
 
@@ -1569,10 +1572,11 @@ if __name__ == "__main__":
         val_set_path=val_set_path,
         val_set_name=val_set_name,
         val_match_margin=args.val_match_margin,
-        val_match_insert_size_threshold=args.val_match_insert_size_threshold,
+        val_match_insert_delta_threshold=args.val_match_insert_delta_threshold,
         skip_filtering=args.skip_filtering,
         additional_cols=additional_cols,
         additional_callsets=additional_callsets,
         limit_to_callsets=limit_to_callsets,
+        ground_truth_name=args.ground_truth_name,
         verbose=args.verbose
     )

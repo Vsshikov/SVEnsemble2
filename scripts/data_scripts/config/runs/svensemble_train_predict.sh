@@ -31,6 +31,7 @@ RUN_MANTA=false
 RUN_GRIDSS=false
 RUN_DELLY=false
 RUN_SNIFFLES=false
+RUN_SNIFFLES_207=false
 RUN_SEVERUS=false
 RUN_SURVIVOR=false
 

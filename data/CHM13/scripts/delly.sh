@@ -1,1 +1,1 @@
-/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/scripts/data_scripts/delly.sh
+../../../scripts/data_scripts/delly.sh

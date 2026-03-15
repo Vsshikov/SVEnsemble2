@@ -265,16 +265,25 @@ def get_insert_size(bp_df: pd.DataFrame, source: str | None = None) -> pd.Series
     return insert_sizes
 
 
-def annotate_svtypes(bps_df, source):
+def annotate_svtypes(bps_df, source, insertion_length_threshold=0.7):
     """
     Annotate structural variant types for each breakpoint-pair record in a DataFrame.
 
     This function infers canonical SV types (DEL, INS, DUP, INV, or OTHER) from
     paired breakend orientation and chromosomal context.
 
+    Classification of complex indels (events with both a reference gap and assembled
+    insertion) follows the StructuralVariantAnnotation approach: an event is classified
+    as INS when ``ins_lens >= abs(net_event_length) * insertion_length_threshold``,
+    where net_event_length is ``ins_lens + 1 - pos_diff`` for DEL-like orientations
+    and ``ins_lens + 1 + pos_diff`` for DUP-like orientations.
+
     Args:
         bps_df (pd.DataFrame): DataFrame with breakpoint-pair records.
         source (str): SV caller/source string, required for insert size calculation.
+        insertion_length_threshold (float): Fraction of the absolute net event length
+            that the insertion must reach to be classified as INS rather than DEL/DUP.
+            Default 0.7 matches the GRIDSS simple-event-annotation.R script.
 
     Returns:
         pd.Series: Series of SV type strings for each record.
@@ -296,26 +305,25 @@ def annotate_svtypes(bps_df, source):
         | ((bnd1["relative_pos"] == "[N") & (bnd2["relative_pos"] == "[N"))
     )
     pos_diff = bps_df["POS_bnd2"] - bps_df["POS_bnd1"]
-    # Len of a deletion is pos_diff - 1, compare it to the insert length to separate dels and inss
-    pos2_gt_pos1_del_ins_mask = (
-        pos_diff - 1 > ins_lens
-    )
-    # Len of a duplication is pos_diff + 1 (as a duplication of a single nucleotide/DUP with len 1 will have pos of both breakends at the same coordinates), so create a mask to separate them from insertions this way
-    pos2_gt_pos1_dup_ins_mask = (
-        pos_diff + 1 > ins_lens
-    )
+
+    # StructuralVariantAnnotation-style net event lengths:
+    #   DEL orientation: insLen + 1 - pos_diff  (negative = net deletion)
+    #   DUP orientation: insLen + 1 + pos_diff  (always positive)
+    del_net_event_length = ins_lens + 1 - pos_diff
+    dup_net_event_length = ins_lens + 1 + pos_diff
+
+    # Classify as INS when insertion fills a significant fraction of the net change
+    ins_over_del_mask = ins_lens >= np.abs(del_net_event_length) * insertion_length_threshold
+    ins_over_dup_mask = ins_lens >= np.abs(dup_net_event_length) * insertion_length_threshold
 
     del_mask = (
-        same_chrom_mask & del_ins_bnds_mask & pos2_gt_pos1_del_ins_mask
+        same_chrom_mask & del_ins_bnds_mask & ~ins_over_del_mask
     )
-    # 2 cases for insertions:
-    # either it has bnd orientations like deletions and the deletion is smaller/same size than the insert
-    # or it has bnd orientations like duplications and the distance between bnds in the "amplified" region is smaller than the insert
     ins_mask = (
-        (same_chrom_mask & del_ins_bnds_mask & ~pos2_gt_pos1_del_ins_mask) | \
-        (same_chrom_mask & dup_bnds_mask & ~pos2_gt_pos1_dup_ins_mask)
+        (same_chrom_mask & del_ins_bnds_mask & ins_over_del_mask)
+        | (same_chrom_mask & dup_bnds_mask & ins_over_dup_mask)
     )
-    dup_mask = same_chrom_mask & dup_bnds_mask & pos2_gt_pos1_dup_ins_mask
+    dup_mask = same_chrom_mask & dup_bnds_mask & ~ins_over_dup_mask
     inv_mask = same_chrom_mask & inv_bnds_mask
 
     svtypes = np.full(len(bps_df), np.nan, dtype=object)

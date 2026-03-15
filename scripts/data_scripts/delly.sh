@@ -33,9 +33,11 @@ fi
 
 # Create a sorted bam if not present.
 SORTED_BAM="${WORKDIR}/temp/$(basename "${INPUT_BAM}" .minimap.bam).sorted.bam"
+SORT_TMP="$SAMPLE_DIR/temp/samtools_sort_delly"
+mkdir -p "$(dirname "$SORT_TMP")"
 if [ ! -f "${SORTED_BAM}" ]; then
     mkdir -p "${WORKDIR}/temp"
-    samtools sort -o "${SORTED_BAM}" "${INPUT_BAM}"
+    samtools sort -T "$SORT_TMP" -o "${SORTED_BAM}" "${INPUT_BAM}"
     samtools index "${SORTED_BAM}"
 fi
 

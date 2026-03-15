@@ -1,14 +1,14 @@
 #! /bin/bash
 
-workdir="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2"
+WORKDIR="/home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2"
 
-training_set_name=$1
-sample_name=$2
-model_name=$3
-use_gpu=$4
+TRAINING_SET_NAME=$1
+SAMPLE_NAME=$2
+MODEL_NAME=$3
+USE_GPU=$4
 
-if [ $use_gpu -eq 1 ]; then
-    sbatch $workdir/scripts/sv_shap.gpu.sh $training_set_name $sample_name $model_name
+if [ $USE_GPU -eq 1 ]; then
+    sbatch $WORKDIR/scripts/sv_shap.gpu.sh $TRAINING_SET_NAME $SAMPLE_NAME $MODEL_NAME
 else
-    sbatch $workdir/scripts/sv_shap.nogpu.sh $training_set_name $sample_name $model_name
+    sbatch $WORKDIR/scripts/sv_shap.nogpu.sh $TRAINING_SET_NAME $SAMPLE_NAME $MODEL_NAME
 fi
