@@ -171,7 +171,7 @@ class TestParsePreprocessCommon:
 
     @patch('svensemble.pipeline.vcfw.write_vcf')
     def test_multiple_callsets(self, mock_vcf_write, tmp_path):
-        config = self._setup_config(tmp_path, callset_names=['gridss', 'survivor'])
+        config = self._setup_config(tmp_path, callset_names=['gridss', 'survivor_short'])
         parse_preprocess_common('sample1', config)
         assert (config['workflow_dir'] / 'gridss.bps.csv').exists()
-        assert (config['workflow_dir'] / 'survivor.bps.csv').exists()
+        assert (config['workflow_dir'] / 'survivor_short.bps.csv').exists()

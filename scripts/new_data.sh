@@ -100,7 +100,7 @@ CRAM_REF_CACHE=
 # Uncomment and modify as needed. Everything else inherits from default_run.sh.
 # SVE_MODELS=("unbiased")
 # SVE_TRAINING_SETS=("gridss" "delly" "manta_diploid")
-# SVE_BENCH_ADDITIONAL_CALLSETS=("survivor")
+# SVE_BENCH_ADDITIONAL_CALLSETS=("survivor_short")
 SAMPLE_EOF
 
 # --------------- Generate default run config ---------------------------------

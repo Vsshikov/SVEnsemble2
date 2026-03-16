@@ -21,7 +21,6 @@ _config_name=$(basename "$SOURCE_FILE" .sh)
 LOG_DIR="$SAMPLE_DIR/logs/run/${_timestamp}_${_config_name}_${RUN_ID:0:8}"
 unset _timestamp _config_name
 mkdir -p "$LOG_DIR"
-mkdir -p "$LOG_DIR"/{bazam_sam,bazam_cram,minimap,minimap_long,manta,gridss,delly,sniffles,sniffles_207,survivor,sve_preprocess,svensemble2,benchmark,shap,finalizer}
 cat "$SOURCE_FILE" > "$LOG_DIR/master_args.sh"
 
 touch "$LOG_DIR/run.log"
@@ -50,11 +49,16 @@ minimap_id=""
 manta_id=""
 gridss_id=""
 delly_id=""
+svaba_id=""
 minimap_long_id=""
 sniffles_id=""
 sniffles_207_id=""
 severus_id=""
-survivor_id=""
+svdss_id=""
+cutesv_id=""
+survivor_short_id=""
+survivor_long_id=""
+survivor_all_id=""
 sve_preprocess_id=""
 sve_array_id=""
 bench_array_id=""
@@ -78,6 +82,7 @@ caller_long_dep=""
 # only (not stdout) so the caller can capture the job ID cleanly.
 submit_job() {
     local name="$1" dep_flag="$2"; shift 2
+    mkdir -p "$LOG_DIR/${name}"
     local job_id
     job_id=$(sbatch --parsable \
         --chdir="$SAMPLE_DIR" \
@@ -114,10 +119,10 @@ require_file "$REF_FASTA"
     printf "REF_FASTA=%s\n"        "$REF_FASTA"
     printf "RERUN=%s  SKIP_REALIGNMENT=%s  RUN_BAZAM=%s\n" \
         "${RERUN:-}" "${SKIP_REALIGNMENT:-}" "${RUN_BAZAM:-}"
-    printf "RUN_MANTA=%s  RUN_GRIDSS=%s  RUN_DELLY=%s\n" \
-        "${RUN_MANTA:-}" "${RUN_GRIDSS:-}" "${RUN_DELLY:-}"
-    printf "RUN_SNIFFLES=%s  RUN_SNIFFLES_207=%s  RUN_SEVERUS=%s  RUN_SURVIVOR=%s\n" \
-        "${RUN_SNIFFLES:-}" "${RUN_SNIFFLES_207:-}" "${RUN_SEVERUS:-}" "${RUN_SURVIVOR:-}"
+    printf "RUN_MANTA=%s  RUN_GRIDSS=%s  RUN_DELLY=%s  RUN_SVABA=%s\n" \
+        "${RUN_MANTA:-}" "${RUN_GRIDSS:-}" "${RUN_DELLY:-}" "${RUN_SVABA:-}"
+    printf "RUN_SNIFFLES=%s  RUN_SNIFFLES_207=%s  RUN_SEVERUS=%s  RUN_SVDSS=%s  RUN_CUTESV=%s  RUN_SURVIVOR=%s  SURVIVOR_MODES=(%s)\n" \
+        "${RUN_SNIFFLES:-}" "${RUN_SNIFFLES_207:-}" "${RUN_SEVERUS:-}" "${RUN_SVDSS:-}" "${RUN_CUTESV:-}" "${RUN_SURVIVOR:-}" "${SURVIVOR_MODES[*]:-}"
     printf "RUN_SVENSEMBLE2=%s  RUN_BENCHMARK=%s  RUN_SHAP=%s\n" \
         "${RUN_SVENSEMBLE2:-}" "${RUN_BENCHMARK:-}" "${RUN_SHAP:-}"
     printf "SVE_MODELS=(%s)\n"        "${SVE_MODELS[*]:-}"
@@ -225,6 +230,11 @@ if [[ "$RUN_DELLY" == "true" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_call
         "$SAMPLE_DIR/scripts/delly.sh" "$SOURCE_FILE")
 fi
 
+if [[ "$RUN_SVABA" == "true" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_calling/svaba/out/${SAMPLE_NAME}.svaba.sv.vcf" )]]; then
+    svaba_id=$(submit_job svaba "$caller_dep" \
+        "$SAMPLE_DIR/scripts/svaba.sh" "$SOURCE_FILE")
+fi
+
 # ========== ========== LONG READS ========== ==========
 
 # ========== LONG READ ALIGNMENT ==========
@@ -255,7 +265,7 @@ if [[ "$RUN_SNIFFLES_207" == "true" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/
         "$SAMPLE_DIR/scripts/sniffles_207.sh" "$SOURCE_FILE")
 fi
 
-if [[ "$RUN_SEVERUS" == "true" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_calling/severus/out/${SAMPLE_NAME}.long.severus.vcf" )]]; then
+if [[ "$RUN_SEVERUS" == "true" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_calling/severus/all_SVs/severus_all.vcf" )]]; then
     if [[ -z "$READS_LONG_PATHS" ]]; then
         die "READS_LONG_PATHS is not set — required for severus (RUN_SEVERUS=true)"
     fi
@@ -263,26 +273,75 @@ if [[ "$RUN_SEVERUS" == "true" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_ca
         "$SAMPLE_DIR/scripts/severus.sh" "$SOURCE_FILE")
 fi
 
+if [[ "$RUN_SVDSS" == "true" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_calling/svdss/out/variations-final.vcf.gz" )]]; then
+    if [[ -z "$READS_LONG_PATHS" ]]; then
+        die "READS_LONG_PATHS is not set — required for svdss (RUN_SVDSS=true)"
+    fi
+    svdss_id=$(submit_job svdss "$caller_long_dep" \
+        "$SAMPLE_DIR/scripts/svdss.sh" "$SOURCE_FILE")
+fi
+
+if [[ "$RUN_CUTESV" == "true" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_calling/cutesv/out/${SAMPLE_NAME}.long.cutesv.vcf") ]]; then
+    if [[ -z "$READS_LONG_PATHS" ]]; then
+        die "READS_LONG_PATHS is not set — required for cutesv (RUN_CUTESV=true)"
+    fi
+    cutesv_id=$(submit_job cutesv "$caller_long_dep" \
+        "$SAMPLE_DIR/scripts/cutesv.sh" "$SOURCE_FILE")
+fi
+
 # ========== ========== POST-CALLING PROCESSING ========== ==========
 
-# ========== ENSEMBLE/CONSENSUS CALLERS ==========
+# ========== ENSEMBLE/CONSENSUS CALLERS (SURVIVOR) ==========
 
-if [[ "$RUN_SURVIVOR" == "true" && ("$RERUN" == "true" || ! -f "$SAMPLE_DIR/sv_calling/survivor/${SAMPLE_NAME}.survivor.vcf" )]]; then
-    if [[ -n "$manta_id" && -n "$gridss_id" && -n "$delly_id" ]]; then
-        survivor_dep="--dependency=afterok:$manta_id:$gridss_id:$delly_id"
-    else
-        survivor_dep=""
-    fi
+if [[ "$RUN_SURVIVOR" == "true" ]]; then
+    for _surv_mode in "${SURVIVOR_MODES[@]}"; do
+        _surv_output="$SAMPLE_DIR/sv_calling/survivor/${SAMPLE_NAME}.survivor_${_surv_mode}.vcf"
 
-    survivor_id=$(submit_job survivor "$survivor_dep" \
-        "$SAMPLE_DIR/scripts/survivor.sh" "$SOURCE_FILE")
+        if [[ "$RERUN" != "true" && -f "$_surv_output" ]]; then
+            logI "SURVIVOR ${_surv_mode}: output exists, skipping — $_surv_output"
+            continue
+        fi
+
+        # Build per-mode dependency string from upstream caller job IDs
+        _surv_dep_ids=""
+        case "$_surv_mode" in
+            short)
+                for _id in "$manta_id" "$gridss_id" "$delly_id" "$svaba_id"; do
+                    [[ -n "$_id" ]] && _surv_dep_ids="${_surv_dep_ids}:${_id}"
+                done
+                ;;
+            long)
+                for _id in "$sniffles_id" "$sniffles_207_id" "$severus_id" "$svdss_id" "$cutesv_id"; do
+                    [[ -n "$_id" ]] && _surv_dep_ids="${_surv_dep_ids}:${_id}"
+                done
+                ;;
+            all)
+                for _id in "$manta_id" "$gridss_id" "$delly_id" "$svaba_id" \
+                           "$sniffles_id" "$sniffles_207_id" "$severus_id" "$svdss_id" "$cutesv_id"; do
+                    [[ -n "$_id" ]] && _surv_dep_ids="${_surv_dep_ids}:${_id}"
+                done
+                ;;
+            *)
+                die "Unknown SURVIVOR_MODE: $_surv_mode (expected short, long, or all)"
+                ;;
+        esac
+        [[ -n "$_surv_dep_ids" ]] && _surv_dep="--dependency=afterok${_surv_dep_ids}" \
+                                  || _surv_dep=""
+
+        _surv_job_id=$(submit_job "survivor_${_surv_mode}" "$_surv_dep" \
+            "$SAMPLE_DIR/scripts/survivor.sh" "$SOURCE_FILE" "$_surv_mode")
+
+        # Store job ID in the mode-specific variable
+        declare "survivor_${_surv_mode}_id=$_surv_job_id"
+    done
 fi
 
 # ========== ========== SVENSEMBLE2 PIPELINE ========== ==========
 
 # Collect all caller job IDs into a single dependency string
 _svensemble_dep_ids=""
-for _id in "$manta_id" "$gridss_id" "$delly_id" "$sniffles_id" "$sniffles_207_id" "$severus_id" "$survivor_id"; do
+for _id in "$manta_id" "$gridss_id" "$delly_id" "$svaba_id" "$sniffles_id" "$sniffles_207_id" "$severus_id" "$svdss_id" "$cutesv_id" \
+           "$survivor_short_id" "$survivor_long_id" "$survivor_all_id"; do
     [[ -n "$_id" ]] && _svensemble_dep_ids="${_svensemble_dep_ids}:${_id}"
 done
 logI "Caller jobs submitted for $SAMPLE_NAME: ${_svensemble_dep_ids:-none}"
@@ -290,6 +349,7 @@ logI "Caller jobs submitted for $SAMPLE_NAME: ${_svensemble_dep_ids:-none}"
 
 # --- Raw VCF preprocessing (single job, runs once per sample) ---------------
 if [[ "$RUN_SVENSEMBLE2" == "true" ]]; then
+    mkdir -p "$LOG_DIR/sve_preprocess"
     sve_preprocess_id=$(sbatch --parsable --chdir="$SAMPLE_DIR" $caller_dep \
         --job-name="preproc_${SAMPLE_NAME}" \
         --output="$LOG_DIR/sve_preprocess/%j.out" \
@@ -313,6 +373,7 @@ if [[ "$RUN_SVENSEMBLE2" == "true" ]]; then
         _gt_suffix=".gt_${SVE_GROUND_TRUTH_SAMPLE_NAME}"
     fi
 
+    mkdir -p "$LOG_DIR/svensemble2"
     SVE_TASK_FILE="$LOG_DIR/svensemble2/tasks.tsv"
     for sve_model in "${SVE_MODELS[@]}"; do
         for sve_training_set in "${SVE_TRAINING_SETS[@]}"; do
@@ -368,6 +429,7 @@ if [[ "$BENCHMARK" == "true" || "$RUN_BENCHMARK" == "true" ]]; then
     [[ ${#_bench_svlen_lower_list[@]} -eq 0 ]] && _bench_svlen_lower_list=("")
 
     # Submit one SLURM array job covering all model × training_set × svtypes × svlen_lower combinations.
+    mkdir -p "$LOG_DIR/benchmark"
     BENCH_TASK_FILE="$LOG_DIR/benchmark/tasks.tsv"
     for sve_model in "${SVE_MODELS[@]}"; do
         for sve_training_set in "${SVE_TRAINING_SETS[@]}"; do
@@ -411,6 +473,7 @@ if [[ "$RUN_SHAP" == "true" ]]; then
     # Resolve per-task GPU flag (0 or 1)
     [[ "$SVE_SHAP_USE_GPU" == "true" ]] && _gpu_flag="1" || _gpu_flag="0"
 
+    mkdir -p "$LOG_DIR/shap"
     SHAP_TASK_FILE="$LOG_DIR/shap/tasks.tsv"
     for sve_model in "${SVE_MODELS[@]}"; do
         for sve_training_set in "${SVE_TRAINING_SETS[@]}"; do
@@ -448,9 +511,10 @@ fi
 
 _all_job_ids=()
 for _id in "$preprocess_sam_id" "$preprocess_cram_id" "$minimap_id" \
-           "$manta_id" "$gridss_id" "$delly_id" \
-           "$minimap_long_id" "$sniffles_id" "$sniffles_207_id" "$severus_id" \
-           "$survivor_id" "$sve_preprocess_id" "$sve_array_id" \
+           "$manta_id" "$gridss_id" "$delly_id" "$svaba_id" \
+           "$minimap_long_id" "$sniffles_id" "$sniffles_207_id" "$severus_id" "$svdss_id" "$cutesv_id" \
+           "$survivor_short_id" "$survivor_long_id" "$survivor_all_id" \
+           "$sve_preprocess_id" "$sve_array_id" \
            "$bench_array_id" "$shap_array_id"; do
     [[ -n "$_id" ]] && _all_job_ids+=("$_id")
 done
@@ -460,6 +524,7 @@ if (( ${#_all_job_ids[@]} > 0 )); then
     _finalizer_dep_str=$(IFS=:; printf '%s' "${_all_job_ids[*]}")
     _finalizer_dep="--dependency=afterany:${_finalizer_dep_str}"
 
+    mkdir -p "$LOG_DIR/finalizer"
     # shellcheck disable=SC2086
     sbatch --parsable --chdir="$SAMPLE_DIR" $_finalizer_dep \
         --job-name="final_${SAMPLE_NAME}" \

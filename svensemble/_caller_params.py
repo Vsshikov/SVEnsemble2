@@ -8,6 +8,8 @@ Added callers:
 - manta
 - delly
 - sniffles
+- cutesv
+- svaba
 
 The file also contains parameters for working with VCF files from reference SV sets.
 Currently, only gnomAD is supported.
@@ -93,6 +95,23 @@ training_set_presets = {
     'sniffles+gridss+manta_diploid': ['sniffles', 'gridss', 'manta_diploid'],
     'sniffles+gridss+manta_candidate+delly': ['sniffles', 'gridss', 'manta_candidate', 'delly'],
     'sniffles+gridss+manta_diploid+delly': ['sniffles', 'gridss', 'manta_diploid', 'delly'],
+    'severus': ['severus'],
+    'sniffles+severus': ['sniffles', 'severus'],
+    'gridss+manta_diploid+delly+sniffles+severus': ['gridss', 'manta_diploid', 'delly', 'sniffles', 'severus'],
+    'cutesv': ['cutesv'],
+    'cutesv+sniffles': ['cutesv', 'sniffles'],
+    'cutesv+severus': ['cutesv', 'severus'],
+    'cutesv+sniffles+severus': ['cutesv', 'sniffles', 'severus'],
+    'sniffles+severus+cutesv': ['sniffles', 'severus', 'cutesv'],
+    'sniffles+severus+cutesv+gridss+manta_diploid+delly': ['sniffles', 'severus', 'cutesv', 'gridss', 'manta_diploid', 'delly'],
+    'svaba': ['svaba'],
+    'svaba+gridss': ['svaba', 'gridss'],
+    'svaba+manta_diploid': ['svaba', 'manta_diploid'],
+    'svaba+delly': ['svaba', 'delly'],
+    'svaba+manta_diploid+delly': ['svaba', 'manta_diploid', 'delly'],
+    'gridss+manta_diploid+delly+svaba': ['gridss', 'manta_diploid', 'delly', 'svaba'],
+    'sniffles+gridss+manta_diploid+delly+svaba': ['sniffles', 'gridss', 'manta_diploid', 'delly', 'svaba'],
+    'sniffles+severus+cutesv+gridss+manta_diploid+delly+svaba': ['sniffles', 'severus', 'cutesv', 'gridss', 'manta_diploid', 'delly', 'svaba'],
 }
 
 training_set_list_presets = {
@@ -121,7 +140,8 @@ training_set_list_presets = {
         'sniffles+gridss+manta_diploid',
         'sniffles+gridss+manta_candidate+delly',
         'sniffles+gridss+manta_diploid+delly',
-    ]
+    ],
+    'all': [training_set for training_set in training_set_presets.keys()]
 }
 
 
@@ -286,8 +306,20 @@ delly_params = default_params | {
 }
 
 survivor_params = default_event_params | {
-    'source': 'survivor',
-    'bps_path': 'survivor.bps.csv',
+    'source': 'survivor_short',
+    'bps_path': 'survivor_short.bps.csv',
+    'bnd2_pos': 'end',
+}
+
+survivor_long_params = default_event_params | {
+    'source': 'survivor_long',
+    'bps_path': 'survivor_long.bps.csv',
+    'bnd2_pos': 'end',
+}
+
+survivor_all_params = default_event_params | {
+    'source': 'survivor_all',
+    'bps_path': 'survivor_all.bps.csv',
     'bnd2_pos': 'end',
 }
 
@@ -477,6 +509,142 @@ sniffles_207_H_params = sniffles_207_params | {
     'bps_path': 'sniffles_207_H.bps.csv',
 }
 
+# Parameters for Severus (long-read SV caller)
+severus_filters = [
+    'PASS',
+    'FAIL_LOWSUPP',
+    'FAIL_MAP_CONS',
+    'FAIL_CONN_CONS',
+    'FAIL_LOWCOV_OTHER',
+]
+severus_info_mandatory_cols = [
+    'SVTYPE',
+    'SVLEN',
+    'MATE_ID',
+]
+severus_info_pred_cols = [
+    'MAPQ',
+    'PRECISE',
+    'IMPRECISE',
+    'INSLEN',
+    'SVLEN',
+]
+
+severus_params = default_params | {
+    'source': 'severus',
+    'base_cols': base_cols + ['INFO_END'],
+    'filter_cols': severus_filters,
+    'info_cols_mandatory': severus_info_mandatory_cols,
+    'info_cols_pred': severus_info_pred_cols,
+    'parse_format': True,
+    'format_cols': ['GT', 'DR', 'DV', 'VAF', 'hVAF'],
+    'svlen_source': 'svlen',
+    'bps_path': 'severus.bps.csv',
+    'bnd2_pos': 'end',
+}
+
+severus_H_params = severus_params | {
+    'bps_path': 'severus_H.bps.csv',
+}
+
+# Parameters for CuteSV (long-read SV caller)
+cutesv_filters = [
+    'PASS',
+    'q5',
+]
+cutesv_info_mandatory_cols = [
+    'SVTYPE',
+    'SVLEN',
+    'CHR2',
+    'CIPOS',
+    'CILEN',
+]
+cutesv_info_pred_cols = [
+    'RE',
+    'AF',
+    'PRECISE',
+    'IMPRECISE',
+    'SVLEN',
+]
+
+cutesv_params = default_params | {
+    'source': 'cutesv',
+    'base_cols': base_cols + ['INFO_END'],
+    'filter_cols': cutesv_filters,
+    'info_cols_mandatory': cutesv_info_mandatory_cols,
+    'info_cols_pred': cutesv_info_pred_cols,
+    'parse_format': True,
+    'format_cols': ['GT', 'GQ', 'DR', 'DV'],
+    'svlen_source': 'svlen',
+    'bps_path': 'cutesv.bps.csv',
+    'bnd2_pos': 'end',
+}
+
+cutesv_H_params = cutesv_params | {
+    'bps_path': 'cutesv_H.bps.csv',
+}
+
+# Parameters for SvABA (short-read SV caller, local assembly-based)
+svaba_filters = [
+    'PASS',
+    'LOWSPANDSCRD',
+    'MULTIMATCH',
+    'TOOSHORT',
+    'LOWAS',
+    'LOWICSUPPORT',
+    'LOCALMATCH',
+    'WEAKSUPPORTHIREP',
+    'LOWQINVERSION',
+    'HIGHHOMOLOGY',
+    'NOLOCAL',
+    'LOWMAPQDISC',
+    'NODISC',
+    'COMPETEDISC',
+    'LOWMATCHLEN',
+    'LOWSPAN',
+    'WEAKDISC',
+    'LOWSPLITSMALL',
+    'DUPREADS',
+    'LOWMAPQ',
+    'SIMPLESEQUENCE',
+    'LOWSUPPORT',
+    'SINGLEBX',
+]
+svaba_info_mandatory_cols = [
+    'MATEID',
+    'SVTYPE',
+    'HOMSEQ',
+]
+svaba_info_pred_cols = [
+    'DISC_MAPQ',
+    'EVDNC',
+    'NUMPARTS',
+    'MAPQ',
+    'SPAN',
+    'NM',
+    'MATENM',
+    'IMPRECISE',
+    'HOMLEN',
+    'SUBN',
+    'SECONDARY',
+]
+
+svaba_params = default_params | {
+    'source': 'svaba',
+    'filter_cols': svaba_filters,
+    'info_cols_mandatory': svaba_info_mandatory_cols,
+    'info_cols_pred': svaba_info_pred_cols,
+    'parse_format': True,
+    'format_cols': ['GT', 'GQ', 'AD', 'DP', 'SR', 'DR', 'LO', 'SL', 'LR', 'PL'],
+    'svlen_source': 'alt',
+    'bps_path': 'svaba.bps.csv',
+    'bnd2_pos': None,
+}
+
+svaba_H_params = svaba_params | {
+    'bps_path': 'svaba_H.bps.csv',
+}
+
 caller_param_dict = {
     'gnomad': gnomad_params,
     'gnomad_filtered': gnomad_filtered_params,
@@ -495,10 +663,18 @@ caller_param_dict = {
     'huddleston': huddleston_params,
     'hg00514_val': hg00514_params,
     'hgsvc2': hgsvc2_params,
-    'survivor': survivor_params,
+    'survivor_short': survivor_params,
+    'survivor_long': survivor_long_params,
+    'survivor_all': survivor_all_params,
     'gridss_H': gridss_H_params,
     'sniffles_207': sniffles_207_params,
-    'sniffles_207_H': sniffles_207_H_params
+    'sniffles_207_H': sniffles_207_H_params,
+    'severus': severus_params,
+    'severus_H': severus_H_params,
+    'cutesv': cutesv_params,
+    'cutesv_H': cutesv_H_params,
+    'svaba': svaba_params,
+    'svaba_H': svaba_H_params,
 }
 
 # Maps each caller_name to (source, svensemble_dir_template, path_template).
@@ -545,10 +721,20 @@ callset_path_configs: dict[str, tuple[str, str, str]] = {
         'data/{s}/sv_calling/delly/svensemble2',
         'data/{s}/sv_calling/delly/out/{s}.delly.bcf',
     ),
-    'survivor': (
-        'survivor',
+    'survivor_short': (
+        'survivor_short',
         'data/{s}/sv_calling/survivor/svensemble2',
-        'data/{s}/sv_calling/survivor/{s}.survivor.vcf',
+        'data/{s}/sv_calling/survivor/{s}.survivor_short.vcf',
+    ),
+    'survivor_long': (
+        'survivor_long',
+        'data/{s}/sv_calling/survivor/svensemble2',
+        'data/{s}/sv_calling/survivor/{s}.survivor_long.vcf',
+    ),
+    'survivor_all': (
+        'survivor_all',
+        'data/{s}/sv_calling/survivor/svensemble2',
+        'data/{s}/sv_calling/survivor/{s}.survivor_all.vcf',
     ),
     'sniffles': (
         'sniffles',
@@ -570,6 +756,36 @@ callset_path_configs: dict[str, tuple[str, str, str]] = {
         'data/{s}/sv_calling/sniffles_207/svensemble2',
         'data/{s}/sv_calling/sniffles_207/out/{s}.long.sniffles_207.vcf',
     ),
+    'severus': (
+        'severus',
+        'data/{s}/sv_calling/severus/svensemble2',
+        'data/{s}/sv_calling/severus/all_SVs/severus_all.vcf',
+    ),
+    'severus_H': (
+        'severus',
+        'data/{s}/sv_calling/severus/svensemble2',
+        'data/{s}/sv_calling/severus/all_SVs/severus_all.vcf',
+    ),
+    'cutesv': (
+        'cutesv',
+        'data/{s}/sv_calling/cutesv/svensemble2',
+        'data/{s}/sv_calling/cutesv/out/{s}.long.cutesv.vcf',
+    ),
+    'cutesv_H': (
+        'cutesv',
+        'data/{s}/sv_calling/cutesv/svensemble2',
+        'data/{s}/sv_calling/cutesv/out/{s}.long.cutesv.vcf',
+    ),
+    'svaba': (
+        'svaba',
+        'data/{s}/sv_calling/svaba/svensemble2',
+        'data/{s}/sv_calling/svaba/out/{s}.svaba.unfiltered.sv.vcf',
+    ),
+    'svaba_H': (
+        'svaba_H',
+        'data/{s}/sv_calling/svaba/svensemble2',
+        'data/{s}/sv_calling/svaba/out/{s}.svaba.sv.vcf',
+    ),
 }
 
 caller_alt_priority = [
@@ -577,8 +793,13 @@ caller_alt_priority = [
     'manta_candidate',
     'manta_diploid',
     'delly',
+    'svaba',
     'sniffles',
-    'survivor'
+    'severus',
+    'cutesv',
+    'survivor_short',
+    'survivor_long',
+    'survivor_all'
 ]
 
 # Fill in the rest of the callset order with the remaining callsets

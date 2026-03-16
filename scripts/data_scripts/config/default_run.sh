@@ -48,19 +48,23 @@ RUN_MINIMAP_LONG=
 RUN_MANTA=true
 RUN_GRIDSS=true
 RUN_DELLY=true
-RUN_SNIFFLES=
+RUN_SNIFFLES=true
 RUN_SNIFFLES_207=
 RUN_SURVIVOR=true
-RUN_SEVERUS=
+SURVIVOR_MODES=("short" "long" "all")
+RUN_SEVERUS=true
+RUN_SVDSS=
+RUN_SVABA=true
+RUN_CUTESV=true
 RUN_SVENSEMBLE2=true
 RUN_BENCHMARK=true
 RUN_SHAP=
 
 # --------------- Run control ------------------------------------------------
 RERUN=false
-SVENSEMBLE2_RERUN=false    # Re-run SVEnsemble2 even when RERUN=false
-BENCHMARK=false            # Run benchmarking after SVEnsemble2 predictions
-SKIP_REALIGNMENT=false
+SVENSEMBLE2_RERUN=true    # Re-run SVEnsemble2 even when RERUN=false
+BENCHMARK=true            # Run benchmarking after SVEnsemble2 predictions
+SKIP_REALIGNMENT=true
 
 # --------------- BAM / SAM / CRAM input (sample-specific, empty here) ------
 SAM_INPUT=
@@ -70,14 +74,14 @@ CRAM_REF_PATH=
 CRAM_REF_CACHE=
 
 # --------------- SVEnsemble2 pipeline parameters ----------------------------
-SVE_GROUND_TRUTH_SAMPLE_NAME=gnomad
+SVE_GROUND_TRUTH_SAMPLE_NAME=gnomad_pass
 SVE_VERBOSE=true
 SVE_MEM=32G
 
 # Default model set — run configs that need additional models override this.
 SVE_MODELS=(
-    "unbiased"
-    "unbiased_GT"
+    # "unbiased"
+    # "unbiased_GT"
     "unbiased_xgb"
     "unbiased_xgb_GT"
     "unbiased_d31"
@@ -87,7 +91,7 @@ SVE_MODELS=(
 # Callsets whose VCFs are parsed into raw breakpoints during the preprocess
 # stage. Every callset referenced in SVE_TRAINING_SETS (directly or as part of
 # a composite name) must appear here, plus any extra callsets needed for
-# benchmarking (e.g. survivor).
+# benchmarking (e.g. survivor_short).
 # NOTE: When adding or removing a caller from the pipeline step flags above,
 # update this list accordingly.
 SVE_CALLSETS=(
@@ -96,14 +100,22 @@ SVE_CALLSETS=(
     "manta_candidate"
     "manta_diploid"
     "delly"
-    # "sniffles"
-    # "sniffles_H"
+    "sniffles"
+    "sniffles_H"
     # "sniffles_207"
     # "sniffles_207_H"
-    "survivor"
+    "severus"
+    "severus_H"
+    "cutesv"
+    "cutesv_H"
+    "svaba"
+    "svaba_H"
+    "survivor_short"
+    "survivor_long"
+    "survivor_all"
 )
 
-# Default training-set preset list (no sniffles).
+# Default training-set preset list (short-read + long-read callers).
 # Available presets: default, gridss, manta_candidate, manta_diploid, delly,
 #   gridss+manta_candidate, gridss+manta_diploid, gridss+delly,
 #   gridss+manta_candidate+delly, gridss+manta_diploid+delly,
@@ -112,29 +124,36 @@ SVE_CALLSETS=(
 #   sniffles+delly, sniffles+manta_candidate+delly, sniffles+manta_diploid+delly,
 #   sniffles+gridss+manta_candidate, sniffles+gridss+manta_diploid, etc.
 #   sniffles_207, sniffles_207+gridss, sniffles_207+manta_candidate, etc.
+#   severus, sniffles+severus, gridss+manta_diploid+delly+sniffles+severus
+#   cutesv, cutesv+sniffles, cutesv+severus, cutesv+sniffles+severus,
+#   sniffles+severus+cutesv, sniffles+severus+cutesv+gridss+manta_diploid+delly
+#   svaba, svaba+gridss, svaba+manta_diploid, svaba+delly,
+#   svaba+manta_diploid+delly, gridss+manta_diploid+delly+svaba,
+#   sniffles+gridss+manta_diploid+delly+svaba,
+#   sniffles+severus+cutesv+gridss+manta_diploid+delly+svaba
 SVE_TRAINING_SETS=(
     "gridss"
     "manta_candidate"
     "manta_diploid"
     "delly"
-    "gridss+manta_candidate"
+    "sniffles"
+    # "gridss+manta_candidate"
     "gridss+manta_diploid"
     "gridss+delly"
-    "gridss+manta_candidate+delly"
+    # "gridss+manta_candidate+delly"
     "gridss+manta_diploid+delly"
     "delly+manta_candidate"
     "delly+manta_diploid"
-    # "sniffles"
-    # "sniffles+gridss"
+    "sniffles+gridss"
     # "sniffles+manta_candidate"
-    # "sniffles+manta_diploid"
-    # "sniffles+delly"
+    "sniffles+manta_diploid"
+    "sniffles+delly"
     # "sniffles+manta_candidate+delly"
-    # "sniffles+manta_diploid+delly"
+    "sniffles+manta_diploid+delly"
     # "sniffles+gridss+manta_candidate"
-    # "sniffles+gridss+manta_diploid"
+    "sniffles+gridss+manta_diploid"
     # "sniffles+gridss+manta_candidate+delly"
-    # "sniffles+gridss+manta_diploid+delly"
+    "sniffles+gridss+manta_diploid+delly"
     # "sniffles_207"
     # "sniffles_207+gridss"
     # "sniffles_207+manta_candidate"
@@ -146,6 +165,20 @@ SVE_TRAINING_SETS=(
     # "sniffles_207+gridss+manta_diploid"
     # "sniffles_207+gridss+manta_candidate+delly"
     # "sniffles_207+gridss+manta_diploid+delly"
+    "cutesv"
+    "severus"
+    "sniffles+severus"
+    "gridss+manta_diploid+delly+sniffles+severus"
+    "cutesv+sniffles"
+    "cutesv+severus"
+    "cutesv+sniffles+severus"
+    "sniffles+severus+cutesv"
+    "sniffles+severus+cutesv+gridss+manta_diploid+delly"
+    "svaba"
+    "svaba+gridss"
+    "svaba+manta_diploid+delly"
+    "gridss+manta_diploid+delly+svaba"
+    "sniffles+severus+cutesv+gridss+manta_diploid+delly+svaba"
 )
 
 # Pipeline processing steps
@@ -181,8 +214,14 @@ SVE_BENCH_VAL_MATCH_INSERT_DELTA_THRESHOLD=0.7
 # Extra callsets and columns included in all benchmark outputs.
 # Run configs override these when needed.
 SVE_BENCH_ADDITIONAL_CALLSETS=(
-    "survivor"
+    "survivor_short"
+    "survivor_long"
+    "survivor_all"
     "gridss_H"
+    "sniffles_H"
+    "severus_H"
+    "cutesv_H"
+    "svaba_H"
 )
 SVE_BENCH_ADDITIONAL_COLS=(
     "FILTER_PASS"

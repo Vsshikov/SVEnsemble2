@@ -210,14 +210,37 @@ _style_mappings = {
             'label': 'DE',
         }
     },
-    'survivor': {
+    'survivor_short': {
         'line': {
-            'color': xgfs_fancy6[1],
-            'linewidth': 1.5,
-            'label': 'SURVIVOR 2 out of 3 Consensus',
+            'color': (0.55, 0.45, 0.95),
+            'linewidth': 1,
+            'dashes': (6, 2.5),
+            'label': 'SURVIVOR Short-Read Consensus',
         },
         'text': {
-            'label': 'SU',
+            'label': 'SU-S',
+        }
+    },
+    'survivor_long': {
+        'line': {
+            'color': (0.88, 0.45, 0.72),
+            'linewidth': 1,
+            'dashes': (6, 2.5),
+            'label': 'SURVIVOR Long-Read Consensus',
+        },
+        'text': {
+            'label': 'SU-L',
+        }
+    },
+    'survivor_all': {
+        'line': {
+            'color': (0.45, 0.35, 0.65),
+            'linewidth': 1,
+            'dashes': (6, 2.5),
+            'label': 'SURVIVOR All-Caller Consensus',
+        },
+        'text': {
+            'label': 'SU-A',
         }
     },
     'svensemble2_delly+manta_diploid': {
@@ -292,6 +315,60 @@ _style_mappings = {
         },
         'text': {
             'label': 'SN_H',
+        }
+    },
+    'severus': {
+        'line': {
+            'color': xgfs_fancy_ext[3],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'Severus',
+        },
+        'text': {
+            'label': 'SV',
+        }
+    },
+    'severus_H': {
+        'line': {
+            'color': xgfs_fancy_ext[3],
+            'linewidth': 1,
+            'dashes': (2, 2),
+            'label': 'Severus (High Confidence Calls)',
+        },
+        'text': {
+            'label': 'SV_H',
+        }
+    },
+    'cutesv': {
+        'line': {
+            'color': xgfs_fancy_ext[4],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'CuteSV',
+        },
+        'text': {
+            'label': 'CS',
+        }
+    },
+    'cutesv_H': {
+        'line': {
+            'color': xgfs_fancy_ext[4],
+            'linewidth': 1,
+            'dashes': (2, 2),
+            'label': 'CuteSV (High Confidence Calls)',
+        },
+        'text': {
+            'label': 'CS_H',
+        }
+    },
+    'svensemble2_cutesv': {
+        'line': {
+            'color': xgfs_fancy_ext[4],
+            'linewidth': 1,
+            'label': 'SVEnsemble2 (CuteSV)',
+        },
+        'text': {
+            'label': 'CS',
         }
     },
     'svensemble2_sniffles': {
@@ -422,7 +499,14 @@ _callset_order = [
     'sniffles',
     'sniffles_H',
     'svensemble2_sniffles',
-    'survivor',
+    'severus',
+    'severus_H',
+    'cutesv',
+    'cutesv_H',
+    'svensemble2_cutesv',
+    'survivor_short',
+    'survivor_long',
+    'survivor_all',
     'svensemble2_delly+manta_diploid',
     'svensemble2_gridss+manta_diploid',
     'svensemble2_sniffles+gridss',

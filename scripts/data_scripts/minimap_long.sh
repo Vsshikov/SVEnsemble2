@@ -44,17 +44,27 @@ fi
 
 echo "Using minimap2 preset for long reads: $RESOLVED_PRESET"
 
+# Validate all input files exist before opening output (prevents destroying
+# an existing BAM when inputs are missing, e.g. purged from scratch).
+for f in "${READS_LONG_PATHS[@]}"; do
+    [ -f "$f" ] || { echo "ERROR: Input file not found: $f" >&2; exit 1; }
+done
+
+OUT_BAM_TMP="${OUT_BAM}.tmp.bam"
+
 if [[ "${READS_LONG_PATHS[0]}" == *.bam ]]; then
     echo "Input is BAM — converting to FASTQ before alignment"
     samtools cat "${READS_LONG_PATHS[@]}" \
         | samtools fastq - \
         | $MINIMAP2_PATH -t 16 -ax "$RESOLVED_PRESET" $REF_FASTA - \
-        | samtools sort -m 4G -@16 -T "$SORT_TMP" -o $OUT_BAM -
+        | samtools sort -m 4G -@16 -T "$SORT_TMP" -o "$OUT_BAM_TMP" -
 else
     $MINIMAP2_PATH -t 16 -ax "$RESOLVED_PRESET" $REF_FASTA "${READS_LONG_PATHS[@]}" \
-        | samtools sort -m 4G -@16 -T "$SORT_TMP" -o $OUT_BAM -
+        | samtools sort -m 4G -@16 -T "$SORT_TMP" -o "$OUT_BAM_TMP" -
 fi
-samtools index $OUT_BAM
+
+mv "$OUT_BAM_TMP" "$OUT_BAM"
+samtools index "$OUT_BAM"
 
 # Prevent job from finishing until the bam and index files can be found
 while [ ! -f "$OUT_BAM" ] || [ ! -f "$OUT_BAM.bai" ]; do

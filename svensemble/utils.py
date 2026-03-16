@@ -205,22 +205,34 @@ def create_config_dict(
         for callset_name in callset_names:
             config_dict[sample_name]['callsets'][callset_name]['params']['custom_cols_pred'] = config_dict[sample_name]['model']['training_params']['custom_cols']
 
-    # Specify the path to the matched breakpoints used for training the model
-    # If the model uses matched_bps from another workflow
+    # Specify the path to the matched breakpoints used for training the model.
+    # When a *_suffix config references another model's workflow (e.g. XGBoost
+    # reusing RF breakpoints), fall back to the current workflow_dir if the
+    # shared directory does not exist yet.
+    workflow_dir = config_dict[sample_name]['workflow_dir']
+
     if 'matched_bps_suffix' in config_dict[sample_name]['model'].keys():
-        config_dict[sample_name]['model']['matched_bps_path'] = base_dir / Path(
+        shared_matched = base_dir / Path(
                 f'data/{sample_name}/sv_calling/svensemble2/'
                 f'{sample_name}.{config_dict[sample_name]["model"]["matched_bps_suffix"]}.'
                 f'{training_set_name}{gt_suffix}'
                 '/matched_bps.csv'
             )
+        local_matched = workflow_dir / 'matched_bps.csv'
+        config_dict[sample_name]['model']['matched_bps_path'] = (
+            shared_matched if shared_matched.exists() else local_matched
+        )
     if 'feature_matrix_suffix' in config_dict[sample_name]['model'].keys():
-        config_dict[sample_name]['model']['feature_matrix_path'] = base_dir / Path(
+        shared_fm = base_dir / Path(
                 f'data/{sample_name}/sv_calling/svensemble2/'
                 f'{sample_name}.{config_dict[sample_name]["model"]["feature_matrix_suffix"]}.'
                 f'{training_set_name}{gt_suffix}'
                 '/feature_matrix.csv'
             )
+        local_fm = workflow_dir / 'feature_matrix.csv'
+        config_dict[sample_name]['model']['feature_matrix_path'] = (
+            shared_fm if shared_fm.exists() else local_fm
+        )
 
     _additional_set = set(additional_callsets) if isinstance(additional_callsets, list) else set()
     for callset_name in callset_names:
@@ -229,9 +241,13 @@ def create_config_dict(
         elif config_dict[sample_name]['callsets'][callset_name]['params']['override_bps_path']:
             config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['sample_dir'] / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
         elif 'bps_suffix' in config_dict[sample_name]['model'].keys():
-            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['sample_dir'] / f'sv_calling/svensemble2/{sample_name}.{config_dict[sample_name]["model"]["bps_suffix"]}.{training_set_name}{gt_suffix}' / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
+            shared_bps = config_dict[sample_name]['sample_dir'] / f'sv_calling/svensemble2/{sample_name}.{config_dict[sample_name]["model"]["bps_suffix"]}.{training_set_name}{gt_suffix}' / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
+            local_bps = workflow_dir / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
+            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = (
+                shared_bps if shared_bps.exists() else local_bps
+            )
         else:
-            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['workflow_dir'] / f'{callset_name}.bps.csv'
+            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = workflow_dir / f'{callset_name}.bps.csv'
     if not config_dict:
         raise ValueError(f"No config dictionary created for sample {sample_name}")
 

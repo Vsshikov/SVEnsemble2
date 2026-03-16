@@ -92,6 +92,16 @@ def survivor_params():
     return _caller_params.survivor_params
 
 
+@pytest.fixture
+def cutesv_params():
+    return _caller_params.cutesv_params
+
+
+@pytest.fixture
+def svaba_params():
+    return _caller_params.svaba_params
+
+
 # ---------------------------------------------------------------------------
 # DataFrame builder helpers -- produce minimal synthetic DataFrames matching
 # what parse_vcf_to_df would return for each caller.
@@ -209,6 +219,7 @@ def make_sniffles_evt_df(n: int = 2) -> pd.DataFrame:
             'INFO_STDEV_POS': 12.7,
             'INFO_STDEV_LEN': 8.3,
             'INFO_CHR2': None,
+            'INFO_COVERAGE': (10, 15, 20, 15, 10),
         })
     return pd.DataFrame(rows)
 
@@ -227,6 +238,7 @@ def make_sniffles_bnd_df(n: int = 4) -> pd.DataFrame:
             'INFO_STDEV_POS': 5.0,
             'INFO_CHR2': 'chr3',
             'INFO_EVENT': f'Sniffles2.BND.{i}',
+            'INFO_COVERAGE': (10, 15, 20, 15, 10),
         })
     return pd.DataFrame(rows)
 
@@ -243,5 +255,169 @@ def make_survivor_evt_df(n: int = 2) -> pd.DataFrame:
             'INFO_SVTYPE': 'DEL', 'INFO_SVLEN': 500,
             'INFO_CIPOS': (-10, 10), 'INFO_CIEND': (-12, 12),
             'INFO_CHR2': 'chr1',
+        })
+    return pd.DataFrame(rows)
+
+
+def make_severus_evt_df(n: int = 2) -> pd.DataFrame:
+    """Synthetic Severus event DataFrame."""
+    rows = []
+    svtypes = ['DEL', 'INS']
+    for i in range(n):
+        rows.append({
+            'CHROM': 'chr1', 'POS': 15000 + i * 1000,
+            'ID': f'severus_DEL{i}' if svtypes[i % 2] == 'DEL' else f'severus_INS{i}',
+            'REF': 'N',
+            'ALT': '<' + svtypes[i % 2] + '>',
+            'QUAL': 60.0, 'INFO_END': 15500 + i * 1000,
+            'FILTER_PASS': 1,
+            'FILTER_FAIL_LOWSUPP': 0,
+            'INFO_SVTYPE': svtypes[i % 2],
+            'INFO_SVLEN': -500 if svtypes[i % 2] == 'DEL' else 200,
+            'INFO_PRECISE': i % 2 == 0,
+            'INFO_IMPRECISE': i % 2 != 0,
+            'INFO_MAPQ': 60,
+            'INFO_INSLEN': None,
+            'SAMPLE_DR': 20,
+            'SAMPLE_DV': 10,
+            'SAMPLE_VAF': 0.33,
+            'SAMPLE_hVAF': (0.5, 0.0, 0.0),
+        })
+    return pd.DataFrame(rows)
+
+
+def make_severus_bnd_df(n: int = 4) -> pd.DataFrame:
+    """Synthetic Severus BND DataFrame."""
+    rows = []
+    for i in range(n):
+        rows.append({
+            'CHROM': 'chr1', 'POS': 17000 + i * 100,
+            'ID': f'severus_BND{i // 2}_{(i % 2) + 1}',
+            'REF': 'N',
+            'ALT': f'N]chr2:{18000 + i * 100}]',
+            'QUAL': 60.0, 'INFO_END': 0,
+            'FILTER_PASS': 1,
+            'FILTER_FAIL_LOWSUPP': 0,
+            'INFO_SVTYPE': 'BND',
+            'INFO_SVLEN': 1000,
+            'INFO_MATE_ID': f'severus_BND{i // 2}_{2 - (i % 2)}',
+            'INFO_PRECISE': True,
+            'INFO_IMPRECISE': False,
+            'INFO_MAPQ': 60,
+            'INFO_INSLEN': None,
+            'SAMPLE_DR': 15,
+            'SAMPLE_DV': 8,
+            'SAMPLE_VAF': 0.35,
+            'SAMPLE_hVAF': (0.4, 0.0, 0.0),
+        })
+    return pd.DataFrame(rows)
+
+
+def make_cutesv_evt_df(n: int = 4) -> pd.DataFrame:
+    """Synthetic CuteSV event DataFrame (DEL, INS, DUP, INV).
+
+    DUP and INV rows simulate pysam's behaviour when CIPOS/CILEN are absent
+    from the VCF: pysam returns None, which becomes NaN after expansion.
+    """
+    rows = []
+    svtypes = ['DEL', 'INS', 'DUP', 'INV']
+    for i in range(n):
+        svtype = svtypes[i % 4]
+        has_ci = svtype in ('DEL', 'INS')
+        rows.append({
+            'CHROM': 'chr1', 'POS': 19000 + i * 1000,
+            'ID': f'cuteSV.{svtype}.{i}', 'REF': 'N',
+            'ALT': f'<{svtype}>',
+            'QUAL': 200.0, 'INFO_END': 19500 + i * 1000,
+            'FILTER_PASS': 1,
+            'INFO_SVTYPE': svtype,
+            'INFO_SVLEN': -500 if svtype == 'DEL' else 200,
+            'INFO_CIPOS': (-18, 18) if has_ci else None,
+            'INFO_CILEN': (-10, 10) if has_ci else None,
+            'INFO_RE': 22,
+            'INFO_AF': (0.95,),
+            'INFO_PRECISE': True,
+            'INFO_IMPRECISE': False,
+            'INFO_CHR2': None,
+            'SAMPLE_GT': '1/1',
+            'SAMPLE_GQ': 48,
+            'SAMPLE_DR': 0,
+            'SAMPLE_DV': 22,
+        })
+    return pd.DataFrame(rows)
+
+
+def make_cutesv_bnd_df(n: int = 4) -> pd.DataFrame:
+    """Synthetic CuteSV BND DataFrame."""
+    rows = []
+    for i in range(n):
+        rows.append({
+            'CHROM': 'chr1', 'POS': 21000 + i * 100,
+            'ID': f'cuteSV.BND.{i}', 'REF': 'N',
+            'ALT': f'N]chr2:{22000 + i * 100}]',
+            'QUAL': 0.0, 'INFO_END': 0,
+            'FILTER_PASS': 0,
+            'FILTER_q5': 1,
+            'INFO_SVTYPE': 'BND',
+            'INFO_SVLEN': 0,
+            'INFO_RE': 15,
+            'INFO_AF': (0.2,),
+            'INFO_PRECISE': i % 2 == 0,
+            'INFO_IMPRECISE': i % 2 != 0,
+            'INFO_CHR2': 'chr2',
+            'SAMPLE_GT': '0/0',
+            'SAMPLE_GQ': 30,
+            'SAMPLE_DR': 60,
+            'SAMPLE_DV': 15,
+        })
+    return pd.DataFrame(rows)
+
+
+def make_svaba_bnd_df(n: int = 4) -> pd.DataFrame:
+    """Synthetic SvABA BND DataFrame (pairs of breakends).
+
+    4 records forming 2 breakpoint pairs.  IDs follow the <hash>:1 / <hash>:2
+    pattern used by SvABA.  Pair 0 is precise (assembly), pair 1 is imprecise
+    (discordant-only).
+    """
+    rows = []
+    evdnc_vals = ['ASSMB', 'ASSMB', 'DSCRD', 'DSCRD']
+    homseqs = ['AGCT', 'AGCT', None, None]
+    for i in range(n):
+        pair_id = i // 2
+        mate_suffix = 2 if (i % 2 == 0) else 1
+        is_imprecise = pair_id == 1
+        rows.append({
+            'CHROM': 'chr1', 'POS': 23000 + i * 200,
+            'ID': f'{1000000 + pair_id}:{(i % 2) + 1}',
+            'REF': 'N',
+            'ALT': f'N[chr1:{24000 + i * 200}[',
+            'QUAL': 60.0 - i * 5,
+            'FILTER_PASS': 1 if pair_id == 0 else 0,
+            'FILTER_LOWMAPQ': 0 if pair_id == 0 else 1,
+            'INFO_SVTYPE': 'BND',
+            'INFO_MATEID': f'{1000000 + pair_id}:{mate_suffix}',
+            'INFO_IMPRECISE': is_imprecise,
+            'INFO_EVDNC': evdnc_vals[i],
+            'INFO_HOMSEQ': homseqs[i],
+            'INFO_HOMLEN': None,
+            'INFO_DISC_MAPQ': -1 if not is_imprecise else 45,
+            'INFO_NUMPARTS': 2 if not is_imprecise else 0,
+            'INFO_MAPQ': 60 if not is_imprecise else -1,
+            'INFO_SPAN': 1000,
+            'INFO_NM': 0 if not is_imprecise else -1,
+            'INFO_MATENM': 1 if not is_imprecise else -1,
+            'INFO_SUBN': None,
+            'INFO_SECONDARY': False,
+            'SAMPLE_GT': '0/1',
+            'SAMPLE_GQ': '0',
+            'SAMPLE_AD': 15,
+            'SAMPLE_DP': 40,
+            'SAMPLE_SR': 10 if not is_imprecise else 0,
+            'SAMPLE_DR': 5 if not is_imprecise else 12,
+            'SAMPLE_LO': 55.0 - i * 5,
+            'SAMPLE_SL': 50.0 - i * 5,
+            'SAMPLE_LR': -50.0 + i * 5,
+            'SAMPLE_PL': (60.0 - i * 5, 0.0, 80.0 + i * 5),
         })
     return pd.DataFrame(rows)

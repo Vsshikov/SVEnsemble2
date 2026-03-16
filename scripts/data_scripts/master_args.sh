@@ -74,7 +74,7 @@ READS_LONG_SOURCE=
 MINIMAP_PRESET=
 
 # ========== SVEnsemble2 Pipeline Parameters ==========
-SVE_GROUND_TRUTH_SAMPLE_NAME=gnomad
+SVE_GROUND_TRUTH_SAMPLE_NAME=gnomad_pass
 SVE_VERBOSE=true
 
 # Models and training sets are run as a cartesian product — one SLURM job per combination.
@@ -135,8 +135,8 @@ SVE_BENCH_SVLEN_LOWER=(
 SVE_BENCH_SVLEN_UPPER=
 SVE_BENCH_VAL_MATCH_MARGIN=200
 SVE_BENCH_VAL_MATCH_INSERT_DELTA_THRESHOLD=0.7
-# Comma-separated extra callsets to include in benchmark (e.g. survivor)
-SVE_BENCH_ADDITIONAL_CALLSETS=survivor
+# Comma-separated extra callsets to include in benchmark (e.g. survivor_short)
+SVE_BENCH_ADDITIONAL_CALLSETS=survivor_short
 # Comma-separated extra columns to retain in benchmark output
 SVE_BENCH_ADDITIONAL_COLS=FILTER_PASS,FILTER_PASS_bnd1,FILTER_PASS_bnd2
 # Comma-separated callsets to restrict evaluation to (leave empty for all)

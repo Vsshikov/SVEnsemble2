@@ -23,6 +23,7 @@ from .conftest import (
     make_sniffles_evt_df,
     make_sniffles_bnd_df,
     make_survivor_evt_df,
+    make_svaba_bnd_df,
     EVENT_TO_BND_REQUIRED_COLS,
     EVENT_TO_BND_REQUIRED_DTYPES,
     BND_TO_BP_REQUIRED_COLS,
@@ -332,6 +333,114 @@ class TestSurvivorPreprocessEvts:
 
 
 # =====================================================================
+# SVABA
+# =====================================================================
+
+class TestSvabaPreprocess:
+    def test_info_event_derived_from_id(self):
+        df = make_svaba_bnd_df()
+        result = cs.svaba_preprocess(df)
+        assert result['INFO_EVENT'].notna().all()
+        assert result.iloc[0]['INFO_EVENT'] == result.iloc[1]['INFO_EVENT']
+        assert result.iloc[2]['INFO_EVENT'] == result.iloc[3]['INFO_EVENT']
+        assert result.iloc[0]['INFO_EVENT'] != result.iloc[2]['INFO_EVENT']
+
+    def test_info_event_strips_suffix(self):
+        df = make_svaba_bnd_df(n=2)
+        result = cs.svaba_preprocess(df)
+        assert ':' not in result['INFO_EVENT'].iloc[0]
+
+    def test_cipos_precise(self):
+        df = make_svaba_bnd_df()
+        result = cs.svaba_preprocess(df)
+        precise = result[~result['INFO_IMPRECISE'].astype(bool)]
+        assert (precise['INFO_CIPOS_l'] == 0).all()
+        assert (precise['INFO_CIPOS_r'] == 0).all()
+
+    def test_cipos_imprecise(self):
+        df = make_svaba_bnd_df()
+        result = cs.svaba_preprocess(df)
+        imprecise = result[result['INFO_IMPRECISE'].astype(bool)]
+        assert (imprecise['INFO_CIPOS_l'] == -50).all()
+        assert (imprecise['INFO_CIPOS_r'] == 50).all()
+
+    def test_homlen_from_homseq(self):
+        df = make_svaba_bnd_df()
+        result = cs.svaba_preprocess(df)
+        assert result['INFO_HOMLEN'].iloc[0] == 4
+        assert result['INFO_HOMLEN'].iloc[2] == 0
+
+    def test_homseq_dropped(self):
+        result = cs.svaba_preprocess(make_svaba_bnd_df())
+        assert_missing_columns(result, ['INFO_HOMSEQ'])
+
+    def test_evdnc_one_hot(self):
+        result = cs.svaba_preprocess(make_svaba_bnd_df())
+        evdnc_cols = [f'CUSTOM_EVDNC_{v}' for v in cs._SVABA_EVDNC_VALUES]
+        assert_has_columns(result, evdnc_cols)
+        assert_missing_columns(result, ['INFO_EVDNC'])
+        assert result['CUSTOM_EVDNC_ASSMB'].iloc[0] == 1
+        assert result['CUSTOM_EVDNC_DSCRD'].iloc[0] == 0
+        assert result['CUSTOM_EVDNC_DSCRD'].iloc[2] == 1
+
+    def test_pl_tuple_split(self):
+        result = cs.svaba_preprocess(make_svaba_bnd_df())
+        assert_has_columns(result, ['SAMPLE_PL_0', 'SAMPLE_PL_1', 'SAMPLE_PL_2'])
+        assert_missing_columns(result, ['SAMPLE_PL'])
+        assert result['SAMPLE_PL_0'].iloc[0] == 60.0
+        assert result['SAMPLE_PL_1'].iloc[0] == 0.0
+
+    def test_schema_bnd_to_bp_contract(self):
+        result = cs.svaba_preprocess(make_svaba_bnd_df())
+        assert_has_columns(result, BND_TO_BP_REQUIRED_COLS + ['INFO_CIPOS_l', 'INFO_CIPOS_r'])
+
+    def test_input_not_mutated(self):
+        df = make_svaba_bnd_df()
+        original_cols = set(df.columns)
+        cs.svaba_preprocess(df)
+        assert set(df.columns) == original_cols
+        assert 'INFO_HOMSEQ' in df.columns
+
+
+class TestSvabaPostBps:
+    def _make_bp_df(self, qual1=100.0, qual2=80.0, fp1=True, fp2=False):
+        return pd.DataFrame({
+            'CHROM_bnd1': ['chr1'], 'POS_bnd1': [1000],
+            'CHROM_bnd2': ['chr1'], 'POS_bnd2': [2000],
+            'QUAL_bnd1': [qual1], 'QUAL_bnd2': [qual2],
+            'FILTER_PASS_bnd1': [fp1], 'FILTER_PASS_bnd2': [fp2],
+            'INFO_EVENT': ['ev1'],
+        })
+
+    def test_qual_unified_to_min(self):
+        result = cs.svaba_post_bps(self._make_bp_df(100.0, 80.0))
+        assert result['QUAL'].iloc[0] == 80.0
+
+    def test_filter_pass_and_logic(self):
+        result = cs.svaba_post_bps(self._make_bp_df(fp1=True, fp2=False))
+        assert result['FILTER_PASS'].iloc[0] == False  # noqa: E712
+
+    def test_filter_pass_both_true(self):
+        result = cs.svaba_post_bps(self._make_bp_df(fp1=True, fp2=True))
+        assert result['FILTER_PASS'].iloc[0] == True  # noqa: E712
+
+    def test_schema_unified_columns(self):
+        result = cs.svaba_post_bps(self._make_bp_df())
+        assert_has_columns(result, ['QUAL', 'FILTER_PASS'])
+        assert_missing_columns(result, ['FILTER_PASS_bnd1', 'FILTER_PASS_bnd2'])
+
+    def test_idempotency_already_unified(self):
+        df = pd.DataFrame({
+            'CHROM_bnd1': ['chr1'], 'POS_bnd1': [1000],
+            'QUAL': [50.0], 'FILTER_PASS': [True],
+            'INFO_EVENT': ['ev1'],
+        })
+        result = cs.svaba_post_bps(df)
+        assert result['QUAL'].iloc[0] == 50.0
+        assert result['FILTER_PASS'].iloc[0] == True  # noqa: E712
+
+
+# =====================================================================
 # Cross-cutting parametrized tests
 # =====================================================================
 
@@ -344,6 +453,7 @@ _ALL_PREPROCESS_FUNCTIONS = [
     ('sniffles_preprocess_evts_only', cs.sniffles_preprocess_evts_only, make_sniffles_evt_df),
     ('sniffles_preprocess_bnds_only', cs.sniffles_preprocess_bnds_only, make_sniffles_bnd_df),
     ('survivor_preprocess_evts', cs.survivor_preprocess_evts, make_survivor_evt_df),
+    ('svaba_preprocess', cs.svaba_preprocess, make_svaba_bnd_df),
 ]
 
 _EVTS_ONLY_FUNCTIONS = [

@@ -516,13 +516,18 @@ def sniffles_preprocess_common(
     )
 
     # Coverage field includes 5 separate metrics in different parts of the SV
-    sniffles_df_.loc[:, ['INFO_COVERAGE_1', 'INFO_COVERAGE_2', 'INFO_COVERAGE_3', 'INFO_COVERAGE_4', 'INFO_COVERAGE_5']] = (
-        pd.DataFrame(
+    cov_cols = ['INFO_COVERAGE_1', 'INFO_COVERAGE_2', 'INFO_COVERAGE_3', 'INFO_COVERAGE_4', 'INFO_COVERAGE_5']
+    if len(sniffles_df_) > 0:
+        cov_expanded = pd.DataFrame(
             sniffles_df_['INFO_COVERAGE'].tolist(),
             index=sniffles_df_.index,
+            columns=cov_cols,
             dtype=float,
-        ).values
-    )
+        )
+        sniffles_df_.loc[:, cov_cols] = cov_expanded.values
+    else:
+        for col in cov_cols:
+            sniffles_df_[col] = pd.Series(dtype=float)
     sniffles_df_ = sniffles_df_.drop(columns=['INFO_COVERAGE'])
 
     # Sniffles2 reports negative SVLEN for deletions; convert to positive for consistency
@@ -615,6 +620,369 @@ def survivor_preprocess_evts(
     return df
 
 
+# SEVERUS
+
+_SEVERUS_IMPRECISE_CI = 50
+
+def severus_preprocess_common(
+    severus_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Common preprocessing for all Severus entries (BND and non-BND).
+
+    1. Sets INFO_EVENT to variant ID
+    2. Infers symmetric CIPOS from PRECISE/IMPRECISE flags
+    3. Converts negative SVLEN for DEL records to positive
+    4. Splits SAMPLE_hVAF 3-element tuple into three scalar columns
+
+    Args:
+        severus_df: DataFrame of Severus variant calls
+        caller_params: Caller-specific parameters (defaults to severus_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.severus_params
+
+    df = severus_df.copy()
+
+    df.loc[:, 'INFO_EVENT'] = df['ID']
+
+    precise_mask = df['INFO_PRECISE'].fillna(False).astype(bool)
+    ci_val = np.where(precise_mask, 0, _SEVERUS_IMPRECISE_CI)
+    df.loc[:, 'INFO_CIPOS_l'] = -ci_val
+    df.loc[:, 'INFO_CIPOS_r'] = ci_val.copy()
+
+    del_mask = df['INFO_SVTYPE'] == 'DEL'
+    df.loc[del_mask, 'INFO_SVLEN'] = df.loc[del_mask, 'INFO_SVLEN'].abs()
+
+    if 'SAMPLE_hVAF' in df.columns:
+        hvaf_cols = ['SAMPLE_hVAF_H0', 'SAMPLE_hVAF_H1', 'SAMPLE_hVAF_H2']
+        if len(df) > 0:
+            hvaf_expanded = pd.DataFrame(
+                df['SAMPLE_hVAF'].tolist(),
+                index=df.index,
+                columns=hvaf_cols,
+                dtype=float,
+            )
+            df.loc[:, hvaf_cols] = hvaf_expanded.values
+        else:
+            for col in hvaf_cols:
+                df[col] = pd.Series(dtype=float)
+        df = df.drop(columns=['SAMPLE_hVAF'])
+
+    return df
+
+
+def severus_preprocess_evts_only(
+    severus_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Preprocessing for Severus non-BND event entries (DEL, INS, DUP, INV).
+
+    Sets INFO_CHR2, infers CIEND from precision flags (required by event_to_bnd),
+    then applies common preprocessing.
+
+    Args:
+        severus_df: DataFrame of Severus non-BND variant calls
+        caller_params: Caller-specific parameters (defaults to severus_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.severus_params
+
+    df = severus_df.copy()
+
+    df.loc[:, 'INFO_CHR2'] = df['CHROM']
+
+    precise_mask = df['INFO_PRECISE'].fillna(False).astype(bool)
+    ci_val = np.where(precise_mask, 0, _SEVERUS_IMPRECISE_CI)
+    df.loc[:, 'INFO_CIEND_l'] = -ci_val
+    df.loc[:, 'INFO_CIEND_r'] = ci_val.copy()
+
+    return severus_preprocess_common(df, caller_params)
+
+
+def severus_preprocess_bnds_only(
+    severus_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Preprocessing for Severus BND entries.
+
+    BNDs go directly to bnd_to_bp (no event_to_bnd), so CIEND is not needed.
+    Only the common preprocessing steps are applied.
+
+    Args:
+        severus_df: DataFrame of Severus BND variant calls
+        caller_params: Caller-specific parameters (defaults to severus_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.severus_params
+
+    return severus_preprocess_common(severus_df, caller_params)
+
+
+# CUTESV
+
+_CUTESV_IMPRECISE_CI = 50
+
+
+def cutesv_preprocess_common(
+    cutesv_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Common preprocessing for all CuteSV entries (BND and non-BND).
+
+    1. Sets INFO_EVENT to variant ID
+    2. Converts negative SVLEN for DEL records to positive
+
+    Args:
+        cutesv_df: DataFrame of CuteSV variant calls
+        caller_params: Caller-specific parameters (defaults to cutesv_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.cutesv_params
+
+    df = cutesv_df.copy()
+
+    df.loc[:, 'INFO_EVENT'] = df['ID']
+
+    del_mask = df['INFO_SVTYPE'] == 'DEL'
+    df.loc[del_mask, 'INFO_SVLEN'] = df.loc[del_mask, 'INFO_SVLEN'].abs()
+
+    # INFO_AF is declared Number=A in CuteSV's VCF header, so pysam
+    # returns a 1-element tuple (float,).  Unpack to scalar so it is
+    # stored as a plain float and treated as continuous, not categorical.
+    if 'INFO_AF' in df.columns:
+        df['INFO_AF'] = df['INFO_AF'].map(
+            lambda x: x[0] if isinstance(x, tuple) else x
+        ).astype(float)
+
+    return df
+
+
+def cutesv_preprocess_evts_only(
+    cutesv_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Preprocessing for CuteSV non-BND event entries (DEL, INS, DUP, INV).
+
+    1. Sets INFO_CHR2 to CHROM (intrachromosomal events)
+    2. Splits native INFO_CIPOS and INFO_CILEN tuples
+    3. For DEL/DUP/INV: computes both CIPOS and CIEND via quadrature of
+       CIPOS and CILEN, since CILEN (material-length uncertainty) is
+       undirected and could extend toward either breakpoint.
+    4. For INS: CIPOS unchanged, CIEND = CIPOS (both breakpoints at POS)
+    5. Drops raw tuple columns
+
+    Args:
+        cutesv_df: DataFrame of CuteSV non-BND variant calls
+        caller_params: Caller-specific parameters (defaults to cutesv_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.cutesv_params
+
+    df = cutesv_df.copy()
+
+    df.loc[:, 'INFO_CHR2'] = df['CHROM']
+
+    if len(df) > 0:
+        # DUP/INV records may lack CIPOS/CILEN entirely; pysam returns
+        # None which becomes NaN after DataFrame expansion.  Fill NaN
+        # with 0 so the quadrature produces valid integers.
+        cipos_expanded = pd.DataFrame(
+            df['INFO_CIPOS'].tolist(),
+            index=df.index,
+            columns=['_cipos_l', '_cipos_r'],
+            dtype=float,
+        ).fillna(0)
+        cilen_expanded = pd.DataFrame(
+            df['INFO_CILEN'].tolist(),
+            index=df.index,
+            columns=['_cilen_l', '_cilen_r'],
+            dtype=float,
+        ).fillna(0)
+
+        ins_mask = df['INFO_SVTYPE'] == 'INS'
+        non_ins = ~ins_mask
+
+        # For INS: CIPOS and CIEND are just the native CIPOS (END = POS)
+        cipos_l = cipos_expanded['_cipos_l'].copy()
+        cipos_r = cipos_expanded['_cipos_r'].copy()
+        ciend_l = cipos_expanded['_cipos_l'].copy()
+        ciend_r = cipos_expanded['_cipos_r'].copy()
+
+        # For DEL/DUP/INV: quadrature of CIPOS and CILEN for both breakpoints
+        if non_ins.any():
+            quad = np.ceil(np.sqrt(
+                cipos_expanded.loc[non_ins, '_cipos_l'].values ** 2
+                + cilen_expanded.loc[non_ins, '_cilen_l'].values ** 2
+            )).astype(int)
+            cipos_l.loc[non_ins] = -quad
+            ciend_l.loc[non_ins] = -quad
+
+            quad_r = np.ceil(np.sqrt(
+                cipos_expanded.loc[non_ins, '_cipos_r'].values ** 2
+                + cilen_expanded.loc[non_ins, '_cilen_r'].values ** 2
+            )).astype(int)
+            cipos_r.loc[non_ins] = quad_r
+            ciend_r.loc[non_ins] = quad_r
+
+        df.loc[:, 'INFO_CIPOS_l'] = cipos_l.values
+        df.loc[:, 'INFO_CIPOS_r'] = cipos_r.values
+        df.loc[:, 'INFO_CIEND_l'] = ciend_l.values
+        df.loc[:, 'INFO_CIEND_r'] = ciend_r.values
+    else:
+        for col in ['INFO_CIPOS_l', 'INFO_CIPOS_r', 'INFO_CIEND_l', 'INFO_CIEND_r']:
+            df[col] = pd.Series(dtype=float)
+
+    df = df.drop(columns=['INFO_CIPOS', 'INFO_CILEN'], errors='ignore')
+
+    return cutesv_preprocess_common(df, caller_params)
+
+
+def cutesv_preprocess_bnds_only(
+    cutesv_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Preprocessing for CuteSV BND entries.
+
+    BNDs lack CIPOS/CILEN in the VCF; infers symmetric CIPOS from
+    PRECISE/IMPRECISE flags (0 for precise, 50bp for imprecise).
+
+    Args:
+        cutesv_df: DataFrame of CuteSV BND variant calls
+        caller_params: Caller-specific parameters (defaults to cutesv_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.cutesv_params
+
+    df = cutesv_df.copy()
+
+    precise_mask = df['INFO_PRECISE'].fillna(False).astype(bool)
+    ci_val = np.where(precise_mask, 0, _CUTESV_IMPRECISE_CI)
+    df.loc[:, 'INFO_CIPOS_l'] = -ci_val
+    df.loc[:, 'INFO_CIPOS_r'] = ci_val.copy()
+
+    df = df.drop(columns=['INFO_CIPOS', 'INFO_CILEN'], errors='ignore')
+
+    return cutesv_preprocess_common(df, caller_params)
+
+
+# SVABA
+
+_SVABA_IMPRECISE_CI = 50
+
+_SVABA_EVDNC_VALUES = ['ASSMB', 'ASDIS', 'DSCRD', 'TSI_L', 'TSI_G']
+
+
+def svaba_preprocess(
+    svaba_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Preprocess SvABA BND entries before bnd_to_bp.
+
+    1. Derives INFO_EVENT from the ID field (strips :1/:2 suffix)
+    2. Infers symmetric CIPOS from the IMPRECISE flag
+    3. Computes INFO_HOMLEN from INFO_HOMSEQ length
+    4. One-hot encodes EVDNC into boolean CUSTOM_ columns
+    5. Splits SAMPLE_PL tuple into three scalar columns
+
+    Args:
+        svaba_df: DataFrame of SvABA BND variant calls
+        caller_params: Caller-specific parameters (defaults to svaba_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.svaba_params
+
+    df = svaba_df.copy()
+
+    df.loc[:, 'INFO_EVENT'] = df['ID'].str.rsplit(':', n=1).str[0]
+
+    imprecise_mask = df['INFO_IMPRECISE'].fillna(False).astype(bool)
+    ci_val = np.where(imprecise_mask, _SVABA_IMPRECISE_CI, 0)
+    df.loc[:, 'INFO_CIPOS_l'] = -ci_val
+    df.loc[:, 'INFO_CIPOS_r'] = ci_val.copy()
+
+    if 'INFO_HOMSEQ' in df.columns:
+        df.loc[:, 'INFO_HOMLEN'] = df['INFO_HOMSEQ'].apply(
+            lambda x: len(x) if isinstance(x, str) else 0
+        )
+        df = df.drop(columns=['INFO_HOMSEQ'])
+
+    if 'INFO_EVDNC' in df.columns:
+        for val in _SVABA_EVDNC_VALUES:
+            df.loc[:, f'CUSTOM_EVDNC_{val}'] = (df['INFO_EVDNC'] == val).astype(int)
+        df = df.drop(columns=['INFO_EVDNC'])
+
+    if 'SAMPLE_PL' in df.columns:
+        pl_cols = ['SAMPLE_PL_0', 'SAMPLE_PL_1', 'SAMPLE_PL_2']
+        if len(df) > 0:
+            pl_expanded = pd.DataFrame(
+                df['SAMPLE_PL'].tolist(),
+                index=df.index,
+                columns=pl_cols,
+                dtype=float,
+            )
+            df.loc[:, pl_cols] = pl_expanded.values
+        else:
+            for col in pl_cols:
+                df[col] = pd.Series(dtype=float)
+        df = df.drop(columns=['SAMPLE_PL'])
+
+    return df
+
+
+def svaba_post_bps(bp_df: pd.DataFrame) -> pd.DataFrame:
+    """Post-process SvABA breakpoints after bnd_to_bp conversion.
+
+    1. Unifies per-breakend QUAL into a single column (min of the two).
+    2. Unifies per-breakend FILTER_PASS into a single column (AND logic).
+
+    Args:
+        bp_df: DataFrame of SvABA breakpoints from bnd_to_bp
+
+    Returns:
+        DataFrame with unified QUAL and FILTER_PASS columns
+    """
+    if 'QUAL' not in bp_df.columns:
+        try:
+            bp_df.loc[:, 'QUAL'] = np.min(
+                [bp_df['QUAL_bnd1'], bp_df['QUAL_bnd2']], axis=0
+            )
+        except KeyError:
+            raise KeyError('No QUAL column found in SvABA breakpoints')
+
+    if 'FILTER_PASS' not in bp_df.columns and \
+            'FILTER_PASS_bnd1' in bp_df.columns and \
+            'FILTER_PASS_bnd2' in bp_df.columns:
+        bp_df.loc[:, 'FILTER_PASS'] = (
+            bp_df['FILTER_PASS_bnd1'].astype(bool) &
+            bp_df['FILTER_PASS_bnd2'].astype(bool)
+        )
+        bp_df = bp_df.drop(columns=['FILTER_PASS_bnd1', 'FILTER_PASS_bnd2'])
+
+    return bp_df
+
+
 # ---------------------------------------------------------------------------
 # Recipe registry for the generic parse_preprocess_vcf dispatcher.
 #
@@ -672,12 +1040,60 @@ parse_recipes: dict[str, dict] = {
         'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
         'post_bps': None,
     },
-    'survivor': {
+    'survivor_short': {
         'bnd_svtypes': [],
         'preprocess_all': None,
         'preprocess_bnds': None,
         'preprocess_evts': survivor_preprocess_evts,
         'force_diff_cols': None,
         'post_bps': None,
+    },
+    'survivor_long': {
+        'bnd_svtypes': [],
+        'preprocess_all': None,
+        'preprocess_bnds': None,
+        'preprocess_evts': survivor_preprocess_evts,
+        'force_diff_cols': None,
+        'post_bps': None,
+    },
+    'survivor_all': {
+        'bnd_svtypes': [],
+        'preprocess_all': None,
+        'preprocess_bnds': None,
+        'preprocess_evts': survivor_preprocess_evts,
+        'force_diff_cols': None,
+        'post_bps': None,
+    },
+    'severus': {
+        'bnd_svtypes': ['BND'],
+        'preprocess_all': None,
+        'preprocess_bnds': severus_preprocess_bnds_only,
+        'preprocess_evts': severus_preprocess_evts_only,
+        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
+        'post_bps': None,
+    },
+    'cutesv': {
+        'bnd_svtypes': ['BND'],
+        'preprocess_all': None,
+        'preprocess_bnds': cutesv_preprocess_bnds_only,
+        'preprocess_evts': cutesv_preprocess_evts_only,
+        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
+        'post_bps': None,
+    },
+    'svaba': {
+        'bnd_svtypes': None,
+        'preprocess_all': svaba_preprocess,
+        'preprocess_bnds': None,
+        'preprocess_evts': None,
+        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
+        'post_bps': svaba_post_bps,
+    },
+    'svaba_H': {
+        'bnd_svtypes': None,
+        'preprocess_all': svaba_preprocess,
+        'preprocess_bnds': None,
+        'preprocess_evts': None,
+        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
+        'post_bps': svaba_post_bps,
     },
 }

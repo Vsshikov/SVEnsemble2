@@ -34,10 +34,14 @@ unset _RUN_DIR
 # RUN_MANTA=true                  # Run Manta SV caller
 # RUN_GRIDSS=true                 # Run GRIDSS SV caller
 # RUN_DELLY=true                  # Run Delly SV caller
+# RUN_SVABA=true                  # Run SvABA SV caller (short reads)
 # RUN_SNIFFLES=true               # Run Sniffles2 SV caller (long reads)
 # RUN_SNIFFLES_207=true           # Run Sniffles2 v2.0.7 SV caller (long reads)
 # RUN_SEVERUS=true                # Run Severus SV caller (long reads)
+# RUN_SVDSS=true                  # Run SVDSS SV caller (HiFi long reads)
+# RUN_CUTESV=true                 # Run CuteSV SV caller (long reads)
 # RUN_SURVIVOR=true               # Run SURVIVOR consensus caller
+# SURVIVOR_MODES=("short" "long" "all")  # Which SURVIVOR modes to run (default: "short")
 # RUN_SVENSEMBLE2=true            # Run SVEnsemble2 pipeline
 # RUN_BENCHMARK=true              # Run benchmarking after SVEnsemble2
 # RUN_SHAP=true                   # Run SHAP feature importance analysis
@@ -77,6 +81,10 @@ unset _RUN_DIR
 #   sniffles+delly, sniffles+manta_candidate+delly, sniffles+manta_diploid+delly,
 #   sniffles+gridss+manta_candidate, sniffles+gridss+manta_diploid
 #   sniffles_207, sniffles_207+gridss, sniffles_207+manta_candidate, etc.
+#   severus, sniffles+severus,
+#   gridss+manta_diploid+delly+sniffles+severus,
+#   cutesv, cutesv+sniffles, cutesv+severus, cutesv+sniffles+severus,
+#   sniffles+severus+cutesv, sniffles+severus+cutesv+gridss+manta_diploid+delly
 # SVE_TRAINING_SETS=(
 #     "gridss"
 #     "manta_diploid"
@@ -113,7 +121,7 @@ unset _RUN_DIR
 # SVE_BENCH_VAL_MATCH_INSERT_DELTA_THRESHOLD=0.7
 
 # Additional callsets and columns in benchmark output (bash arrays)
-# SVE_BENCH_ADDITIONAL_CALLSETS=("survivor")
+# SVE_BENCH_ADDITIONAL_CALLSETS=("survivor_short")
 # SVE_BENCH_ADDITIONAL_COLS=("FILTER_PASS" "FILTER_PASS_bnd1" "FILTER_PASS_bnd2")
 # SVE_BENCH_LIMIT_TO_CALLSETS=()  # Empty array = all callsets
 # SVE_BENCH_SKIP_FILTERING=false

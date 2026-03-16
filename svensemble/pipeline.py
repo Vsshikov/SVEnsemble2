@@ -283,6 +283,14 @@ _derived_callset_config = {
         'parent': 'sniffles_207',
         'filter': lambda df: df[df['FILTER_PASS'].astype(bool)]
     },
+    'severus_H': {
+        'parent': 'severus',
+        'filter': lambda df: df[df['FILTER_PASS'].astype(bool)]
+    },
+    'cutesv_H': {
+        'parent': 'cutesv',
+        'filter': lambda df: df[df['FILTER_PASS'].astype(bool)]
+    },
 }
 
 
@@ -561,10 +569,18 @@ def pu_predict_sample(
         _log(f"Saving predictions to: {workflow_config['workflow_dir'] / 'predictions.csv'}")
     y_pred = pd.DataFrame(y_pred, columns=[f'{list(workflow_config['training_sets'].keys())[0]}_{workflow_config['model']['name']}_pred'], index=X.index).reset_index(drop=False)
 
-    # Load the matched breakpoints DataFrame
-    if not (workflow_config['model']['matched_bps_path']).exists():
-        raise FileNotFoundError(f"Matched breakpoints not found at {workflow_config['model']['matched_bps_path']}")
-    matched_bp_df = _read_csv_with_retry(workflow_config['model']['matched_bps_path'], low_memory=False)
+    # Load the matched breakpoints DataFrame (prefer local workflow dir,
+    # fall back to the configured shared path from another model).
+    local_matched_bps = workflow_config['workflow_dir'] / 'matched_bps.csv'
+    configured_matched_bps = workflow_config['model']['matched_bps_path']
+    if local_matched_bps.exists():
+        matched_bp_df = _read_csv_with_retry(local_matched_bps, low_memory=False)
+    elif configured_matched_bps.exists():
+        matched_bp_df = _read_csv_with_retry(configured_matched_bps, low_memory=False)
+    else:
+        raise FileNotFoundError(
+            f"Matched breakpoints not found at {local_matched_bps} or {configured_matched_bps}"
+        )
 
     svensemble2_calls_df = mbps.get_svensemble2_calls(
         matched_bp_df,
@@ -702,7 +718,7 @@ if __name__ == '__main__':
         type=str,
         nargs='*',
         default=None,
-        help="Additional callsets to include (e.g. survivor gridss_H sniffles_H)."
+        help="Additional callsets to include (e.g. survivor_short gridss_H sniffles_H)."
     )
     parser.add_argument(
         '--preprocess',
