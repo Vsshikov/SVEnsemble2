@@ -6,6 +6,7 @@ using pysam. Classified SV types (DEL, DUP, INS, INV) are written as symbolic
 allele records; remaining unclassified SVs are written as BND pairs.
 """
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,8 @@ from pysam import VariantFile, VariantHeader
 from . import breakpoints as bps_mod
 from . import breakends as bnds
 from . import utils
+
+logger = logging.getLogger(__name__)
 
 
 _SYMBOLIC_SVTYPES = frozenset({'DEL', 'DUP', 'INS', 'INV'})
@@ -328,6 +331,25 @@ def write_vcf(
         vcf_out = VariantFile(str(output_path), write_mode, header=header)
         vcf_out.close()
         return output_path
+
+    invalid_pos_mask = (bps_df['POS_bnd1'] <= 0) | (bps_df['POS_bnd2'] <= 0)
+    if invalid_pos_mask.any():
+        n_bad = invalid_pos_mask.sum()
+        bad_events = bps_df.loc[invalid_pos_mask, 'INFO_EVENT'].tolist()
+        logger.warning(
+            "Dropping %d record(s) with non-positive POS (VCF requires POS >= 1): %s",
+            n_bad, bad_events,
+        )
+        bps_df = bps_df[~invalid_pos_mask]
+        if len(bps_df) == 0:
+            empty_chrom_df = pd.DataFrame({
+                'CHROM_bnd1': pd.Series(dtype=str),
+                'CHROM_bnd2': pd.Series(dtype=str),
+            })
+            header = _build_header(empty_chrom_df, sample_name=sample_name, source=source)
+            vcf_out = VariantFile(str(output_path), write_mode, header=header)
+            vcf_out.close()
+            return output_path
 
     svtypes = _get_svtypes(bps_df, source)
     has_ci = _has_ci(bps_df)

@@ -50,6 +50,18 @@ for f in "${READS_LONG_PATHS[@]}"; do
     [ -f "$f" ] || { echo "ERROR: Input file not found: $f" >&2; exit 1; }
 done
 
+# For BAM inputs, verify BGZF integrity (catches truncated/corrupt files
+# before committing to a 30+ minute alignment).
+if [[ "${READS_LONG_PATHS[0]}" == *.bam ]]; then
+    for f in "${READS_LONG_PATHS[@]}"; do
+        samtools quickcheck "$f" || {
+            echo "ERROR: BAM file failed integrity check (truncated/corrupt): $f" >&2
+            echo "Re-download or regenerate this file before retrying." >&2
+            exit 1
+        }
+    done
+fi
+
 OUT_BAM_TMP="${OUT_BAM}.tmp.bam"
 
 if [[ "${READS_LONG_PATHS[0]}" == *.bam ]]; then

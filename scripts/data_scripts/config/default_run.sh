@@ -221,6 +221,7 @@ SVE_BENCH_ADDITIONAL_CALLSETS=(
     "sniffles_H"
     "severus_H"
     "cutesv_H"
+    "svaba"
     "svaba_H"
 )
 SVE_BENCH_ADDITIONAL_COLS=(
