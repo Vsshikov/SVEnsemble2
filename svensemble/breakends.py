@@ -90,9 +90,11 @@ def bnd_to_bp(
             - Rows sorted by chromosome and position
     """
     if force_diff_cols is None:
-        force_diff_cols = []
+        _force_diff_cols = []
+    else:
+        _force_diff_cols = force_diff_cols.copy()
     # CHROM, POS fields must always be considered different
-    force_diff_cols.extend(['CHROM', 'POS'])
+    _force_diff_cols.extend(['CHROM', 'POS'])
 
     # Generate chromosome keys for sorting
     chrom_key_dict = utils.generate_chrom_key_dict(bnd_df['CHROM'])
@@ -111,7 +113,7 @@ def bnd_to_bp(
     same_cols_mask = ((bnd1 == bnd2) | (bnd1.isna() & bnd2.isna())).all()
 
     # If force_diff_cols is provided, exclude those columns from being considered as 'same' columns
-    force_diff_cols_mask = bnd1.columns.isin(force_diff_cols)
+    force_diff_cols_mask = bnd1.columns.isin(_force_diff_cols)
     same_cols_mask = same_cols_mask & (~force_diff_cols_mask)
 
     same_cols = bnd1.columns[same_cols_mask]

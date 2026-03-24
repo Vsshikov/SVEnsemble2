@@ -5,7 +5,7 @@ import os
 import copy
 import pandas as pd
 from pathlib import Path
-from collections import defaultdict, abc
+from collections import abc
 from ._caller_params import caller_param_dict, callset_path_configs, training_set_presets, default_reference_set, default_training_set
 from ._sample_params import sample_val_sets, sample_val_set_template, default_model_name
 from ._model_configs import model_configs
@@ -47,12 +47,12 @@ def _get_caller_callset_dict(sample_name: str, caller_name: str, base_dir: Path 
             f'Unknown caller: {caller_name!r}. '
             f'Available: {list(callset_path_configs)}'
         )
-    return defaultdict(str, {
+    return {
         'source': source,
         'svensemble_dir': base_dir / Path(svensemble_dir_tmpl.format(s=sample_name)),
         'path': base_dir / Path(path_tmpl.format(s=sample_name)),
         'params': copy.deepcopy(caller_param_dict[caller_name]),
-    })
+    }
 
 def create_config_dict(
     sample_name: str,
@@ -166,7 +166,7 @@ def create_config_dict(
                 }
             }
         }
-        return defaultdict(str, config_dict)
+        return config_dict
 
     training_set_name, training_set_callers = next(iter(_training_sets.items()))
 
@@ -250,8 +250,6 @@ def create_config_dict(
             config_dict[sample_name]['callsets'][callset_name]['bps_path'] = workflow_dir / f'{callset_name}.bps.csv'
     if not config_dict:
         raise ValueError(f"No config dictionary created for sample {sample_name}")
-
-    config_dict = defaultdict(str, config_dict)
 
     return config_dict
 

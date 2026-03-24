@@ -2,6 +2,8 @@
 PU models for SV call probability estimation.
 """
 import os
+import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -12,6 +14,30 @@ from xgboost import XGBClassifier as XGB
 
 from . import matched_breakpoints as mbps
 from . import utils as sv_utils
+
+
+def _wait_for_file(path: str | Path, timeout: int = 1800, poll: int = 30) -> Path:
+    """Block until *path* exists on disk, polling every *poll* seconds.
+
+    Useful when concurrent SLURM jobs produce files that this job depends on
+    (e.g. cross-sample training data).  Raises ``FileNotFoundError`` after
+    *timeout* seconds.
+    """
+    path = Path(path)
+    if path.exists():
+        return path
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        print(
+            f"[wait_for_file] {path.name} not found yet, "
+            f"retrying in {poll}s (timeout in {int(deadline - time.monotonic())}s)..."
+        )
+        time.sleep(poll)
+        if path.exists():
+            return path
+    raise FileNotFoundError(
+        f"Timed out after {timeout}s waiting for {path}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +284,7 @@ def train_unbiased_concat_rf(
                 training_set=training_set_name,
                 ground_truth_name=_gt_name,
             )[sample]
+            _wait_for_file(sample_workflow_config['model']['matched_bps_path'])
             sample_joint_bp_df = pd.read_csv(
                 sample_workflow_config['model']['matched_bps_path'],
                 low_memory=False,
@@ -279,7 +306,7 @@ def train_unbiased_concat_rf(
         training_set_df, match_col='ref_match', fillna=fillna,
     )
     X_train, X_val, y_train, y_val = skm.train_test_split(
-        X, y, train_size=0.8, random_state=0,
+        X, y, train_size=0.8, random_state=0, stratify=y,
     )
     training_set_splits = {
         'X': X,
@@ -368,6 +395,7 @@ def train_unbiased_xgb_concat(
                 training_set=training_set_name,
                 ground_truth_name=_gt_name,
             )[sample]
+            _wait_for_file(sample_workflow_config['model']['matched_bps_path'])
             sample_joint_bp_df = pd.read_csv(
                 sample_workflow_config['model']['matched_bps_path'],
                 low_memory=False,
@@ -389,7 +417,7 @@ def train_unbiased_xgb_concat(
         training_set_df, match_col='ref_match', fillna=fillna,
     )
     X_train, X_val, y_train, y_val = skm.train_test_split(
-        X, y, train_size=0.8, random_state=0,
+        X, y, train_size=0.8, random_state=0, stratify=y,
     )
     training_set_splits = {
         'X': X,

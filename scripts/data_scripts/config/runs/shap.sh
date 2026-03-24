@@ -40,12 +40,12 @@ BENCHMARK=false
 
 # --------------- Enable SHAP ------------------------------------------------
 RUN_SHAP=true
-SVE_SHAP_USE_GPU=true          # Requires gpuq partition and max_depth <= 31
+SVE_SHAP_USE_GPU=false          # Requires gpuq partition and max_depth <= 31
 SVE_SHAP_MEM=20G               # P100 nodes have ~113G total
 
-SVE_MODELS=(
-    "unbiased_xgb"
-    "unbiased_xgb_GT"
-    "unbiased_d31"
-    "unbiased_GT_d31"
-)
+# SVE_MODELS=(
+#     "unbiased_xgb"
+#     "unbiased_xgb_GT"
+#     "unbiased_d31"
+#     "unbiased_GT_d31"
+# )

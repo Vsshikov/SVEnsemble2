@@ -27,10 +27,11 @@ IFS=$'\t' read -r SVE_MODEL SVE_TRAINING_SET _use_gpu _source _max_samples \
 [[ "$_use_gpu"      == "." ]] && _use_gpu=""
 [[ "$_max_samples"  == "." ]] && _max_samples=""
 
-echo "$(date): Array task ${SLURM_ARRAY_TASK_ID}: model=${SVE_MODEL} training_set=${SVE_TRAINING_SET} use_gpu=${_use_gpu} max_samples=${_max_samples}"
+echo "$(date): Array task ${SLURM_ARRAY_TASK_ID}: model=${SVE_MODEL} training_set=${SVE_TRAINING_SET} gt=${SVE_GROUND_TRUTH_SAMPLE_NAME:-default} use_gpu=${_use_gpu} max_samples=${_max_samples}"
 
 # Build SHAP flags from per-task and sourced config values
 _shap_flags=""
+[[ -n "$SVE_GROUND_TRUTH_SAMPLE_NAME" ]] && _shap_flags+=" --ground_truth_sample_name $SVE_GROUND_TRUTH_SAMPLE_NAME"
 [[ "$_use_gpu"         == "1" ]]    && _shap_flags+=" --use_gpu"
 [[ -n "$_max_samples" ]]            && _shap_flags+=" --max_samples $_max_samples"
 [[ "$SVE_SHAP_PLOT"    == "true" ]] && _shap_flags+=" --plot"

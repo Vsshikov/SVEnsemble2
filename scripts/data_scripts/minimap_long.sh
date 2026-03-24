@@ -52,13 +52,18 @@ done
 
 # For BAM inputs, verify BGZF integrity (catches truncated/corrupt files
 # before committing to a 30+ minute alignment).
+# quickcheck exit is a bitmask: 1=bad format, 2=can't open, 4=bad header,
+# 8=no @SQ targets, 16=missing EOF block, 32=bad index.
+# Bit 8 is expected for unmapped BAMs (e.g. native PacBio HiFi), so we
+# mask it out and only fail on bits that indicate real corruption.
 if [[ "${READS_LONG_PATHS[0]}" == *.bam ]]; then
     for f in "${READS_LONG_PATHS[@]}"; do
-        samtools quickcheck "$f" || {
-            echo "ERROR: BAM file failed integrity check (truncated/corrupt): $f" >&2
+        rc=0; samtools quickcheck "$f" || rc=$?
+        if (( (rc & ~8) != 0 )); then
+            echo "ERROR: BAM file failed integrity check (truncated/corrupt, rc=$rc): $f" >&2
             echo "Re-download or regenerate this file before retrying." >&2
             exit 1
-        }
+        fi
     done
 fi
 

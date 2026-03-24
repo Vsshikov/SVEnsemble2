@@ -120,3 +120,10 @@ utils/apache-ant-1.10.15/
 pkg/gridss-2.13.2.tar
 sv_benchmark/funcs.R
 TODO
+docs/NA12878_benchmark_metrics.md
+docs/getopt_tutorial.md
+docs/pipeline_flowcharts.md
+docs/pu_learning_review.md
+.gitignore
+docs/xgboost_notes.md
+docs/svensemble2_pipeline_slide.pptx

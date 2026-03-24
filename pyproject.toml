@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "svensemble"
-version = "0.4.1"
+version = "0.4.2"
 description = "A toolkit for structural variant ensemble calling"
 requires-python = ">=3.12"
 dependencies = [

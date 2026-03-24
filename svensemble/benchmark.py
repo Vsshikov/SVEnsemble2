@@ -16,6 +16,8 @@ import os
 import sys
 import pysam
 from adjustText import adjust_text
+from matplotlib.legend_handler import HandlerLine2D
+from matplotlib.text import Text
 
 from . import breakends as bnds
 from . import events as evts
@@ -742,6 +744,48 @@ def get_style_mapping(callset, default_style_mapping=default_style_mapping):
         style_mapping['text']['bbox']['fc'] = style_mapping['line']['color']
     return style_mapping
 
+class HandlerLineWithBadge(HandlerLine2D):
+    """Legend handler that draws the standard line swatch plus a colored text badge."""
+
+    def __init__(self, badge_label, badge_color, **kwargs):
+        self.badge_label = badge_label
+        self.badge_color = badge_color
+        super().__init__(**kwargs)
+
+    def create_artists(self, legend, orig_handle,
+                       xdescent, ydescent, width, height, fontsize, trans):
+        artists = super().create_artists(
+            legend, orig_handle, xdescent, ydescent, width, height, fontsize, trans,
+        )
+        badge = Text(
+            -fontsize * 0.3,
+            height / 2,
+            self.badge_label,
+            fontsize=fontsize * 0.7,
+            fontfamily='monospace',
+            fontweight='bold',
+            color='white',
+            ha='right',
+            va='center',
+            bbox=dict(boxstyle='round,pad=0.15', fc=self.badge_color, ec=self.badge_color),
+            transform=trans,
+        )
+        artists.append(badge)
+        return artists
+
+
+def _build_badge_handler(callset):
+    """Return a ``HandlerLineWithBadge`` for *callset*, or *None* if no badge text is defined."""
+    style = get_style_mapping(callset)
+    badge_label = style['text'].get('label', '')
+    if not badge_label:
+        return None
+    return HandlerLineWithBadge(
+        badge_label=badge_label,
+        badge_color=style['line'].get('color', 'gray'),
+    )
+
+
 # Create ordering for callsets. svensemble2 calls should always follow corresponding original callsets.
 # Svensemble ensemble calls should be last, survivor calls should be just before them
 # At the moment the ordering is manual
@@ -832,28 +876,39 @@ def style_text(text: mpl.text.Text, callset):
     text.set(**style_mapping)
 
 
-def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None, verbose=False):
-    """
-    Plot ROC curves for multiple prediction arrays against corresponding truth series
-
+def plot_roc_curves(
+    sample_val_dict, ax=None, use_counts=True, title=None,
+    svensemble2_cutoff=None, verbose=False,
+    xlim=None, ylim=None,
+):
+    """Plot ROC curves for multiple callsets.
 
     Args:
-        sample_val_dict: Dictionary containing callset names as keys and dataframes with a prediction metric as 2nd column and a truth column as "is_in_val"
-        ax: matplotlib axis to plot the ROC curves on
-        use_counts: Whether to plot the ROC curves as counts or rates
+        sample_val_dict: Dict of {callset_name: DataFrame} where each
+            DataFrame has a prediction score as the 2nd column and a
+            boolean truth column ``is_in_val``.
+        ax: Matplotlib axis.  Created if *None*.
+        use_counts: Plot as counts (True) or rates (False).
+        title: Plot title.
+        svensemble2_cutoff: If set, mark the operating point closest to
+            this threshold on SVEnsemble2 curves.
+        verbose: Print skipped callsets.
+        xlim: Tuple (xmin, xmax) to set x-axis limits.
+        ylim: Tuple (ymin, ymax) to set y-axis limits.
 
     Returns:
-        matplotlib axis with plotted ROC curves
+        Matplotlib axis with plotted ROC curves.
     """
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8,8))
+        fig, ax = plt.subplots(figsize=(8, 8))
     if title is not None:
         ax.set_title(title)
 
+    if not use_counts:
+        ax.plot([0, 1], [0, 1], color='0.75', linewidth=0.8, linestyle='--', zorder=0)
+
     callsets = list(sample_val_dict.keys())
     callsets.sort()
-    # n_callsets = len(callsets)
-    # colors = get_plot_colors(n_callsets)
 
     for idx, callset in _ordered_callset_enumerate(callsets, _callset_order):
         callset_val_df = sample_val_dict[callset].dropna().copy()
@@ -871,29 +926,31 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None, verbo
 
         fpr, tpr, thresholds = roc_curve(truth_series, pred_series, pos_label=True)
 
-        # Drop last values in all arrays
-        # fpr = fpr[:-1]
-        # tpr = tpr[:-1]
-        # thresholds = thresholds[:-1]
-
         total_tp = sum(truth_series)
         total_tn = len(truth_series) - total_tp
 
         if use_counts:
-            # Convert rates to counts
             tpr = tpr * total_tp
             fpr = fpr * total_tn
-        else:
-            ax.set_ylim(0, 1)
-            ax.set_xlim(0, 1)
 
         ax.plot(fpr, tpr, **get_style_mapping(callset)['line'])
 
-    # Add a dotted diagonal line from (0, 0) to (total_tn, total_tp) if use_counts, else from (0, 0) to (1, 1)
-    # if use_counts:
-    #     ax.plot([0, total_tn], [0, total_tp], linestyle='--', color='grey', linewidth=1, label='Random')
-    # else:
-    #     ax.plot([0, 1], [0, 1], linestyle='--', color='grey', linewidth=1, label='Random')
+        if (svensemble2_cutoff is not None) and ('svensemble2' in callset):
+            threshold_idx = np.argmin(np.abs(thresholds - svensemble2_cutoff))
+            ax.plot(
+                fpr[threshold_idx], tpr[threshold_idx], 'o',
+                color=get_style_mapping(callset)['line']['color'],
+            )
+
+    if xlim is not None:
+        ax.set_xlim(*xlim)
+    elif not use_counts:
+        ax.set_xlim(0, 1)
+
+    if ylim is not None:
+        ax.set_ylim(*ylim)
+    elif not use_counts:
+        ax.set_ylim(0, 1)
 
     ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5), frameon=False)
 
@@ -906,21 +963,39 @@ def plot_roc_curves(sample_val_dict, ax=None, use_counts=True, title=None, verbo
     return ax
 
 
-def plot_reverse_roc_curves(sample_val_dict, svtype=None, ax=None, use_counts=True, filter_pass=False, title=None):
-    """
-    Plot ROC curves for multiple prediction arrays against corresponding truth series
+def plot_reverse_roc_curves(
+    sample_val_dict, svtype=None, ax=None, use_counts=True,
+    filter_pass=False, title=None, svensemble2_cutoff=None,
+    verbose=False, xlim=None, ylim=None,
+):
+    """Plot log-scale reverse ROC curves (1/FP vs TP/FP) for multiple callsets.
 
+    When *use_counts* is True (default) the axes show 1/FP-count and
+    TP/FP-count on log scales, which makes it easier to compare callers
+    with very different false-positive rates.
 
     Args:
-        sample_val_dict: Dictionary containing callset names as keys and dataframes with a prediction metric as 2nd column and a truth column as "is_in_val"
-        ax: matplotlib axis to plot the ROC curves on
-        use_counts: Whether to plot the ROC curves as counts or rates
+        sample_val_dict: Dict of {callset_name: DataFrame} where each
+            DataFrame has a prediction score as the 2nd column and a
+            boolean truth column ``is_in_val``.
+        svtype: If set, restrict to rows where INFO_INFERRED_SVTYPE
+            matches this value.
+        ax: Matplotlib axis.  Created if *None*.
+        use_counts: Plot as counts (True) or rates (False).
+        filter_pass: If True, restrict to rows where FILTER_PASS is
+            truthy (column must exist in the DataFrame).
+        title: Plot title.
+        svensemble2_cutoff: If set, mark the operating point closest to
+            this threshold on SVEnsemble2 curves.
+        verbose: Print skipped callsets.
+        xlim: Tuple (xmin, xmax) to set x-axis limits.
+        ylim: Tuple (ymin, ymax) to set y-axis limits.
 
     Returns:
-        matplotlib axis with plotted ROC curves
+        Matplotlib axis with plotted reverse ROC curves.
     """
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8,8))
+        fig, ax = plt.subplots(figsize=(8, 8))
     if title is not None:
         ax.set_title(title)
 
@@ -929,8 +1004,6 @@ def plot_reverse_roc_curves(sample_val_dict, svtype=None, ax=None, use_counts=Tr
 
     callsets = list(sample_val_dict.keys())
     callsets.sort()
-    # n_callsets = len(callsets)
-    # colors = get_plot_colors(n_callsets)
 
     for idx, callset in _ordered_callset_enumerate(callsets, _callset_order):
         callset_val_df = sample_val_dict[callset].dropna().copy()
@@ -938,7 +1011,8 @@ def plot_reverse_roc_curves(sample_val_dict, svtype=None, ax=None, use_counts=Tr
         if filter_pass and 'FILTER_PASS' in sample_val_dict[callset].columns:
             sample_mask = callset_val_df['FILTER_PASS'].astype(bool)
         elif filter_pass:
-            print(f'{callset} does not have a FILTER_PASS column, ignoring filter_pass argument')
+            if verbose:
+                print(f'{callset} does not have a FILTER_PASS column, ignoring filter_pass argument')
             sample_mask = np.ones(len(callset_val_df), dtype=bool)
         else:
             sample_mask = np.ones(len(callset_val_df), dtype=bool)
@@ -946,49 +1020,52 @@ def plot_reverse_roc_curves(sample_val_dict, svtype=None, ax=None, use_counts=Tr
         if svtype is not None:
             sample_mask = sample_mask & (callset_val_df['INFO_INFERRED_SVTYPE'] == svtype)
 
-        # Remove rows with NaNs and apply sample mask
         callset_val_df = callset_val_df.loc[sample_mask, :]
         truth_series = callset_val_df['is_in_val']
         if sum(truth_series) == 0:
-            print(f'{callset} has no true positives, skipping')
+            if verbose:
+                print(f'{callset} has no true positives, skipping')
             continue
         elif sum(truth_series) == len(truth_series):
-            print(f'{callset} has no true negatives, skipping')
+            if verbose:
+                print(f'{callset} has no true negatives, skipping')
             continue
         pred_series = callset_val_df.iloc[:, 1]
 
         fpr, tpr, thresholds = roc_curve(truth_series, pred_series, pos_label=True)
 
-        # Drop last values in all arrays
-        # fpr = fpr[:-1]
-        # tpr = tpr[:-1]
-        # thresholds = thresholds[:-1]
-
         total_tp = sum(truth_series)
         total_tn = len(truth_series) - total_tp
 
         if use_counts:
-            # Convert rates to counts
             tp = tpr * total_tp
             fp = fpr * total_tn
             zeros_mask = (fp == 0) | (tp == 0)
 
             tp_no_zeros = tp[~zeros_mask]
             fp_no_zeros = fp[~zeros_mask]
+            thresholds_no_zeros = thresholds[~zeros_mask]
 
-            fp_metric = 1/fp_no_zeros
-            tp_fp_metric = tp_no_zeros/fp_no_zeros
+            fp_metric = 1 / fp_no_zeros
+            tp_fp_metric = tp_no_zeros / fp_no_zeros
         else:
             fp_metric = fpr
             tp_fp_metric = tpr
+            thresholds_no_zeros = thresholds
 
         ax.plot(fp_metric, tp_fp_metric, **get_style_mapping(callset)['line'])
 
-    # Add a dotted diagonal line from (0, 0) to (total_tn, total_tp) if use_counts, else from (0, 0) to (1, 1)
-    # if use_counts:
-    #     ax.plot([0, total_tn], [0, total_tp], linestyle='--', color='grey', linewidth=1, label='Random')
-    # else:
-    #     ax.plot([0, 1], [0, 1], linestyle='--', color='grey', linewidth=1, label='Random')
+        if (svensemble2_cutoff is not None) and ('svensemble2' in callset) and len(thresholds_no_zeros):
+            threshold_idx = np.argmin(np.abs(thresholds_no_zeros - svensemble2_cutoff))
+            ax.plot(
+                fp_metric[threshold_idx], tp_fp_metric[threshold_idx], 'o',
+                color=get_style_mapping(callset)['line']['color'],
+            )
+
+    if xlim is not None:
+        ax.set_xlim(*xlim)
+    if ylim is not None:
+        ax.set_ylim(*ylim)
 
     ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5), frameon=False)
 
@@ -1030,6 +1107,7 @@ def plot_precision_recall_curves(
     callsets.sort()
 
     text_objects = []
+    handler_map = {}
 
     paired_raw_callers = set()
     for callset in sample_val_dict:
@@ -1066,7 +1144,11 @@ def plot_precision_recall_curves(
             tp_metric = recall
             precision_metric = precision
 
-        ax.plot(tp_metric, precision_metric, **get_style_mapping(callset)['line'])
+        line, = ax.plot(tp_metric, precision_metric, **get_style_mapping(callset)['line'])
+
+        badge_handler = _build_badge_handler(callset)
+        if badge_handler is not None:
+            handler_map[line] = badge_handler
 
         if callset not in paired_raw_callers:
             text_label = callset if callset not in _style_mappings else _style_mappings[callset]['text']['label']
@@ -1097,7 +1179,9 @@ def plot_precision_recall_curves(
             expand=(1.2, 1.4),
         )
 
-    ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5), frameon=False)
+    ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5), frameon=False,
+              handler_map=handler_map)
+    ax._badge_handler_map = handler_map
 
     xlabel = 'Recall' if not use_counts else 'TP count'
     ylabel = 'Precision'
@@ -1116,6 +1200,142 @@ def plot_precision_recall_curves(
         )
         ax2.set_xlabel('Recall', size='large', weight=700)
         ax.figure.tight_layout()
+
+    return ax
+
+
+def plot_precision_recall_gain_curves(
+    sample_val_dict, ax=None, title=None,
+    svensemble2_cutoff=None, verbose=False,
+    text_labels=False,
+    xlim=None, ylim=None,
+):
+    """Plot Precision-Recall-Gain curves (Flach & Kull, 2015).
+
+    Uses per-callset prevalence as defined by the original paper:
+    pi = n_pos / (n_pos + n_neg) where n_pos and n_neg are the positive
+    and negative counts within each callset's prediction set.
+
+    The gain transform is:
+        precision_gain = 1 - (n_pos / n_neg) * (FP / TP)
+        recall_gain    = 1 - (n_pos / n_neg) * (FN / TP)
+
+    Points where precision or recall fall below pi (i.e. worse than the
+    per-callset random baseline) map to negative gains and are clipped.
+
+    Args:
+        sample_val_dict: Dict of {callset_name: DataFrame} where each
+            DataFrame has a prediction score as the 2nd column and a
+            boolean truth column ``is_in_val``.
+        ax: Matplotlib axis.  Created if *None*.
+        title: Plot title.
+        svensemble2_cutoff: If set, mark the operating point closest to
+            this threshold on SVEnsemble2 curves.
+        verbose: Print skipped callsets.
+        xlim: Tuple (xmin, xmax).  Defaults to (0, 1).
+        ylim: Tuple (ymin, ymax).  Defaults to (0, 1).
+
+    Returns:
+        Matplotlib axis with plotted PRG curves.
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+    ax.plot([0, 1], [1, 0], color='0.75', linewidth=0.8, linestyle='--', zorder=0)
+
+    callsets = list(sample_val_dict.keys())
+    callsets.sort()
+
+    text_objects = []
+    handler_map = {}
+
+    paired_raw_callers = set()
+    for callset in sample_val_dict:
+        if callset.startswith('svensemble2_'):
+            raw_name = callset[len('svensemble2_'):]
+            if raw_name in sample_val_dict:
+                paired_raw_callers.add(raw_name)
+
+    for _, callset in _ordered_callset_enumerate(callsets, _callset_order):
+        callset_val_df = sample_val_dict[callset].dropna().copy()
+        truth_series = callset_val_df['is_in_val']
+        n_pos = sum(truth_series)
+        n_neg = len(truth_series) - n_pos
+        if n_pos == 0:
+            if verbose:
+                print(f'{callset} has no true positives, skipping')
+            continue
+        elif n_neg == 0:
+            if verbose:
+                print(f'{callset} has no true negatives, skipping')
+            continue
+        pred_series = callset_val_df.iloc[:, 1]
+
+        # Sort predictions descending to walk thresholds high-to-low
+        order = np.argsort(-pred_series.values)
+        sorted_labels = truth_series.values[order]
+        sorted_scores = pred_series.values[order]
+
+        tp = np.cumsum(sorted_labels).astype(float)
+        fp = np.cumsum(~sorted_labels).astype(float)
+        fn = n_pos - tp
+
+        pos_neg_ratio = n_pos / n_neg
+
+        with np.errstate(divide='ignore', invalid='ignore'):
+            prec_gain = 1.0 - pos_neg_ratio * (fp / tp)
+            rec_gain = 1.0 - pos_neg_ratio * (fn / tp)
+
+        # Keep only points inside the unit square (both gains > 0)
+        valid = (prec_gain > 0) & (rec_gain > 0) & np.isfinite(prec_gain) & np.isfinite(rec_gain)
+        prec_gain = prec_gain[valid]
+        rec_gain = rec_gain[valid]
+        thresholds_valid = sorted_scores[valid]
+
+        if len(prec_gain) == 0:
+            if verbose:
+                print(f'{callset} has no points above baseline prevalence, skipping')
+            continue
+
+        line, = ax.plot(rec_gain, prec_gain, **get_style_mapping(callset)['line'])
+
+        badge_handler = _build_badge_handler(callset)
+        if badge_handler is not None:
+            handler_map[line] = badge_handler
+
+        if (callset not in paired_raw_callers) and text_labels:
+            text_label = callset if callset not in _style_mappings else _style_mappings[callset]['text']['label']
+            text_style = {k: v for k, v in get_style_mapping(callset)['text'].items() if k != 'label'}
+            t = ax.text(rec_gain[0], prec_gain[0], text_label, **text_style)
+            text_objects.append(t)
+
+        if (svensemble2_cutoff is not None) and ('svensemble2' in callset) and len(thresholds_valid):
+            threshold_idx = np.argmin(np.abs(thresholds_valid - svensemble2_cutoff))
+            ax.plot(
+                rec_gain[threshold_idx], prec_gain[threshold_idx], 'o',
+                color=get_style_mapping(callset)['line']['color'],
+            )
+
+    ax.set_xlim(*(xlim or (0, 1)))
+    ax.set_ylim(*(ylim or (0, 1)))
+
+    if text_objects:
+        adjust_text(
+            text_objects,
+            ax=ax,
+            arrowprops=dict(arrowstyle='-', color='gray', lw=0.5),
+            force_text=(0.5, 1.0),
+            expand=(1.2, 1.4),
+        )
+
+    ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5), frameon=False,
+              handler_map=handler_map)
+    ax._badge_handler_map = handler_map
+
+    plt.xlabel('Recall Gain', size='large', weight=700)
+    plt.ylabel('Precision Gain', size='large', weight=700)
+    if title:
+        plt.title(title, size='large', weight=700)
 
     return ax
 

@@ -266,6 +266,8 @@ gnomad_pass_params = gnomad_params | {
     'input_path': 'gnomad_pass.vcf.gz'
 }
 
+gnomad_pass_hg19_params = gnomad_pass_params
+
 manta_candidate_params = default_params | {
     'source': 'manta_candidate',
     'base_cols': base_cols + ['INFO_END'],
@@ -649,6 +651,7 @@ caller_param_dict = {
     'gnomad': gnomad_params,
     'gnomad_filtered': gnomad_filtered_params,
     'gnomad_pass': gnomad_pass_params,
+    'gnomad_pass_hg19': gnomad_pass_hg19_params,
     'gridss': gridss_params,
     'manta_candidate': manta_candidate_params,
     'manta_diploid': manta_diploid_params,
@@ -693,6 +696,11 @@ callset_path_configs: dict[str, tuple[str, str, str]] = {
     ),
     'gnomad_pass': (
         'gnomad_pass',
+        'data/{s}/svensemble2',
+        'data/gnomad/gnomad.vcf.gz',
+    ),
+    'gnomad_pass_hg19': (
+        'gnomad_pass_hg19',
         'data/{s}/svensemble2',
         'data/gnomad/gnomad.vcf.gz',
     ),

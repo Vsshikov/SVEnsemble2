@@ -83,7 +83,6 @@ def chunker(bp_df: pd.DataFrame, chunk_size: int = 10000, chunk_max_n: int|None 
     # Get chromosome and orientation identifiers for grouping
     # chrom_orientation_labels = bps.get_bp_chroms_orientations(bp_df)
 
-    # Process each chromosome-orientation group separately
     n_chunks = 0
     for _, group in bp_df.groupby(['CHROM_bnd1', 'CHROM_bnd2']):
         current_chunk = []

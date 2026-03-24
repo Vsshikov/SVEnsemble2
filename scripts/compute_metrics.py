@@ -2,61 +2,43 @@
 """
 Compute classification metrics from SVEnsemble2 benchmark CSV files.
 
-For each benchmark CSV (produced by svensemble/benchmark.py), reports counts and
-scores at both a chosen operating threshold and across the full score range:
+For each benchmark CSV (produced by svensemble/benchmark.py):
 
-  Counts at threshold
-  -------------------
-  TP   — calls at or above threshold that match a truth variant
-  FP   — calls at or above threshold that do not match a truth variant
-  TN   — calls below threshold that do not match a truth variant
-         (SVEnsemble2: correctly low-scored calls; regular callers: correctly
-          filtered calls — note this is incomplete since calls not made by the
-          caller are absent from the benchmark CSV)
-  FN   — calls below threshold that match a truth variant (within the callset)
-  FN*  — truth variants not recalled at all (n_truth - TP); requires --n_truth
-          or --sample_name so the total truth count can be resolved
+  Callset-level counts
+  --------------------
+  For raw callers, every call is a positive prediction — the caller already
+  decided what to report.  TP, FP, FN are determined directly from truth
+  matching without any threshold.
 
-  Rates at threshold
-  ------------------
-  Precision   = TP / (TP + FP)
-  Recall      = TP / n_truth  [if n_truth available]  or  TP / (TP + FN)
-  F1          = harmonic mean of Precision and Recall
+  For SVEnsemble2 models, predictions are thresholded on the ``_pred``
+  probability at one or more operating points (default: 0.1, 0.2, 0.3).
 
-  Curve metrics (threshold-free)
-  -------------------------------
-  AUROC  — area under the receiver-operating-characteristic curve
-  AUPRC  — area under the precision-recall curve
+  Metrics at each operating point
+  --------------------------------
+  TP         — predicted-positive calls matching a truth variant
+  FP         — predicted-positive calls NOT matching a truth variant
+  FN         — n_truth - TP  (requires --n_truth or --sample_name)
+  Precision  — TP / (TP + FP)
+  Recall     — TP / n_truth
+  F1         — harmonic mean of Precision and Recall
 
-Threshold selection per callset:
-  • SVEnsemble2 predictions (score column ends with ``_pred``): use --threshold
-    (default 0.5).
-  • Regular callers that have a ``FILTER_PASS`` column: FILTER_PASS is used as
-    the binary predictor.  Pass --ignore_filter_pass to use --threshold instead.
-  • Regular callers without FILTER_PASS: use --threshold on the quality metric.
+  Curve metrics (threshold-free, always on quality score)
+  -------------------------------------------------------
+  AUROC  — area under the ROC curve (callset-level, no padding)
+  AUPRC  — area under the precision-recall curve (global, padded for
+            missed truth variants when n_truth is known)
 
 Usage:
     python scripts/compute_metrics.py \\
-        --benchmark_csvs a.benchmark.csv,b.benchmark.csv OR (MUTUALLY EXCLUSIVE) --benchmark_csvs_file paths.txt \\
-        --labels callerA,svensemble2_B \\
+        --benchmark_csvs a.benchmark.csv,b.benchmark.csv \\
         --sample_name NA12878 \\
-        --svtypes DEL,INS \\
-        --svlen_lower 50 \\
-        --threshold 0.5 \\
-        [--output metrics.csv] \\
-        [--verbose]
+        --thresholds 0.1 0.2 0.3 \\
+        [--output metrics.csv] [--verbose]
 
-    # Alternatively, supply CSV paths via a text file (one path per line,
-    # blank lines and lines starting with '#' are ignored):
-    python scripts/compute_metrics.py \\
-        --benchmark_csvs_file paths.txt \\
-        ...
-
-    # Or pipe paths from find (or any command) via stdin using '-':
+    # Pipe paths from find via stdin:
     find data/ -name '*.benchmark.csv' | python scripts/compute_metrics.py \\
         --benchmark_csvs_file - \\
-        --sample_name NA12878 \\
-        --svtypes DEL,INS
+        --sample_name NA12878
 """
 
 import os
@@ -69,20 +51,17 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     average_precision_score,
-    precision_recall_curve,
     roc_auc_score,
 )
 
+WORKDIR = "/vast/ai_projects/Papenfuss_SVEnsemble2"
+if WORKDIR not in sys.path:
+    sys.path.insert(0, WORKDIR)
 if __name__ == '__main__':
-    WORKDIR = "/vast/ai_projects/Papenfuss_SVEnsemble2"
     os.chdir(WORKDIR)
-    if WORKDIR not in sys.path:
-        sys.path.insert(0, WORKDIR)
-    import svensemble._caller_params as caller_params
-    import svensemble.benchmark as bench
-else:
-    from . import _caller_params as caller_params
-    from . import benchmark as bench
+
+import svensemble._caller_params as caller_params
+import svensemble.benchmark as bench
 
 
 # ---------------------------------------------------------------------------
@@ -92,18 +71,27 @@ else:
 _META_COLS = frozenset({'INFO_EVENT', 'is_in_val', 'FILTER_PASS', 'INFO_INFERRED_SVTYPE'})
 
 
-def detect_score_column(df: pd.DataFrame) -> str:
+def resolve_score_column(df: pd.DataFrame, callset: str | None = None) -> str:
     """Return the quality/prediction score column from a benchmark CSV.
 
-    Args:
-        df: Benchmark CSV dataframe.
+    Resolution order:
 
-    Returns:
-        Name of the score column (first column that is not a metadata column).
-
-    Raises:
-        ValueError: If no score column can be identified.
+    1. If a ``_pred`` column is present (SVEnsemble2 output), return it.
+    2. If *callset* is given and its ``qual_metric`` (from
+       ``caller_param_dict``) exists in the DataFrame, return that.
+    3. Fall back to the first column that is not a metadata column.
     """
+    pred_cols = [c for c in df.columns if c.endswith('_pred')]
+    if pred_cols:
+        return pred_cols[0]
+
+    if callset is not None:
+        params = caller_params.caller_param_dict.get(callset)
+        if params is not None:
+            qual_metric = params.get('qual_metric')
+            if qual_metric is not None and qual_metric in df.columns:
+                return qual_metric
+
     score_cols = [c for c in df.columns if c not in _META_COLS]
     if not score_cols:
         raise ValueError(
@@ -113,12 +101,8 @@ def detect_score_column(df: pd.DataFrame) -> str:
 
 
 def is_svensemble2_csv(df: pd.DataFrame) -> bool:
-    """Return True when the benchmark CSV comes from an SVEnsemble2 model.
-
-    SVEnsemble2 prediction columns follow the ``{training_set}_{model}_pred``
-    naming convention produced by ``validate_svensemble2_predictions``.
-    """
-    return detect_score_column(df).endswith('_pred')
+    """Return True when the benchmark CSV comes from an SVEnsemble2 model."""
+    return any(c.endswith('_pred') for c in df.columns)
 
 
 # ---------------------------------------------------------------------------
@@ -128,10 +112,9 @@ def is_svensemble2_csv(df: pd.DataFrame) -> bool:
 def compute_at_threshold(
     y_true: np.ndarray,
     y_score: np.ndarray,
-    threshold: float,
+    threshold: float | None,
     *,
-    use_filter_pass: bool = False,
-    filter_pass: np.ndarray | None = None,
+    n_truth: int | None = None,
 ) -> dict:
     """Compute confusion-matrix counts and derived rates at a single threshold.
 
@@ -139,98 +122,77 @@ def compute_at_threshold(
         y_true: Binary ground-truth labels (1 = matched a truth variant).
         y_score: Quality metric or model prediction scores.
         threshold: Calls with score >= threshold are predicted positive.
-        use_filter_pass: If True, use ``filter_pass`` instead of ``threshold``.
-        filter_pass: Boolean/int array for FILTER_PASS (1 = PASS); required when
-            ``use_filter_pass`` is True.
+            If None, **all** calls are treated as positive predictions
+            (appropriate for raw callers whose callset IS their output).
+        n_truth: Total truth variants for global recall / FN.
 
     Returns:
-        Dict with keys: tp, fp, tn, fn, precision, recall_callset, f1_callset,
-        threshold_used.
+        Dict with keys: tp, fp, fn, precision, recall, f1.
+        ``fn`` and ``recall`` are global (using n_truth) when available,
+        otherwise callset-level.
     """
     y_true = np.asarray(y_true, dtype=int)
 
-    if use_filter_pass and filter_pass is not None:
-        y_pred = np.asarray(filter_pass, dtype=int)
-        threshold_label = 'FILTER_PASS'
+    if threshold is None:
+        y_pred = np.ones_like(y_true)
     else:
         y_pred = (np.asarray(y_score, dtype=float) >= threshold).astype(int)
-        threshold_label = f'{threshold:.3f}'
 
     tp = int(((y_pred == 1) & (y_true == 1)).sum())
     fp = int(((y_pred == 1) & (y_true == 0)).sum())
-    tn = int(((y_pred == 0) & (y_true == 0)).sum())
-    fn = int(((y_pred == 0) & (y_true == 1)).sum())
+
+    if n_truth is not None:
+        fn = n_truth - tp
+        recall = tp / n_truth if n_truth > 0 else float('nan')
+    else:
+        fn_callset = int(((y_pred == 0) & (y_true == 1)).sum())
+        fn = fn_callset
+        recall = tp / (tp + fn) if (tp + fn) > 0 else float('nan')
 
     precision = tp / (tp + fp) if (tp + fp) > 0 else float('nan')
-    # Recall within the callset (TP / (TP + FN_callset))
-    recall_callset = tp / (tp + fn) if (tp + fn) > 0 else float('nan')
-    f1_callset = (
-        2 * precision * recall_callset / (precision + recall_callset)
-        if (not np.isnan(precision)) and (not np.isnan(recall_callset)) and (precision + recall_callset) > 0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (not np.isnan(precision)) and (not np.isnan(recall)) and (precision + recall) > 0
         else float('nan')
     )
 
-    return dict(
-        tp=tp,
-        fp=fp,
-        tn=tn,
-        fn=fn,
-        precision=precision,
-        recall_callset=recall_callset,
-        f1_callset=f1_callset,
-        threshold_used=threshold_label,
-    )
+    return dict(tp=tp, fp=fp, fn=fn, precision=precision, recall=recall, f1=f1)
 
 
 def compute_metrics(
     df: pd.DataFrame,
-    threshold: float = 0.5,
+    thresholds: list[float] | None = None,
     n_truth: int | None = None,
-    ignore_filter_pass: bool = False,
+    callset: str | None = None,
 ) -> dict:
     """Compute all metrics for a single benchmark CSV dataframe.
 
     Args:
         df: Benchmark CSV with at least ``is_in_val`` and a score column.
-        threshold: Operating threshold for binary classification.  Ignored for
-            basic-caller CSVs that have a FILTER_PASS column (unless
-            ``ignore_filter_pass`` is set).
-        n_truth: Total number of truth variants in the filtered validation set.
-            When provided, global recall (TP / n_truth) and FN* (n_truth − TP)
-            are reported in addition to the callset-level values.
-        ignore_filter_pass: If True, ignore the FILTER_PASS column and apply
-            ``threshold`` to the quality metric instead.
+        thresholds: Operating thresholds for SVEnsemble2 predictions.
+            Raw callers ignore these (all calls are positive predictions).
+        n_truth: Total truth variants for global recall / FN.
+        callset: Optional callset name for qual_metric lookup.
 
     Returns:
-        Dict with keys: score_col, is_svensemble2, threshold_used, n, n_pos,
-        tp, fp, tn, fn, fn_global, precision, recall, f1, auroc, auprc.
-        ``fn_global`` and global recall/f1 are ``nan`` when ``n_truth`` is None.
-        AUROC is always computed on callset-level data only (no padding for
-        missed truth variants) so that it measures score ranking quality.
-        When ``n_truth`` is provided, AUPRC accounts for missed truth variants
-        by treating them as positives with score 0, so the recall axis
-        reflects TP / n_truth.
+        Flat dict.  Common keys: score_col, is_svensemble2, n, n_pos,
+        n_truth, auroc, auprc.  Per-threshold keys are suffixed with
+        ``_<threshold>`` (e.g. ``tp_0.2``, ``precision_0.2``).
     """
+    if thresholds is None:
+        thresholds = [0.1, 0.2, 0.3]
+
     df = df.copy()
     df = df.dropna(subset=['is_in_val'])
 
-    score_col = detect_score_column(df)
+    score_col = resolve_score_column(df, callset=callset)
     y_true = df['is_in_val'].astype(int).values
     y_score = df[score_col].fillna(0.0).values
-
     is_sve2 = score_col.endswith('_pred')
-    use_filter_pass = (
-        (not is_sve2)
-        and (not ignore_filter_pass)
-        and ('FILTER_PASS' in df.columns)
-    )
-    filter_pass = df['FILTER_PASS'].astype(int).values if use_filter_pass else None
 
     n_pos = int(y_true.sum())
 
-    # When n_truth is known, truth variants absent from the callset must be
-    # included as positives with score 0 so that sklearn curve metrics use the
-    # correct recall denominator (TP / n_truth instead of TP / n_pos).
+    # -- Curve metrics (always on quality score) ----------------------------
     n_missed = max(n_truth - n_pos, 0) if n_truth is not None else 0
     if n_missed > 0:
         y_true_global = np.concatenate([y_true, np.ones(n_missed, dtype=int)])
@@ -239,13 +201,7 @@ def compute_metrics(
         y_true_global = y_true
         y_score_global = y_score
 
-    n_pos_global = int(y_true_global.sum())
-    n_neg_global = len(y_true_global) - n_pos_global
-
-    # AUROC — computed on callset-level data only (no padding).
-    # Padding with score-0 fake positives for missed truth variants conflates
-    # caller sensitivity with score ranking quality, producing misleading
-    # sub-0.5 values for callsets with low recall.
+    # AUROC — callset-level only (no padding)
     n_pos_callset = int(y_true.sum())
     n_neg_callset = len(y_true) - n_pos_callset
     if n_pos_callset > 0 and n_neg_callset > 0:
@@ -253,54 +209,73 @@ def compute_metrics(
     else:
         auroc = float('nan')
 
-    # AUPRC — uses global arrays so the recall axis reflects TP / n_truth
-    # rather than TP / n_pos_callset when n_truth is known.
-    auprc = float(average_precision_score(y_true_global, y_score_global)) if n_pos_global > 0 else float('nan')
-
-    at_thr = compute_at_threshold(
-        y_true, y_score, threshold,
-        use_filter_pass=use_filter_pass,
-        filter_pass=filter_pass,
+    # AUPRC — global (padded for missed truth when n_truth known)
+    n_pos_global = int(y_true_global.sum())
+    auprc = (
+        float(average_precision_score(y_true_global, y_score_global))
+        if n_pos_global > 0 else float('nan')
     )
 
-    tp = at_thr['tp']
-    fp = at_thr['fp']
-    tn = at_thr['tn']
-    fn_callset = at_thr['fn']
-    precision = at_thr['precision']
-    recall_callset = at_thr['recall_callset']
-    f1_callset = at_thr['f1_callset']
-
-    if n_truth is not None:
-        fn_global = n_truth - tp
-        recall_global = tp / n_truth if n_truth > 0 else float('nan')
-        f1_global = (
-            2 * precision * recall_global / (precision + recall_global)
-            if (not np.isnan(precision)) and (not np.isnan(recall_global)) and (precision + recall_global) > 0
-            else float('nan')
-        )
-    else:
-        fn_global = float('nan')
-        recall_global = recall_callset
-        f1_global = f1_callset
-
-    return dict(
+    result = dict(
         score_col=score_col,
         is_svensemble2=is_sve2,
-        threshold_used=at_thr['threshold_used'],
         n=len(df),
         n_pos=n_pos,
-        tp=tp,
-        fp=fp,
-        tn=tn,
-        fn=fn_callset,
-        fn_global=fn_global,
-        precision=precision,
-        recall=recall_global,
-        f1=f1_global,
+        n_truth=n_truth if n_truth is not None else float('nan'),
         auroc=auroc,
         auprc=auprc,
     )
+
+    # -- Per-threshold confusion matrix -------------------------------------
+    if is_sve2:
+        for thr in thresholds:
+            at_thr = compute_at_threshold(y_true, y_score, thr, n_truth=n_truth)
+            for key, val in at_thr.items():
+                result[f'{key}_{thr}'] = val
+    else:
+        # Raw callers: every call is a positive prediction, no threshold.
+        # Values repeated in each _T column for easier comparison.
+        at_callset = compute_at_threshold(y_true, y_score, None, n_truth=n_truth)
+        for thr in thresholds:
+            for key, val in at_callset.items():
+                result[f'{key}_{thr}'] = val
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Filename parsing
+# ---------------------------------------------------------------------------
+
+def parse_benchmark_filename(path: Path) -> dict:
+    """Extract metadata fields from a benchmark CSV filename.
+
+    Benchmark filenames follow the pattern::
+
+        {callset}.{svtypes}.{svlens}.{val_set}.benchmark.csv
+
+    where *svtypes* is a dash-separated combination (e.g. ``DEL-INS``),
+    *svlens* is a colon-separated range (e.g. ``50:inf``), and *val_set*
+    may be empty (producing a ``..`` in the filename).
+
+    Returns:
+        Dict with keys: callset, svtypes (list of str), svlens_str, val_set.
+    """
+    name = path.name
+    if name.endswith('.benchmark.csv'):
+        name = name[: -len('.benchmark.csv')]
+    parts = name.split('.')
+    if len(parts) < 3:
+        raise ValueError(
+            f"Cannot parse benchmark filename: {path.name!r} "
+            f"(expected at least callset.svtypes.svlens)"
+        )
+    val_set = parts[-1]
+    svlens_str = parts[-2]
+    svtypes_str = parts[-3]
+    callset = '.'.join(parts[:-3])
+    svtypes = svtypes_str.split('-') if svtypes_str else []
+    return dict(callset=callset, svtypes=svtypes, svlens_str=svlens_str, val_set=val_set)
 
 
 # ---------------------------------------------------------------------------
@@ -310,39 +285,51 @@ def compute_metrics(
 def load_and_compute(
     csv_paths: List[Path],
     labels: List[str] | None = None,
-    threshold: float = 0.5,
-    n_truth: int | None = None,
-    ignore_filter_pass: bool = False,
+    thresholds: list[float] | None = None,
+    n_truth: int | List[int | None] | None = None,
     verbose: bool = False,
 ) -> pd.DataFrame:
     """Load benchmark CSVs and compute metrics for each.
 
     Args:
         csv_paths: Paths to benchmark CSV files.
-        labels: Optional display labels for each callset.  Defaults to the file
-            stem of each path.
-        threshold: Score threshold for binary classification.
-        n_truth: Total number of truth variants; used for global recall and FN*.
-        ignore_filter_pass: If True, ignore FILTER_PASS columns.
+        labels: Optional display labels.  Defaults to file stems.
+        thresholds: Operating thresholds for SVEnsemble2 (default: [0.1, 0.2, 0.3]).
+            Raw callers always treat all calls as positive predictions.
+        n_truth: Total truth variants; single int or per-file list.
         verbose: Print per-file progress.
-
-    Returns:
-        DataFrame with one row per callset and columns for each metric.
     """
+    if thresholds is None:
+        thresholds = [0.1, 0.2, 0.3]
     if labels is None:
         labels = [p.stem for p in csv_paths]
 
+    if isinstance(n_truth, list):
+        n_truths = n_truth
+        if len(n_truths) != len(csv_paths):
+            raise ValueError(
+                f"n_truth list has {len(n_truths)} entries but there are "
+                f"{len(csv_paths)} CSV paths"
+            )
+    else:
+        n_truths = [n_truth] * len(csv_paths)
+
     rows = []
-    for path, label in zip(csv_paths, labels):
+    for path, label, file_n_truth in zip(csv_paths, labels, n_truths):
         if verbose:
-            print(f"  Processing {path} ({label}) …")
+            print(f"  Processing {path} ({label}) n_truth={file_n_truth} …")
+        try:
+            parsed = parse_benchmark_filename(path)
+            callset = parsed['callset']
+        except ValueError:
+            callset = None
         try:
             df = pd.read_csv(path, low_memory=False)
             metrics = compute_metrics(
                 df,
-                threshold=threshold,
-                n_truth=n_truth,
-                ignore_filter_pass=ignore_filter_pass,
+                thresholds=thresholds,
+                n_truth=file_n_truth,
+                callset=callset,
             )
         except Exception as exc:
             warnings.warn(f"Failed to compute metrics for '{path}': {exc}")
@@ -356,40 +343,60 @@ def load_and_compute(
 # Display
 # ---------------------------------------------------------------------------
 
-_FLOAT_COLS = {'precision', 'recall', 'f1', 'auroc', 'auprc'}
-_INT_COLS   = {'n', 'n_pos', 'tp', 'fp', 'tn', 'fn', 'fn_global'}
+_THRESHOLD_METRICS = ('tp', 'fp', 'fn', 'precision', 'recall', 'f1')
+_FLOAT_METRICS = frozenset({'precision', 'recall', 'f1', 'auroc', 'auprc'})
+_INT_METRICS = frozenset({'n', 'n_pos', 'n_truth', 'tp', 'fp', 'fn'})
+
+
+def _fmt(val, metric_name: str) -> str:
+    """Format a single value for display."""
+    base = metric_name.rsplit('_', 1)[0] if '_' in metric_name else metric_name
+    if pd.isna(val):
+        return ''
+    if base in _FLOAT_METRICS:
+        return f'{val:.4f}'
+    if base in _INT_METRICS:
+        return str(int(val))
+    return str(val)
+
+
+def _detect_thresholds(results: pd.DataFrame) -> list[float]:
+    """Infer threshold values from column names like 'tp_0.2'."""
+    thresholds = set()
+    for col in results.columns:
+        if '_' in col:
+            try:
+                thresholds.add(float(col.rsplit('_', 1)[1]))
+            except ValueError:
+                pass
+    return sorted(thresholds)
 
 
 def format_results(results: pd.DataFrame) -> pd.DataFrame:
     """Return a display-ready copy of the results table.
 
-    Args:
-        results: Raw metrics DataFrame from ``load_and_compute``.
-
-    Returns:
-        Formatted DataFrame suitable for printing, with float and integer
-        columns rendered as strings.
+    Columns are ordered: common info, unsuffixed callset-level metrics
+    (raw callers), then threshold-grouped metrics (SVEnsemble2),
+    then curve metrics.
     """
-    display_cols = [
-        'label', 'n', 'n_pos',
-        'tp', 'fp', 'tn', 'fn', 'fn_global',
-        'precision', 'recall', 'f1',
-        'auroc', 'auprc',
-        'threshold_used',
-    ]
-    display_cols = [c for c in display_cols if c in results.columns]
+    thresholds = _detect_thresholds(results)
+
+    common_cols = ['label', 'n', 'n_pos', 'n_truth']
+    threshold_cols = []
+    for thr in thresholds:
+        for m in _THRESHOLD_METRICS:
+            col = f'{m}_{thr}'
+            if col in results.columns:
+                threshold_cols.append(col)
+    curve_cols = ['auroc', 'auprc']
+
+    display_cols = [c for c in common_cols + threshold_cols + curve_cols if c in results.columns]
 
     rows = []
     for _, row in results.iterrows():
         formatted: dict = {}
         for col in display_cols:
-            val = row.get(col)
-            if col in _FLOAT_COLS:
-                formatted[col] = f'{val:.4f}' if pd.notna(val) else 'N/A'
-            elif col in _INT_COLS:
-                formatted[col] = str(int(val)) if pd.notna(val) else 'N/A'
-            else:
-                formatted[col] = val
+            formatted[col] = _fmt(row.get(col), col)
         rows.append(formatted)
 
     return pd.DataFrame(rows, columns=display_cols)
@@ -397,29 +404,21 @@ def format_results(results: pd.DataFrame) -> pd.DataFrame:
 
 def print_metrics_table(
     results: pd.DataFrame,
-    n_truth: int | None = None,
     verbose: bool = False,
 ) -> None:
-    """Print a formatted metrics table to stdout.
-
-    Args:
-        results: Metrics DataFrame from ``load_and_compute``.
-        n_truth: Total truth variants used (for header display only).
-        verbose: Print per-row notes about TN interpretation.
-    """
-    sep = '=' * 110
+    """Print a formatted metrics table to stdout."""
+    thresholds = _detect_thresholds(results)
+    sep = '=' * 120
 
     print(f'\n{sep}')
     print('METRICS SUMMARY')
     print(sep)
-    if n_truth is not None:
-        print(f'  Total truth variants (n_truth): {n_truth}')
-    print('  TN  = calls below threshold / not FILTER_PASS that do NOT match a truth variant')
-    print('        (for regular callers this count is restricted to calls present in the callset;')
-    print('         calls never made by the caller are absent and cannot be counted)')
-    print('  FN  = calls at or above threshold / FILTER_PASS that match a truth variant')
-    print('  FN* = n_truth − TP  (requires --n_truth or --sample_name; shown in fn_global column)')
-    print('  Recall, F1 use global recall = TP / n_truth when n_truth is available, else TP / (TP + FN)')
+    print('  Raw callers: every call is a positive prediction (no threshold).')
+    print('               Values repeated in each _T column for easier comparison.')
+    print(f'  SVEnsemble2: thresholded on _pred probability at {thresholds}')
+    print('  FN = n_truth − TP   (requires --n_truth or --sample_name)')
+    print('  Recall = TP / n_truth   |   Precision = TP / (TP + FP)')
+    print('  AUROC/AUPRC: computed on quality score (not thresholded)')
     print(sep)
 
     disp = format_results(results)
@@ -427,10 +426,10 @@ def print_metrics_table(
 
     if verbose and 'is_svensemble2' in results.columns:
         print(f'\n{sep}')
-        print('Threshold used per callset:')
+        print('Score column used per callset:')
         for _, row in results.iterrows():
-            kind = 'SVEnsemble2' if row.get('is_svensemble2') else 'regular caller'
-            print(f"  {row['label']:<50s}  [{kind}]  threshold = {row['threshold_used']}")
+            kind = 'SVEnsemble2' if row.get('is_svensemble2') else 'raw caller'
+            print(f"  {row['label']:<50s}  [{kind}]  score_col = {row['score_col']}")
 
 
 # ---------------------------------------------------------------------------
@@ -464,7 +463,7 @@ if __name__ == '__main__':
     # --- Truth count resolution -------------------------------------------
     parser.add_argument(
         '--n_truth', type=int, default=None,
-        help='Total number of truth variants (for global Recall / FN*).  '
+        help='Total number of truth variants (for global Recall / FN).  '
              'Provide either this or --sample_name.'
     )
     parser.add_argument(
@@ -495,16 +494,12 @@ if __name__ == '__main__':
         help='Maximum SVLEN filter (default: %(default)s).'
     )
 
-    # --- Threshold / behaviour --------------------------------------------
+    # --- Thresholds -------------------------------------------------------
     parser.add_argument(
-        '--threshold', type=float, default=0.5,
-        help='Score threshold for binary classification of SVEnsemble2 predictions '
-             'and regular callers without FILTER_PASS (default: %(default)s).'
-    )
-    parser.add_argument(
-        '--ignore_filter_pass', action='store_true', default=False,
-        help='Ignore FILTER_PASS columns and apply --threshold to the quality metric '
-             'for all regular callers.'
+        '--thresholds', type=float, nargs='+', default=[0.1, 0.2, 0.3],
+        help='Operating thresholds for SVEnsemble2 predictions.  Raw callers '
+             'always treat all calls as positive predictions regardless of '
+             'threshold (default: 0.1 0.2 0.3).'
     )
 
     # --- Output -----------------------------------------------------------
@@ -514,7 +509,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--verbose', action='store_true', default=False,
-        help='Print per-file progress and threshold notes.'
+        help='Print per-file progress and score column notes.'
     )
 
     args = parser.parse_args()
@@ -546,7 +541,7 @@ if __name__ == '__main__':
 
     # Parse labels
     if args.labels is not None:
-        labels = [l.strip() for l in args.labels.split(sep=',')]
+        labels = [s.strip() for s in args.labels.split(sep=',')]
         if len(labels) != len(csv_paths):
             raise ValueError(
                 f"--labels has {len(labels)} entries but the benchmark CSV list "
@@ -555,33 +550,48 @@ if __name__ == '__main__':
     else:
         labels = None
 
-    # Parse svtypes
-    svtypes = None
+    # Parse svtypes (global override — forces the same svtypes for all files)
+    svtypes_override = None
     if args.svtypes is not None and args.svtypes.lower() != 'all':
-        svtypes = args.svtypes.split(sep=',')
-        for svtype in svtypes:
+        svtypes_override = args.svtypes.split(sep=',')
+        for svtype in svtypes_override:
             if svtype not in caller_params.default_sv_types:
                 raise ValueError(f"Unsupported svtype: {svtype!r}")
 
     svlens = (args.svlen_lower, args.svlen_upper)
 
-    # Resolve n_truth
-    n_truth = args.n_truth
-    if n_truth is None and args.sample_name is not None:
-        n_truth = bench.get_truth_count(
-            sample_name=args.sample_name,
-            svtypes=svtypes,
-            svlens=svlens,
-            val_set_path=args.val_set_path or None,
-            val_set_name=args.val_set_name or None,
-        )
-        if args.verbose:
-            print(f"Resolved n_truth = {n_truth} from sample '{args.sample_name}'")
-
-    if n_truth is None:
+    # Resolve n_truth — per-file when possible
+    if args.n_truth is not None:
+        n_truths = [args.n_truth] * len(csv_paths)
+    elif args.sample_name is not None:
+        truth_cache: dict[tuple, int] = {}
+        n_truths = []
+        for p in csv_paths:
+            if svtypes_override is not None:
+                file_svtypes = svtypes_override
+            else:
+                try:
+                    file_svtypes = parse_benchmark_filename(p)['svtypes']
+                except ValueError:
+                    file_svtypes = None
+            cache_key = tuple(sorted(file_svtypes)) if file_svtypes else ()
+            if cache_key not in truth_cache:
+                truth_cache[cache_key] = bench.get_truth_count(
+                    sample_name=args.sample_name,
+                    svtypes=file_svtypes or None,
+                    svlens=svlens,
+                    val_set_path=args.val_set_path or None,
+                    val_set_name=args.val_set_name or None,
+                )
+                if args.verbose:
+                    print(f"Resolved n_truth = {truth_cache[cache_key]} "
+                          f"for svtypes={file_svtypes or 'all'}")
+            n_truths.append(truth_cache[cache_key])
+    else:
+        n_truths = [None] * len(csv_paths)
         warnings.warn(
             "n_truth not provided and could not be resolved.  "
-            "Global Recall, F1, and FN* will not be computed.  "
+            "Global Recall, F1, and FN will not be computed.  "
             "Provide --n_truth or --sample_name."
         )
 
@@ -591,13 +601,12 @@ if __name__ == '__main__':
     results = load_and_compute(
         csv_paths=csv_paths,
         labels=labels,
-        threshold=args.threshold,
-        n_truth=n_truth,
-        ignore_filter_pass=args.ignore_filter_pass,
+        thresholds=args.thresholds,
+        n_truth=n_truths,
         verbose=args.verbose,
     )
 
-    print_metrics_table(results, n_truth=n_truth, verbose=args.verbose)
+    print_metrics_table(results, verbose=args.verbose)
 
     if args.output is not None:
         out_path = Path(args.output)

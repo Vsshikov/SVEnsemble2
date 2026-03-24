@@ -48,12 +48,23 @@ def resolve_shap_paths(
     sample_name: str,
     model_name: str,
     training_set_name: str,
+    ground_truth_name: str | None = None,
 ) -> dict[str, Path]:
-    """Resolve standard SVEnsemble2 paths for SHAP analysis."""
-    base = sv_utils.DATA_DIR / sample_name / 'sv_calling' / 'svensemble2'
-    workflow_dir = base / f'{sample_name}.{model_name}.{training_set_name}'
+    """Resolve SVEnsemble2 paths for SHAP analysis via the unified config system.
+
+    Delegates to ``sv_utils.create_config_dict`` so that the ``gt_`` suffix
+    (e.g. ``.gt_gnomad_pass``) is applied consistently with the training
+    pipeline.
+    """
+    config = sv_utils.create_config_dict(
+        sample_name=sample_name,
+        model_name=model_name,
+        training_set=training_set_name,
+        ground_truth_name=ground_truth_name,
+    )
+    workflow_dir = config[sample_name]['workflow_dir']
     return {
-        'base': base,
+        'base': workflow_dir.parent,
         'workflow_dir': workflow_dir,
         'model_pkl': workflow_dir / 'model.pkl',
         'feature_matrix': workflow_dir / 'feature_matrix.csv',
@@ -107,6 +118,7 @@ def load_from_workflow(
     sample_name: str,
     model_name: str,
     training_set_name: str,
+    ground_truth_name: str | None = None,
     verbose: bool = False,
 ) -> tuple:
     """
@@ -115,7 +127,8 @@ def load_from_workflow(
     Returns:
         (model, X, y) where y may be None if no ref_match column is present.
     """
-    paths = resolve_shap_paths(sample_name, model_name, training_set_name)
+    paths = resolve_shap_paths(sample_name, model_name, training_set_name,
+                               ground_truth_name=ground_truth_name)
     model_path = paths['model_pkl']
     fm_path = paths['feature_matrix']
 
@@ -156,19 +169,18 @@ def load_model_and_data(
     sample_name: str,
     model_name: str,
     training_set_name: str,
+    ground_truth_name: str | None = None,
     verbose: bool = False,
 ) -> tuple:
     """
-    Dispatch loader based on *source* and align features with the model.
-
-    Args:
-        source: ``'bench_pkl'`` or ``'workflow'``.
+    Dispatch loader and align features with the model.
 
     Returns:
         (model, X, y)
     """
     model, X, y = load_from_workflow(
-        sample_name, model_name, training_set_name, verbose=verbose,
+        sample_name, model_name, training_set_name,
+        ground_truth_name=ground_truth_name, verbose=verbose,
     )
 
     X = align_features(model, X, verbose=verbose)
@@ -323,6 +335,7 @@ def run_shap_assessment(
     sample_name: str,
     model_name: str,
     training_set_name: str,
+    ground_truth_name: str | None = None,
     use_gpu: bool = False,
     max_samples: Optional[int] = None,
     plot: bool = False,
@@ -337,13 +350,14 @@ def run_shap_assessment(
     """
     print(f"{'='*65}")
     print(f"SHAP assessment: {sample_name} | {model_name} | {training_set_name}")
-    print(f"  use_gpu={use_gpu}  max_samples={max_samples}")
+    gt_label = ground_truth_name or '(default)'
+    print(f"  ground_truth={gt_label}  use_gpu={use_gpu}  max_samples={max_samples}")
     print(f"{'='*65}")
 
     # --- Load ---
     model, X, y = load_model_and_data(
         sample_name, model_name, training_set_name,
-        verbose=verbose,
+        ground_truth_name=ground_truth_name, verbose=verbose,
     )
 
     # --- Compute ---
@@ -352,7 +366,8 @@ def run_shap_assessment(
     )
 
     # --- Save ---
-    paths = resolve_shap_paths(sample_name, model_name, training_set_name)
+    paths = resolve_shap_paths(sample_name, model_name, training_set_name,
+                               ground_truth_name=ground_truth_name)
     shap_dir = paths['shap_dir']
     shap_dir.mkdir(parents=True, exist_ok=True)
 
@@ -402,6 +417,12 @@ if __name__ == "__main__":
         help="Training set name (e.g. delly+manta_diploid)",
     )
     parser.add_argument(
+        '--ground_truth_sample_name', type=str, default=None,
+        help="Ground truth sample name (e.g. gnomad_pass). "
+             "Appends .gt_<name> suffix to workflow directory when set "
+             "and differs from the default reference set.",
+    )
+    parser.add_argument(
         '--use_gpu', action='store_true', default=False,
         help="Use GPUTreeExplainer (requires CUDA and max_depth <= 31)",
     )
@@ -431,6 +452,7 @@ if __name__ == "__main__":
         sample_name=args.sample_name,
         model_name=args.model_name,
         training_set_name=training_set_name,
+        ground_truth_name=args.ground_truth_sample_name,
         use_gpu=args.use_gpu,
         max_samples=args.max_samples,
         plot=args.plot,

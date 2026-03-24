@@ -556,7 +556,10 @@ def pu_predict_sample(
         raise FileNotFoundError(f"Model dictionary not found at {workflow_config['workflow_dir'] / 'model.pkl'}")
     if verbose:
         _log(f"Loading model from: {workflow_config['workflow_dir'] / 'model.pkl'}")
-    model_fit = pickle.load(open(workflow_config['workflow_dir'] / 'model.pkl', 'rb'))
+
+    with open(workflow_config['workflow_dir'] / 'model.pkl', 'rb') as f:
+        model_fit = pickle.load(f)
+
     if verbose:
         _log(f"Predicting probabilities for {len(X)} breakpoints")
 

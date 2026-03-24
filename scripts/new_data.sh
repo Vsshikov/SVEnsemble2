@@ -38,11 +38,13 @@ mkdir -p "$SAMPLE_DIR"/{scripts,logs,preprocessed,aligned,sv_calling}
 mkdir -p "$SAMPLE_DIR/scripts/config/runs"
 
 # --------------- Create scratch dirs and symlink ----------------------------
-# downloads/ and temp/ live on scratch to avoid filling the VAST project quota.
+# downloads/, temp/, and svensemble2 results live on scratch to avoid filling
+# the VAST project quota.
 SCRATCH_SAMPLE_DIR="$SCRATCH_DATA_DIR/$SAMPLE_NAME"
-mkdir -p "$SCRATCH_SAMPLE_DIR"/{downloads,temp}
-ln -sn "$SCRATCH_SAMPLE_DIR/downloads" "$SAMPLE_DIR/downloads"
-ln -sn "$SCRATCH_SAMPLE_DIR/temp"      "$SAMPLE_DIR/temp"
+mkdir -p "$SCRATCH_SAMPLE_DIR"/{downloads,temp,sv_calling/svensemble2}
+ln -sn "$SCRATCH_SAMPLE_DIR/downloads"              "$SAMPLE_DIR/downloads"
+ln -sn "$SCRATCH_SAMPLE_DIR/temp"                   "$SAMPLE_DIR/temp"
+ln -sn "$SCRATCH_SAMPLE_DIR/sv_calling/svensemble2" "$SAMPLE_DIR/sv_calling/svensemble2"
 
 # --------------- Symlink shared batch scripts --------------------------------
 # Only symlink regular files (*.sh) from data_scripts/; skip directories and
