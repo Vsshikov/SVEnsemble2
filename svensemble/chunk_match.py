@@ -54,7 +54,7 @@ def chunker(bp_df: pd.DataFrame, chunk_size: int = 10000, chunk_max_n: int|None 
                           - relative orientation of breakends
                           - position of breakend1 and breakend2
         chunk_size (int, optional): Maximum distance in base pairs between
-                                   breakpoints to group them together. Defaults to 5000.
+                                   breakpoints to group them together. Defaults to 10000.
         chunk_max_n (int, optional): Requires chunk_max_n_dist to be set. Soft upper limit on the number of breakpoints in a chunk. Defaults to 100.
                                     If the number of breakpoints in a chunk exceeds this value,
                                     and the next element is more than chunk_max_n_dist base pairs away,

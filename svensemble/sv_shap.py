@@ -23,8 +23,6 @@ Usage:
         --source workflow --max_samples 5000 --plot
 """
 
-import os
-import sys
 import time
 import pickle
 from pathlib import Path
@@ -36,8 +34,6 @@ import shap
 
 
 from . import utils as sv_utils
-from . import importances
-from . import matched_breakpoints as matchedbps
 from . import _caller_params as caller_params
 
 
@@ -141,7 +137,8 @@ def load_from_workflow(
         print(f"Loading model from: {model_path}")
         print(f"Loading feature matrix from: {fm_path}")
 
-    model = pickle.load(open(model_path, 'rb'))
+    with open(model_path, 'rb') as f:
+        model = pickle.load(f)
     fm = pd.read_csv(fm_path, low_memory=False)
 
     y = None
@@ -373,7 +370,8 @@ def run_shap_assessment(
 
     prefix = f'{sample_name}.{model_name}.{training_set_name}'
     shap_pkl_path = shap_dir / f'{prefix}.shap_values.pkl'
-    pickle.dump(shap_values, open(shap_pkl_path, 'wb'))
+    with open(shap_pkl_path, 'wb') as f:
+        pickle.dump(shap_values, f)
     print(f"Saved SHAP values: {shap_pkl_path}")
 
     # --- Summary ---

@@ -1,6 +1,6 @@
 """SVEnsemble - A toolkit for structural variant ensemble calling"""
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 from . import vcfparse
 from . import vcfwrite
