@@ -1,0 +1,348 @@
+"""
+Utility functions for SVEnsemble
+"""
+import os
+import copy
+import pandas as pd
+from pathlib import Path
+from collections import abc
+from ._caller_params import caller_param_dict, callset_path_configs, training_set_presets, default_reference_set, default_training_set
+from ._sample_params import sample_val_sets, sample_val_set_template, default_model_name
+from ._model_configs import model_configs
+from typing import Dict, Any
+
+def get_base_dir() -> Path:
+    base = os.environ.get("SVENSEMBLE_BASE_DIR")
+    if base:
+        return Path(base)
+    # Fallback: assume we're running from the project root
+    return Path.cwd()
+
+BASE_DIR = get_base_dir()
+DATA_DIR = BASE_DIR / "data"
+
+def update(d, u):
+    for k, v in u.items():
+        if isinstance(v, abc.Mapping):
+            d[k] = update(d.get(k, {}), v)
+        else:
+            d[k] = v
+    return d
+
+human_chroms = [f'chr{i}' for i in range(1, 23)] + ['chrX', 'chrY', 'chrM']
+
+def _get_caller_callset_dict(sample_name: str, caller_name: str, base_dir: Path | None = None) -> dict:
+    """Build a callset config dict for a given caller and sample.
+
+    Paths are resolved from callset_path_configs (_caller_params) using sample_name substitution.
+    The params key always matches caller_name, so _H variants (gridss_H, sniffles_H)
+    share paths with their base caller but carry separate parameter sets.
+    """
+    if base_dir is None:
+        base_dir = BASE_DIR
+    try:
+        source, svensemble_dir_tmpl, path_tmpl = callset_path_configs[caller_name]
+    except KeyError:
+        raise KeyError(
+            f'Unknown caller: {caller_name!r}. '
+            f'Available: {list(callset_path_configs)}'
+        )
+    return {
+        'source': source,
+        'svensemble_dir': base_dir / Path(svensemble_dir_tmpl.format(s=sample_name)),
+        'path': base_dir / Path(path_tmpl.format(s=sample_name)),
+        'params': copy.deepcopy(caller_param_dict[caller_name]),
+    }
+
+def create_config_dict(
+    sample_name: str,
+    ref_path: Path | None = None,
+    is_ground_truth: bool = False,
+    training_set: str | list[str] = 'default',
+    val_set: None | str | dict[str, Any] = None,
+    model_name: str | None = None,
+    additional_callsets: list[str] | None = None,
+    callsets: list[str] | None = None,
+    ground_truth_name: str | None = None,
+    base_dir: Path | None = None
+):
+    """
+    Based on _caller_params, create a config dictionary for the sample.
+
+    When `callsets` is provided it is used as the exact callset list,
+    bypassing the training-set-derived list and `additional_callsets`.
+    """
+    if base_dir is None:
+        base_dir = BASE_DIR
+
+    if callsets is not None:
+        invalid = [c for c in callsets if c not in caller_param_dict]
+        if invalid:
+            raise ValueError(f'Unknown callsets: {invalid}')
+        callset_names = list(callsets)
+        _training_sets = {default_training_set: training_set_presets[default_training_set]}
+    else:
+        if isinstance(training_set, str):
+            if training_set == 'default':
+                _training_sets = {default_training_set: training_set_presets[default_training_set]}
+            elif training_set in training_set_presets.keys():
+                _training_sets = {training_set: training_set_presets[training_set]}
+            else:
+                raise ValueError(f'Invalid training set: {training_set}')
+        elif isinstance(training_set, list):
+            _training_sets = {f'{'+'.join(training_set)}': training_set}
+        else:
+            raise ValueError(f'Invalid training set: {training_set}')
+
+        callset_names = set()
+        for training_set in _training_sets.values():
+            for callset_name in training_set:
+                callset_names.add(callset_name)
+        callset_names = list(callset_names)
+        if isinstance(additional_callsets, list):
+            if any(callset_name not in caller_param_dict.keys() for callset_name in additional_callsets):
+                raise ValueError(f'Invalid extra callsets: {additional_callsets}')
+            callset_names.extend(additional_callsets)
+
+    # If a validation set exists for the sample, add it to the config dict.
+    if (val_set == 'use_name'):
+        if sample_name not in sample_val_sets.keys():
+            raise ValueError(f'Validation set not found for sample: {sample_name}')
+        val_set = sample_val_sets[sample_name].copy()
+        if not val_set['path'].is_absolute():
+            val_set['path'] = base_dir / val_set['path']
+    elif val_set in list(sample_val_sets.keys()):
+        val_set = sample_val_sets[val_set].copy()
+        if not val_set['path'].is_absolute():
+            val_set['path'] = base_dir / val_set['path']
+    elif isinstance(val_set, dict):
+        if all(key in val_set.keys() for key in sample_val_set_template.keys()):
+            pass
+        else:
+            raise ValueError(f'Invalid validation set: {val_set}')
+        try:
+            val_set['path'] = Path(val_set['path'])
+            if not val_set['path'].is_absolute():
+                val_set['path'] = base_dir / val_set['path']
+        except Exception as e:
+            raise ValueError(f'Invalid validation set path: {val_set['path']}, error: {e}')
+    elif val_set is None:
+        val_set = None
+    else:
+        raise ValueError(f'Invalid validation set: {val_set}')
+
+    # Val_set must have a viable callset param setup
+    if val_set is not None:
+        val_name = val_set.get('name')
+        if not val_name or not str(val_name).strip():
+            raise ValueError(
+                f"Validation set has an empty or missing 'name'. "
+                f"Ensure 'name' is set to a key in _caller_params.caller_param_dict. Got: {repr(val_name)}"
+            )
+        try:
+            val_set['params'] = caller_param_dict[val_name]
+        except KeyError as e:
+            raise ValueError(
+                f'Validation set "{val_name}" does not have a callable param setup in _caller_params.py. '
+                f'Available names: {list(caller_param_dict.keys())}. Error: {e}'
+            )
+
+
+    if model_name is None:
+        model_name = default_model_name
+    if model_name not in model_configs.keys():
+        raise ValueError(f'Invalid model name: {model_name}')
+
+
+    if is_ground_truth:
+        config_dict = {
+            sample_name: {
+                'sample_dir': base_dir / Path(f'data/{sample_name}'),
+                'callset_bps_dir': base_dir / Path(f'data/{sample_name}/callset_bps'),
+                'workflow_dir': base_dir / Path(f'data/{sample_name}/svensemble2'),
+                'is_reference': True,
+                'callsets': {
+                    sample_name: _get_caller_callset_dict(sample_name, sample_name, base_dir=base_dir)
+                }
+            }
+        }
+        return config_dict
+
+    training_set_name, training_set_callers = next(iter(_training_sets.items()))
+
+    gt_suffix = ''
+    if ground_truth_name and ground_truth_name != default_reference_set:
+        gt_suffix = f'.gt_{ground_truth_name}'
+
+    config_dict = {
+        sample_name: {
+            'sample_name': sample_name,
+            'sample_dir': base_dir / Path(f'data/{sample_name}'),
+            'callset_bps_dir': base_dir / Path(f'data/{sample_name}/sv_calling/callset_bps'),
+            'workflow_dir': base_dir / Path(
+                f'data/{sample_name}/sv_calling/svensemble2/'
+                f'{sample_name}.{model_name}.'
+                f'{training_set_name}{gt_suffix}'
+            ),
+            'is_reference': False,
+            'callsets': {
+                callset_name: _get_caller_callset_dict(
+                    sample_name, caller_name=callset_name, base_dir=base_dir
+                )
+                for callset_name in callset_names
+            },
+            'training_sets': _training_sets,
+            'ref_path': ref_path,
+            'val_set': val_set,
+            'model': model_configs[model_name].copy()
+        }
+    }
+
+    # If there are custom columns specified in the model config, add them to the config dict of each caller.
+    if ('custom_cols' in config_dict[sample_name]['model']['training_params'].keys()) and len(config_dict[sample_name]['model']['training_params']['custom_cols']) > 0:
+        print(f"Adding custom columns to the config dict for sample {sample_name}")
+        print(f"Custom columns: {config_dict[sample_name]['model']['training_params']['custom_cols']}")
+        for callset_name in callset_names:
+            config_dict[sample_name]['callsets'][callset_name]['params']['custom_cols_pred'] = config_dict[sample_name]['model']['training_params']['custom_cols']
+
+    # Specify the path to the matched breakpoints used for training the model.
+    # When a *_suffix config references another model's workflow (e.g. XGBoost
+    # reusing RF breakpoints), fall back to the current workflow_dir if the
+    # shared directory does not exist yet.
+    workflow_dir = config_dict[sample_name]['workflow_dir']
+
+    if 'matched_bps_suffix' in config_dict[sample_name]['model'].keys():
+        shared_matched = base_dir / Path(
+                f'data/{sample_name}/sv_calling/svensemble2/'
+                f'{sample_name}.{config_dict[sample_name]["model"]["matched_bps_suffix"]}.'
+                f'{training_set_name}{gt_suffix}'
+                '/matched_bps.csv'
+            )
+        local_matched = workflow_dir / 'matched_bps.csv'
+        config_dict[sample_name]['model']['matched_bps_path'] = (
+            shared_matched if shared_matched.exists() else local_matched
+        )
+    if 'feature_matrix_suffix' in config_dict[sample_name]['model'].keys():
+        shared_fm = base_dir / Path(
+                f'data/{sample_name}/sv_calling/svensemble2/'
+                f'{sample_name}.{config_dict[sample_name]["model"]["feature_matrix_suffix"]}.'
+                f'{training_set_name}{gt_suffix}'
+                '/feature_matrix.csv'
+            )
+        local_fm = workflow_dir / 'feature_matrix.csv'
+        config_dict[sample_name]['model']['feature_matrix_path'] = (
+            shared_fm if shared_fm.exists() else local_fm
+        )
+
+    _additional_set = set(additional_callsets) if isinstance(additional_callsets, list) else set()
+    for callset_name in callset_names:
+        if callset_name in _additional_set:
+            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['callset_bps_dir'] / f'{callset_name}.raw_bps.csv'
+        elif config_dict[sample_name]['callsets'][callset_name]['params']['override_bps_path']:
+            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['sample_dir'] / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
+        elif 'bps_suffix' in config_dict[sample_name]['model'].keys():
+            shared_bps = config_dict[sample_name]['sample_dir'] / f'sv_calling/svensemble2/{sample_name}.{config_dict[sample_name]["model"]["bps_suffix"]}.{training_set_name}{gt_suffix}' / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
+            local_bps = workflow_dir / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
+            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = (
+                shared_bps if shared_bps.exists() else local_bps
+            )
+        else:
+            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = workflow_dir / f'{callset_name}.bps.csv'
+    if not config_dict:
+        raise ValueError(f"No config dictionary created for sample {sample_name}")
+
+    return config_dict
+
+
+def generate_chrom_key_dict(chrom_series: pd.Series) -> dict:
+    """
+    Generate a dictionary mapping chromosome names to numeric indices for sorting.
+
+    Creates a mapping of standard chromosome names (chr1-22, X, Y, M) plus any
+    non-standard chromosomes found in the input series to sequential indices.
+
+    Args:
+        chrom_series: Series containing chromosome names
+
+    Returns:
+        Dictionary mapping chromosome names to numeric indices
+    """
+    # Standard chromosome list in desired sort order
+    chrom_list = ['chr' + str(i) for i in range(1, 23)] + ['chrX', 'chrY', 'chrM']
+
+    # Add any non-standard chromosomes found in input
+    nonstd_chrom_list = chrom_series[~chrom_series.isin(chrom_list)].unique().tolist()
+    chrom_list += nonstd_chrom_list
+
+    # Create mapping of chromosome names to indices
+    return {chrom: idx for idx, chrom in enumerate(chrom_list)}
+
+
+def get_chrom_keys(chrom_series: pd.Series, chrom_keys: dict | None = None) -> pd.Series:
+    """
+    Convert chromosome names to numeric keys for sorting.
+
+    Maps chromosome names to numeric indices using either provided mapping
+    or default standard chromosome order.
+
+    Args:
+        chrom_series: Series containing chromosome names
+        chrom_keys: Optional dictionary mapping chromosomes to indices.
+                   If None, uses standard chromosome order.
+
+    Returns:
+        Series with chromosome names converted to numeric indices.
+        Returns original series if chromosome not found in mapping.
+    """
+    if chrom_keys is None:
+        # Use standard chromosome order if no mapping provided
+        chrom_list = ['chr' + str(i) for i in range(1, 23)] + ['chrX', 'chrY', 'chrM']
+        chrom_keys = {chrom: idx for idx, chrom in enumerate(chrom_list)}
+
+    return chrom_series.map(chrom_keys).fillna(chrom_series)
+
+
+def split_cipos(cipos_col: pd.Series, default_cipos: tuple[int, int] = (0, 0)) -> pd.DataFrame:
+    cipos_df = pd.DataFrame(cipos_col)
+    cipos_df.loc[:, cipos_col.name.replace('INFO_CIPOS', 'INFO_CIPOS_l')] = cipos_col.str[0].fillna(default_cipos[0]).astype(int)
+    cipos_df.loc[:, cipos_col.name.replace('INFO_CIPOS', 'INFO_CIPOS_r')] = cipos_col.str[1].fillna(default_cipos[1]).astype(int)
+    return cipos_df.drop(columns=[cipos_col.name])
+
+
+def split_ciend(ciend_col: pd.Series, default_ciend: tuple[int, int] = (0, 0)) -> pd.DataFrame:
+    ciend_df = pd.DataFrame(ciend_col)
+    ciend_df.loc[:, ciend_col.name.replace('INFO_CIEND', 'INFO_CIEND_l')] = ciend_col.str[0].fillna(default_ciend[0]).astype(int)
+    ciend_df.loc[:, ciend_col.name.replace('INFO_CIEND', 'INFO_CIEND_r')] = ciend_col.str[1].fillna(default_ciend[1]).astype(int)
+    return ciend_df.drop(columns=[ciend_col.name])
+
+
+def create_samples_config_table(samples: Dict[str, Dict[str, Any]]) -> pd.DataFrame:
+    """
+    Create a configuration table (CSV) listing all sample, training set, and model name combinations.
+
+    Args:
+        samples (Dict[str, Dict[str, Any]]):
+            Dictionary mapping sample names to their configuration dictionaries.
+            Each configuration dictionary is expected to contain a 'training_sets' key,
+            which is iterable of training set names.
+
+    Returns:
+        pandas.DataFrame:
+            DataFrame with columns ['sample_name', 'training_set_name', 'model_name'].
+            Each row is a combination of sample, training set, and model name ("unbiased").
+    """
+    sample_names: list = []
+    training_set_names: list = []
+    model_names: list = []
+
+    for sample_name, sample_config in samples.items():
+        for training_set_name in sample_config['training_sets']:
+            sample_names.append(sample_name)
+            training_set_names.append(training_set_name)
+            model_names.append('unbiased')
+
+    return pd.DataFrame({
+        'sample_name': sample_names,
+        'training_set_name': training_set_names,
+        'model_name': model_names
+    })
