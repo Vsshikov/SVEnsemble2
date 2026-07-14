@@ -1,7 +1,23 @@
 """
 Functions for preprocessing ground truth sets for SVEnsemble2.
+
+The single public entry point, `preprocess_ground_truth`, takes explicit
+`vcf_path` and `output_path` arguments and exposes all filtering options
+(FILTER values, EVIDENCE, ALGORITHMS, allele-frequency bounds, SV length
+range, BOTHSIDES_SUPPORT, canonical-chromosome restriction). It is invoked
+either through `svensemble ground-truth` in the CLI or as a plain Python
+call from a workflow.
+
+Ground-truth-family-specific processing (CI assignment, EVENT population,
+event-to-BND conversion, BND-to-BP collapse) is dispatched via
+`callset_specific.ground_truth_recipes`. The recipe key is
+`callset_param_dict[ground_truth_name]['source']`, so every variant of a
+family (e.g. `gnomad`, `gnomad_pass`, `gnomad_filtered`) shares the same
+recipe and per-variant differences (CIPOS dictionaries, filter defaults,
+input filenames) live only in the params entry.
 """
 
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
@@ -10,100 +26,142 @@ import pandas as pd
 from pysam import VariantFile
 
 from . import _caller_params
-from . import breakends as bnds
-from . import caller_specific
+from . import callset_specific
 from . import utils as sv_utils
 from . import vcfparse as vcfp
 
 
-def preprocess_gnomad_ground_truth(
-    ground_truth_name: str,
+def preprocess_ground_truth(
+    vcf_path: Path,
+    output_path: Path,
+    ground_truth_name: str = "gnomad",
     filters: List[str] | None = None,
     evidence: List[str] | None = None,
     svtypes: List[str] | None = None,
     algorithms: List[str] | None = None,
     min_af: float | None = None,
     max_af: float | None = None,
-    svlens: tuple[int, int] | None = (50, np.inf),
+    svlens: tuple[float, float] | None = (50, np.inf),
     bothsides_support_only: bool = False,
     canonical_chroms_only: bool = True,
     force_rerun: bool = False,
+    write_manifest: bool = True,
     verbose: bool = False,
-) -> None:
+) -> Path:
     """
-    Preprocess a gnomAD VCF into a filtered ground truth breakpoint set.
+    Preprocess a ground-truth VCF into a filtered breakpoint CSV.
 
-    Paths are resolved from the config system via create_config_dict(ground_truth_name, is_ground_truth=True),
-    which reads callset_path_configs and caller_param_dict from _caller_params.
+    Reads `vcf_path`, applies the requested filters, dispatches to the
+    ground-truth-specific preprocessing recipe registered in
+    `callset_specific.ground_truth_recipes[ground_truth_name]`, converts to
+    breakpoints, applies the SVLEN range filter and writes the result to
+    `output_path`.
 
     Args:
-        ground_truth_name (str): Identifier for this ground truth version. Must have a matching entry in callset_path_configs.
-        filters (list or None): VCF FILTER values to retain. Defaults to ['PASS'].
-        evidence (list or None): Required EVIDENCE types (SR, PE, RD, BAF). A variant is kept if it carries at least one of the listed types. None disables this filter.
-        svtypes (list or None): SV types to retain. Defaults to ['DEL', 'DUP', 'INV', 'INS'].
-        algorithms (list or None): Required ALGORITHMS (depth, manta, melt, rescan, wham). A variant is kept if it was called by at least one of the listed algorithms. None disables this filter.
-        min_af (float or None): Minimum allele frequency (inclusive).
-        max_af (float or None): Maximum allele frequency (inclusive).
-        svlens (tuple or None): (min_len, max_len) SV length range applied to breakpoint INFO_SVLEN. Defaults to (50, inf).
-        bothsides_support_only (bool): If True, keep only variants with the BOTHSIDES_SUPPORT flag.
-        canonical_chroms_only (bool): If True, restrict to canonical human chromosomes (chr1-22, X, Y, M).
-        force_rerun (bool): Re-create the output even if it already exists.
-        verbose (bool): If True, print progress messages.
+        vcf_path: Full path to the input ground-truth VCF.
+        output_path: Full path to the output bps.csv (parent dir will be
+            created if missing).
+        ground_truth_name: Key into `_caller_params.callset_param_dict` for
+            parsing parameters and into
+            `callset_specific.ground_truth_recipes` for the preprocessing
+            recipe. Both registries must contain the name.
+        filters: VCF FILTER values to retain. When None (the default), falls
+            back to `callset_param_dict[ground_truth_name]['filter_defaults']
+            ['filters']` if set, otherwise no FILTER filter is applied
+            (all records kept). This is how e.g. `gnomad_pass` and `gnomad`
+            differ in behavior from the same input VCF: `gnomad_pass` sets
+            `filter_defaults={'filters': ['PASS'], ...}` while `gnomad` sets
+            no `filter_defaults` at all.
+        evidence: Required EVIDENCE types (SR, PE, RD, BAF). A record is kept
+            if it carries at least one of the listed types. None → resolved
+            from `filter_defaults['evidence']` if set, else no filter.
+        svtypes: SV types to retain. None → resolved from
+            `filter_defaults['svtypes']` if set, else the recipe's
+            `supported_svtypes` (e.g. ['DEL', 'DUP', 'INV', 'INS']).
+        algorithms: Required ALGORITHMS (depth, manta, melt, rescan, wham).
+            None → resolved from `filter_defaults['algorithms']` if set,
+            else no filter.
+        min_af: Minimum allele frequency (inclusive). None → resolved from
+            `filter_defaults['min_af']` if set, else no filter.
+        max_af: Maximum allele frequency (inclusive). None → resolved from
+            `filter_defaults['max_af']` if set, else no filter.
+        svlens: (min_len, max_len) breakpoint SVLEN range applied after
+            breakpoint conversion. Defaults to (50, inf); pass None to skip.
+        bothsides_support_only: If True, keep only variants with the
+            BOTHSIDES_SUPPORT flag set.
+        canonical_chroms_only: If True, restrict to chr1-22, X, Y, M.
+        force_rerun: Re-create the output even if it already exists.
+        write_manifest: If True, write a `manifest.txt` next to `output_path`
+            recording the source VCF, timestamp, filter set and a
+            reproduction command.
+        verbose: If True, print progress messages.
 
+    Returns:
+        The `output_path` that was written (or would have been written on a
+        skipped rerun).
+
+    Raises:
+        FileNotFoundError: If `vcf_path` does not exist.
+        KeyError: If `ground_truth_name` is not registered in
+            `callset_specific.ground_truth_recipes` or
+            `_caller_params.callset_param_dict`.
     """
-    if ground_truth_name not in _caller_params.callset_path_configs:
-        raise ValueError(
-            f'No config found for ground truth name {ground_truth_name!r}. '
-            f'Add an entry to callset_path_configs in _caller_params.py. '
-            f'Available: {list(_caller_params.callset_path_configs)}'
-        )
-
-    config = sv_utils.create_config_dict(
-        ground_truth_name, is_ground_truth=True
-    )[ground_truth_name]
-
-    callset_key = next(iter(config['callsets']))
-    callset = config['callsets'][callset_key]
-    vcf_path = Path(callset['path'])
-    svensemble_dir = Path(callset['svensemble_dir'])
-    gnomad_params = callset['params']
-
-    output_path = svensemble_dir / 'bps.csv'
+    vcf_path = Path(vcf_path)
+    output_path = Path(output_path)
 
     if output_path.exists() and not force_rerun:
         if verbose:
             print(f"Output already exists at {output_path}, skipping (use force_rerun=True to overwrite)")
-        return
-
-    if not svensemble_dir.exists():
-        svensemble_dir.mkdir(parents=True, exist_ok=True)
+        return output_path
 
     if not vcf_path.exists():
         raise FileNotFoundError(
-            f'VCF not found at {vcf_path} (resolved for ground truth {ground_truth_name!r}). '
-            f'Check the path template in callset_path_configs[{ground_truth_name!r}]'
+            f'Ground-truth VCF not found at {vcf_path}'
         )
 
-    # Parse VCF
-    if verbose:
-        print(f"Parsing gnomAD VCF: {vcf_path}")
-    gnomad_vcf = VariantFile(str(vcf_path))
-    gnomad_df, _ = vcfp.parse_vcf_to_df(
-        vcf_file=gnomad_vcf,
-        caller_params=gnomad_params
-    )
-    if verbose:
-        print(f"Parsed {len(gnomad_df)} records")
+    if ground_truth_name not in _caller_params.callset_param_dict:
+        raise KeyError(
+            f'No callset_params registered for ground truth {ground_truth_name!r}. '
+            f'Add an entry to _caller_params.callset_param_dict.'
+        )
+    gt_params = _caller_params.callset_param_dict[ground_truth_name]
 
-    # Apply filters
+    recipe_key = gt_params.get('source', ground_truth_name)
+    if recipe_key not in callset_specific.ground_truth_recipes:
+        raise KeyError(
+            f'No processing recipe registered for ground-truth family {recipe_key!r} '
+            f'(resolved from callset_param_dict[{ground_truth_name!r}][\"source\"]). '
+            f'Add an entry to callset_specific.ground_truth_recipes. '
+            f'Available: {list(callset_specific.ground_truth_recipes)}'
+        )
+    recipe = callset_specific.ground_truth_recipes[recipe_key]
+
+    if verbose:
+        print(f"Parsing ground-truth VCF: {vcf_path}")
+    gt_vcf = VariantFile(str(vcf_path))
+    gt_df, _ = vcfp.parse_vcf_to_df(vcf_file=gt_vcf, caller_params=gt_params)
+    if verbose:
+        print(f"Parsed {len(gt_df)} records")
+
+    filter_defaults = gt_params.get('filter_defaults', {})
     if filters is None:
-        filters = ['PASS']
-
+        filters = filter_defaults.get('filters')
+    if evidence is None:
+        evidence = filter_defaults.get('evidence')
+    if algorithms is None:
+        algorithms = filter_defaults.get('algorithms')
+    if min_af is None:
+        min_af = filter_defaults.get('min_af')
+    if max_af is None:
+        max_af = filter_defaults.get('max_af')
     if svtypes is None:
-        svtypes = gnomad_params.get('supported_svtypes', ['DEL', 'DUP', 'INV', 'INS'])
+        svtypes = filter_defaults.get(
+            'svtypes',
+            gt_params.get('supported_svtypes', ['DEL', 'DUP', 'INV', 'INS']),
+        )
 
-    gnomad_df = _apply_filters(
-        gnomad_df,
+    gt_df = _apply_filters(
+        gt_df,
         filters=filters,
         evidence=evidence,
         svtypes=svtypes,
@@ -112,65 +170,51 @@ def preprocess_gnomad_ground_truth(
         max_af=max_af,
         bothsides_support_only=bothsides_support_only,
         canonical_chroms_only=canonical_chroms_only,
-        verbose=verbose
+        verbose=verbose,
     )
 
-    # Run gnomad_preprocess for CIPOS / CHR2 / EVENT assignment
-    gnomad_df = caller_specific.gnomad_preprocess(
-        gnomad_df,
+    gt_bp_df = recipe['process'](
+        gt_df,
+        caller_params=gt_params,
         svtypes_retain=svtypes,
-        filter_pass_only=False,
-        caller_params=gnomad_params,
-        verbose=verbose
+        verbose=verbose,
     )
 
-    # Convert to breakpoints
-    if verbose:
-        print("Converting events to breakends")
-    gnomad_bnd_df = caller_specific.gnomad_event_to_bnd(gnomad_df, caller_params=gnomad_params)
-
-    if verbose:
-        print("Converting breakends to breakpoints")
-    gnomad_bp_df = bnds.bnd_to_bp(
-        gnomad_bnd_df,
-        force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
-    )
-
-    # SVLEN filter (applied on breakpoints)
     if svlens is not None:
         min_len, max_len = svlens
         if verbose:
             print(f"Filtering breakpoints by SVLEN [{min_len}, {max_len}]")
-        gnomad_bp_df = gnomad_bp_df[
-            gnomad_bp_df['INFO_SVLEN'].abs().between(min_len, max_len)
-        ]
+        gt_bp_df = gt_bp_df[gt_bp_df['INFO_SVLEN'].abs().between(min_len, max_len)]
 
-    # Save
-    gnomad_bp_df.to_csv(output_path, index=False)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    gt_bp_df.to_csv(output_path, index=False)
     if verbose:
-        print(f"Saved {len(gnomad_bp_df)} breakpoints to {output_path}")
+        print(f"Saved {len(gt_bp_df)} breakpoints to {output_path}")
 
-    _write_manifest(
-        output_dir=svensemble_dir,
-        ground_truth_name=ground_truth_name,
-        vcf_path=vcf_path,
-        n_breakpoints=len(gnomad_bp_df),
-        filters=filters,
-        evidence=evidence,
-        svtypes=svtypes,
-        algorithms=algorithms,
-        min_af=min_af,
-        max_af=max_af,
-        svlens=svlens,
-        bothsides_support_only=bothsides_support_only,
-        canonical_chroms_only=canonical_chroms_only,
-    )
-    if verbose:
-        print(f"Wrote manifest and params template to {svensemble_dir}")
+    if write_manifest:
+        _write_manifest(
+            output_path=output_path,
+            ground_truth_name=ground_truth_name,
+            vcf_path=vcf_path,
+            n_breakpoints=len(gt_bp_df),
+            filters=filters,
+            evidence=evidence,
+            svtypes=svtypes,
+            algorithms=algorithms,
+            min_af=min_af,
+            max_af=max_af,
+            svlens=svlens,
+            bothsides_support_only=bothsides_support_only,
+            canonical_chroms_only=canonical_chroms_only,
+        )
+        if verbose:
+            print(f"Wrote manifest to {output_path.parent / 'manifest.txt'}")
+
+    return output_path
 
 
 def _write_manifest(
-    output_dir: Path,
+    output_path: Path,
     ground_truth_name: str,
     vcf_path: Path,
     n_breakpoints: int,
@@ -180,17 +224,15 @@ def _write_manifest(
     algorithms: List[str] | None,
     min_af: float | None,
     max_af: float | None,
-    svlens: tuple[int, int] | None,
+    svlens: tuple[float, float] | None,
     bothsides_support_only: bool,
     canonical_chroms_only: bool,
 ) -> None:
-    """Write a human-readable manifest and a _caller_params.py snippet."""
-    from datetime import datetime
-
-    # --- manifest.txt ---
+    """Write a human-readable manifest alongside the output bps CSV."""
     lines = [
         f"ground_truth_name: {ground_truth_name}",
         f"source_vcf: {vcf_path}",
+        f"output: {output_path}",
         f"created: {datetime.now().isoformat(timespec='seconds')}",
         f"breakpoints: {n_breakpoints}",
         "",
@@ -206,12 +248,13 @@ def _write_manifest(
         f"canonical_chroms_only: {canonical_chroms_only}",
     ]
 
-    # --- Reproduction command ---
     cmd_parts = [
-        "python -m svensemble.ground_truth",
+        "svensemble ground-truth",
+        f"    --vcf_path {vcf_path}",
+        f"    --output_path {output_path}",
         f"    --ground_truth_name {ground_truth_name}",
     ]
-    if filters and filters != ['PASS']:
+    if filters:
         cmd_parts.append(f"    --filters {','.join(filters)}")
     if evidence:
         cmd_parts.append(f"    --evidence {','.join(evidence)}")
@@ -232,16 +275,18 @@ def _write_manifest(
     if not canonical_chroms_only:
         cmd_parts.append("    --no_canonical_chroms")
     cmd_parts.append("    --verbose")
+
     lines.append("")
     lines.append("# Reproduce with:")
     lines.append(" \\\n".join(cmd_parts))
-    (output_dir / 'manifest.txt').write_text('\n'.join(lines) + '\n')
+
+    (output_path.parent / 'manifest.txt').write_text('\n'.join(lines) + '\n')
 
 
 def _apply_filters(
     df: pd.DataFrame,
     *,
-    filters: List[str],
+    filters: List[str] | None,
     evidence: List[str] | None,
     svtypes: List[str],
     algorithms: List[str] | None,
@@ -251,23 +296,26 @@ def _apply_filters(
     canonical_chroms_only: bool,
     verbose: bool
 ) -> pd.DataFrame:
-    """Apply successive filters to a parsed gnomAD DataFrame."""
+    """Apply successive record-level filters to a parsed ground-truth DataFrame.
 
-    # FILTER
-    filter_cols = [f'FILTER_{f}' for f in filters]
-    present_cols = [c for c in filter_cols if c in df.columns]
-    if present_cols:
-        if verbose:
-            print(f"Filtering by FILTER values: {filters}")
-        mask = df[present_cols].any(axis=1).astype(bool)
-        df = df[mask]
+    `filters=None` or `[]` skips the FILTER filter entirely (all records kept).
+    """
 
-    # SVTYPE
+    if filters:
+        filter_cols = [f'FILTER_{f}' for f in filters]
+        present_cols = [c for c in filter_cols if c in df.columns]
+        if present_cols:
+            if verbose:
+                print(f"Filtering by FILTER values: {filters}")
+            mask = df[present_cols].any(axis=1).astype(bool)
+            df = df[mask]
+    elif verbose:
+        print("No FILTER filter applied (keeping all records)")
+
     if verbose:
         print(f"Filtering by SVTYPE: {svtypes}")
     df = df[df['INFO_SVTYPE'].isin(svtypes)]
 
-    # EVIDENCE
     if evidence is not None and 'INFO_EVIDENCE' in df.columns:
         if verbose:
             print(f"Filtering by EVIDENCE: {evidence}")
@@ -277,7 +325,6 @@ def _apply_filters(
         )
         df = df[mask]
 
-    # ALGORITHMS
     if algorithms is not None and 'INFO_ALGORITHMS' in df.columns:
         if verbose:
             print(f"Filtering by ALGORITHMS: {algorithms}")
@@ -287,7 +334,6 @@ def _apply_filters(
         )
         df = df[mask]
 
-    # AF — stored as a single-element tuple by pysam
     if (min_af is not None or max_af is not None) and 'INFO_AF' in df.columns:
         if verbose:
             print(f"Filtering by AF: [{min_af}, {max_af}]")
@@ -300,13 +346,11 @@ def _apply_filters(
         if max_af is not None:
             df = df[af_series <= max_af]
 
-    # BOTHSIDES_SUPPORT
     if bothsides_support_only and 'INFO_BOTHSIDES_SUPPORT' in df.columns:
         if verbose:
             print("Filtering to BOTHSIDES_SUPPORT variants only")
         df = df[df['INFO_BOTHSIDES_SUPPORT'].astype(bool)]
 
-    # Canonical chromosomes
     if canonical_chroms_only:
         if verbose:
             print("Filtering to canonical chromosomes")
@@ -316,59 +360,3 @@ def _apply_filters(
         print(f"{len(df)} variants remaining after filtering")
 
     return df
-
-
-if __name__ == '__main__':
-    from argparse import ArgumentParser
-
-    parser = ArgumentParser(
-        description="Preprocess a gnomAD VCF into a filtered ground truth breakpoint set for SVEnsemble2."
-    )
-    parser.add_argument('--ground_truth_name', type=str, required=True,
-                        help="Ground truth version name (must match an entry in callset_path_configs).")
-    parser.add_argument('--filters', type=str, default=None,
-                        help="Comma-separated FILTER values to retain (default: PASS).")
-    parser.add_argument('--evidence', type=str, default=None,
-                        help="Comma-separated EVIDENCE types to require (e.g. SR,PE).")
-    parser.add_argument('--svtypes', type=str, default=None,
-                        help="Comma-separated SV types to retain (default: DEL,DUP,INV,INS).")
-    parser.add_argument('--algorithms', type=str, default=None,
-                        help="Comma-separated ALGORITHMS to require (e.g. manta,depth).")
-    parser.add_argument('--min_af', type=float, default=None,
-                        help="Minimum allele frequency (inclusive).")
-    parser.add_argument('--max_af', type=float, default=None,
-                        help="Maximum allele frequency (inclusive).")
-    parser.add_argument('--svlen_lower', type=int, default=50,
-                        help="Minimum SV length (default: 50).")
-    parser.add_argument('--svlen_upper', type=float, default=np.inf,
-                        help="Maximum SV length (default: inf).")
-    parser.add_argument('--bothsides_support_only', action='store_true', default=False,
-                        help="Keep only variants with BOTHSIDES_SUPPORT flag.")
-    parser.add_argument('--no_canonical_chroms', action='store_true', default=False,
-                        help="Do not restrict to canonical chromosomes.")
-    parser.add_argument('--force_rerun', action='store_true', default=False,
-                        help="Overwrite existing output.")
-    parser.add_argument('-v', '--verbose', action='store_true', default=False,
-                        help="Print progress messages.")
-
-    args = parser.parse_args()
-
-    filters = args.filters.split(',') if args.filters else None
-    evidence = args.evidence.split(',') if args.evidence else None
-    svtypes = args.svtypes.split(',') if args.svtypes else None
-    algorithms = args.algorithms.split(',') if args.algorithms else None
-
-    preprocess_gnomad_ground_truth(
-        ground_truth_name=args.ground_truth_name,
-        filters=filters,
-        evidence=evidence,
-        svtypes=svtypes,
-        algorithms=algorithms,
-        min_af=args.min_af,
-        max_af=args.max_af,
-        svlens=(args.svlen_lower, args.svlen_upper),
-        bothsides_support_only=args.bothsides_support_only,
-        canonical_chroms_only=not args.no_canonical_chroms,
-        force_rerun=args.force_rerun,
-        verbose=args.verbose
-    )

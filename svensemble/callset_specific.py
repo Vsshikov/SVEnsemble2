@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import Union, List, Literal, Dict
 
+from . import breakends as bnds
 from . import events as evts
 from . import utils as sv_utils
 from . import _caller_params
@@ -449,8 +450,11 @@ def delly_preprocess_bnds_only(delly_df: pd.DataFrame, caller_params: dict|None 
     """
     Preprocessing for Delly BND entries only.
     """
+    if delly_df.empty:
+        return delly_df
+
     delly_df_ = delly_df.copy()
-    delly_df_.loc[:, 'INFO_EVENT'] = delly_df_.loc[:, 'ID'].str[:-4]
+    delly_df_.loc[:, 'INFO_EVENT'] = delly_df_.loc[:, 'ID'].astype(str).str[:-4]
 
     delly_df_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(delly_df_['INFO_CIPOS'])
 
@@ -530,9 +534,12 @@ def sniffles_preprocess_common(
             sniffles_df_[col] = pd.Series(dtype=float)
     sniffles_df_ = sniffles_df_.drop(columns=['INFO_COVERAGE'])
 
-    # Sniffles2 reports negative SVLEN for deletions; convert to positive for consistency
+    # Sniffles2 reports negative SVLEN for deletions; convert to positive for consistency.
+    # SVLEN is missing for BND/INV records; coerce NaN to 0 so the column stays int.
+    sniffles_df_.loc[:, 'INFO_SVLEN'] = sniffles_df_.loc[:, 'INFO_SVLEN'].astype(float).fillna(0)
     del_mask = sniffles_df_['INFO_SVTYPE'] == 'DEL'
     sniffles_df_.loc[del_mask, 'INFO_SVLEN'] = sniffles_df_.loc[del_mask, 'INFO_SVLEN'].abs()
+    sniffles_df_.loc[:, 'INFO_SVLEN'] = sniffles_df_.loc[:, 'INFO_SVLEN'].astype(int)
 
     return sniffles_df_
 
@@ -654,8 +661,11 @@ def severus_preprocess_common(
     df.loc[:, 'INFO_CIPOS_l'] = -ci_val
     df.loc[:, 'INFO_CIPOS_r'] = ci_val.copy()
 
+    # SVLEN is missing for BND records; coerce NaN to 0 so the column stays int.
+    df.loc[:, 'INFO_SVLEN'] = df.loc[:, 'INFO_SVLEN'].astype(float).fillna(0)
     del_mask = df['INFO_SVTYPE'] == 'DEL'
     df.loc[del_mask, 'INFO_SVLEN'] = df.loc[del_mask, 'INFO_SVLEN'].abs()
+    df.loc[:, 'INFO_SVLEN'] = df.loc[:, 'INFO_SVLEN'].astype(int)
 
     if 'SAMPLE_hVAF' in df.columns:
         hvaf_cols = ['SAMPLE_hVAF_H0', 'SAMPLE_hVAF_H1', 'SAMPLE_hVAF_H2']
@@ -756,8 +766,11 @@ def cutesv_preprocess_common(
 
     df.loc[:, 'INFO_EVENT'] = df['ID']
 
+    # SVLEN is missing for BND/INV records; coerce NaN to 0 so the column stays int.
+    df.loc[:, 'INFO_SVLEN'] = df.loc[:, 'INFO_SVLEN'].astype(float).fillna(0)
     del_mask = df['INFO_SVTYPE'] == 'DEL'
     df.loc[del_mask, 'INFO_SVLEN'] = df.loc[del_mask, 'INFO_SVLEN'].abs()
+    df.loc[:, 'INFO_SVLEN'] = df.loc[:, 'INFO_SVLEN'].astype(int)
 
     # INFO_AF is declared Number=A in CuteSV's VCF header, so pysam
     # returns a 1-element tuple (float,).  Unpack to scalar so it is
@@ -1095,5 +1108,64 @@ parse_recipes: dict[str, dict] = {
         'preprocess_evts': None,
         'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
         'post_bps': svaba_post_bps,
+    },
+}
+
+
+def gnomad_process(
+    df: pd.DataFrame,
+    caller_params: dict,
+    svtypes_retain: Union[str, List[str]] = 'simple',
+    verbose: bool = False,
+) -> pd.DataFrame:
+    """Top-level processing for a gnomAD-family ground-truth callset.
+
+    Takes an unprocessed DataFrame (a parsed gnomAD VCF, optionally already
+    record-level filtered by the caller) and returns a breakpoint DataFrame
+    with CI/EVENT columns populated and events collapsed to bp form.
+
+    Composes `gnomad_preprocess` -> `gnomad_event_to_bnd` -> `bnds.bnd_to_bp`
+    with the CIPOS columns marked as force_diff so paired breakends preserve
+    their per-side CI.
+    """
+    df = gnomad_preprocess(
+        df,
+        svtypes_retain=svtypes_retain,
+        filter_pass_only=False,
+        caller_params=caller_params,
+        verbose=verbose,
+    )
+    if verbose:
+        print("Converting events to breakends")
+    bnd_df = gnomad_event_to_bnd(df, caller_params=caller_params)
+    if verbose:
+        print("Converting breakends to breakpoints")
+    bp_df = bnds.bnd_to_bp(bnd_df, force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r'])
+    return bp_df
+
+
+# ---------------------------------------------------------------------------
+# ground_truth_recipes: registry of processing recipes per ground-truth family.
+#
+# Sibling of parse_recipes. Keyed by *family* name (matching the `source`
+# field of the corresponding entries in _caller_params.callset_param_dict), so
+# a single recipe serves every variant of a family (e.g. gnomad, gnomad_pass,
+# gnomad_filtered all have source='gnomad' and share the 'gnomad' recipe).
+#
+# Adding a new ground-truth family: register a recipe here plus one or more
+# callset_param_dict entries in _caller_params.py whose `source` matches this
+# key. Per-variant differences (CI dictionaries, filter defaults, etc.) live
+# in the callset_param_dict entries, not in the recipe.
+#
+# Keys per entry:
+#   process - callable(df, caller_params, svtypes_retain='simple', verbose=False)
+#             takes the parsed+filtered VCF DataFrame and returns the fully
+#             processed breakpoint DataFrame (preprocess + event_to_bnd +
+#             bnd_to_bp collapsed into one step).
+# ---------------------------------------------------------------------------
+
+ground_truth_recipes: dict[str, dict] = {
+    'gnomad': {
+        'process': gnomad_process,
     },
 }

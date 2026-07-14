@@ -1,6 +1,8 @@
 """
 This module contains parameters to use for loading and processing VCF files
-from specific callers supported by SVEnsemble2.
+from specific callsets supported by SVEnsemble2. A callset is any named,
+parseable source of SV calls: an actual caller's output (below), a reference/
+ground-truth set (e.g. gnomAD), or a hand-curated validation set.
 As well as parameters for PU learning with those sets.
 
 Added callers:
@@ -26,7 +28,7 @@ svtype_cols = ['INFO_SVTYPE', 'INFO_INFERRED_SVTYPE']
 
 base_cols = ['CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL']
 
-# Caller-specific parameters are defined as dictionaries with the following keys:
+# Callset parameter entries are defined as dictionaries with the following keys:
 # - 'base_cols': List[str] - Standard VCF columns to parse (e.g., CHROM, POS, ID, REF, ALT, QUAL)
 # - 'filter_cols': List[str] - FILTER fields to extract for pre-processing or prediction
 # - 'info_cols_mandatory': List[str] - INFO fields required for correct parsing; absence may break downstream logic
@@ -43,7 +45,7 @@ base_cols = ['CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL']
 #     'format_cols': []
 # }
 
-# Default parameters for all callers
+# Default parameters shared by all callsets
 default_filter_cols = []
 default_info_mandatory_cols = []
 default_info_pred_cols = []
@@ -245,25 +247,37 @@ gnomad_params = default_params | {
     },
     'is_reference': True,
     'bps_path': 'gnomad.bps.csv',
-    'input_path': 'gnomad.vcf.gz'
 }
 
+# `filter_defaults` encodes the per-variant filter profile consumed by
+# `ground_truth.preprocess_ground_truth`. Any key present here overrides the
+# corresponding parameter's `None` default, and any CLI value overrides the
+# `filter_defaults` value in turn. Keys must match the kwargs accepted by
+# `preprocess_ground_truth` (`filters`, `evidence`, `svtypes`, `algorithms`,
+# `min_af`, `max_af`, `svlens`, `bothsides_support_only`,
+# `canonical_chroms_only`).
+#
+# `evidence=['SR', 'PE']` explicitly drops RD-only records for the strict
+# gnomAD variants. RD calls have >~500 bp positional uncertainty and are
+# not appropriate members of a strict PASS-quality ground-truth set. Without
+# this drop, an RD-only record would flow into `gnomad_process` and be
+# assigned an `INFO_CIPOS` from `method_cipos['RD']` alongside SR/PE-quality
+# records - conflating quality tiers.
 gnomad_filtered_params = gnomad_params | {
-    'method_cipos': {
-        'SR': 10,
-        'PE': 100,
+    'filter_defaults': {
+        'filters': ['PASS'],
+        'evidence': ['SR', 'PE'],
+        'min_af': 0.01,
     },
     'bps_path': 'gnomad_filtered.bps.csv',
-    'input_path': 'gnomad_filtered.vcf.gz'
 }
 
 gnomad_pass_params = gnomad_params | {
-    'method_cipos': {
-        'SR': 10,
-        'PE': 100,
+    'filter_defaults': {
+        'filters': ['PASS'],
+        'evidence': ['SR', 'PE'],
     },
     'bps_path': 'gnomad_pass.bps.csv',
-    'input_path': 'gnomad_pass.vcf.gz'
 }
 
 gnomad_pass_hg19_params = gnomad_pass_params
@@ -580,6 +594,7 @@ cutesv_params = default_params | {
     'svlen_source': 'svlen',
     'bps_path': 'cutesv.bps.csv',
     'bnd2_pos': 'end',
+    'qual_metric': 'INFO_RE',
 }
 
 cutesv_H_params = cutesv_params | {
@@ -647,7 +662,59 @@ svaba_H_params = svaba_params | {
     'bps_path': 'svaba_H.bps.csv',
 }
 
-caller_param_dict = {
+class CallsetParamDict(dict):
+    """dict of callset name -> params that transparently aliases any key bearing
+    a configured suffix onto an existing entry.
+
+    Use this for callset families whose names are generated dynamically and so
+    cannot be enumerated ahead of time, but which share the parsing params of a
+    statically-defined callset. Every key ending in ``_ALIAS_SUFFIX`` resolves to
+    the params stored under ``_ALIAS_TARGET``. Resolution is virtual: alias keys
+    are never stored, so ``.keys()``/iteration (and any list derived from them,
+    e.g. ``callset_alt_priority``) only ever see the real, statically-defined
+    callsets.
+
+    All access patterns used across the package are covered: subscript
+    (``d[k]`` via ``__missing__``), ``.get()``, ``in`` membership
+    (``__contains__``), and ``.keys()`` enumeration. The alias only fires when
+    ``_ALIAS_TARGET`` actually exists; any other unknown key raises ``KeyError``
+    / returns the ``.get()`` default as usual.
+
+    Current alias: long-read consensus callsets ('{sample}_long_read_consensus')
+    reuse SURVIVOR's params since their SVLEN encoding is identical.
+    """
+
+    _ALIAS_SUFFIX = '_long_read_consensus'
+    _ALIAS_TARGET = 'survivor_short'
+
+    def _alias_target(self, key):
+        if (
+            isinstance(key, str)
+            and key.endswith(self._ALIAS_SUFFIX)
+            and super().__contains__(self._ALIAS_TARGET)
+        ):
+            return self._ALIAS_TARGET
+        return None
+
+    def __missing__(self, key):
+        target = self._alias_target(key)
+        if target is not None:
+            return super().__getitem__(target)
+        raise KeyError(key)
+
+    def __contains__(self, key):
+        return super().__contains__(key) or self._alias_target(key) is not None
+
+    def get(self, key, default=None):
+        if super().__contains__(key):
+            return super().__getitem__(key)
+        target = self._alias_target(key)
+        if target is not None:
+            return super().__getitem__(target)
+        return default
+
+
+callset_param_dict = CallsetParamDict({
     'gnomad': gnomad_params,
     'gnomad_filtered': gnomad_filtered_params,
     'gnomad_pass': gnomad_pass_params,
@@ -678,11 +745,11 @@ caller_param_dict = {
     'cutesv_H': cutesv_H_params,
     'svaba': svaba_params,
     'svaba_H': svaba_H_params,
-}
+})
 
-# Maps each caller_name to (source, svensemble_dir_template, path_template).
+# Maps each callset_name to (source, svensemble_dir_template, path_template).
 # {s} is substituted with the sample name at call time.
-# _H variants share source+paths with their base caller but reference separate params keys.
+# _H variants share source+paths with their base callset but reference separate params keys.
 callset_path_configs: dict[str, tuple[str, str, str]] = {
     'gnomad': (
         'gnomad',
@@ -796,7 +863,7 @@ callset_path_configs: dict[str, tuple[str, str, str]] = {
     ),
 }
 
-caller_alt_priority = [
+callset_alt_priority = [
     'gridss',
     'manta_candidate',
     'manta_diploid',
@@ -811,4 +878,4 @@ caller_alt_priority = [
 ]
 
 # Fill in the rest of the callset order with the remaining callsets
-caller_alt_priority.extend([callset for callset in caller_param_dict.keys() if callset not in caller_alt_priority])
+callset_alt_priority.extend([callset for callset in callset_param_dict.keys() if callset not in callset_alt_priority])

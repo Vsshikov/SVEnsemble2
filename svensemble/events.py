@@ -291,10 +291,13 @@ def get_insert_seq_len_from_svlen(bp_df: pd.DataFrame):
     Insert seq len is nonzero only for INS and DUPs
     """
     for svtype_col in caller_params.svtype_cols:
-        try:
-            insert_seq_len = np.where(bp_df[svtype_col].isin(['INS']), bp_df['INFO_SVLEN'], 0)
-            return insert_seq_len
-        except KeyError:
+        if svtype_col not in bp_df.columns:
             continue
+        if 'INFO_SVLEN' not in bp_df.columns:
+            raise KeyError(
+                f"INFO_SVLEN column not found in the dataframe, required for get_insert_seq_len_from_svlen"
+            )
+        insert_seq_len = np.where(bp_df[svtype_col].isin(['INS']), bp_df['INFO_SVLEN'], 0)
+        return insert_seq_len
     raise KeyError(f"None of the following columns were found in the dataframe: {caller_params.svtype_cols}, required for get_insert_seq_len_from_svlen")
 

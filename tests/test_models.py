@@ -1,5 +1,7 @@
 """Tests for svensemble.models and related refactored components."""
 
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -70,6 +72,36 @@ def training_df():
     return df
 
 
+def _make_pu_ready_df(n=40, seed=0):
+    """DataFrame already shaped like preprocess_matchedbps_for_pu's output
+    (i.e. what a matched_bps_sources entry looks like *after* preprocessing)."""
+    rng = np.random.RandomState(seed)
+    return pd.DataFrame({
+        "numeric_a": rng.rand(n) * 10,
+        "ref_match": (rng.rand(n) > 0.4),
+    })
+
+
+@pytest.fixture
+def concat_workflow_config():
+    return {
+        "sample_name": "target_sample",
+        "model": {
+            "name": "unbiased_concat",
+            "training_params": {
+                "function": "unbiased_concat",
+                "concat": True,
+                "model_kwargs": {"n_estimators": 10},
+            },
+        },
+    }
+
+
+@pytest.fixture
+def concat_ground_truth_config():
+    return {"callsets": {"gnomad": {"source": "gnomad"}}}
+
+
 # ---------------------------------------------------------------------------
 # get_X_y_from_training_df
 # ---------------------------------------------------------------------------
@@ -130,15 +162,17 @@ class TestEstimateDuplessisWeights:
         assert 0 in result and 1 in result
         assert result[0] > 0 and result[1] > 0
 
-    def test_returns_none_when_no_positives_in_train(self, splits):
+    def test_zero_weight_when_no_positives_in_train(self, splits):
         splits["y_train"] = pd.Series(np.zeros(len(splits["y_train"]), dtype=int))
         result = models._estimate_duplessis_weights(splits, {"n_estimators": 50})
-        assert result is None
+        assert result is not None
+        assert result[1] == 0
 
-    def test_returns_none_when_no_positives_in_val(self, splits):
+    def test_zero_weight_when_no_positives_in_val(self, splits):
         splits["y_val"] = pd.Series(np.zeros(len(splits["y_val"]), dtype=int))
         result = models._estimate_duplessis_weights(splits, {"n_estimators": 50})
-        assert result is None
+        assert result is not None
+        assert result[1] == 0
 
     def test_handles_nan_in_features(self, splits_with_nan):
         """The non-traditional RF should fill NaN internally."""
@@ -146,14 +180,30 @@ class TestEstimateDuplessisWeights:
             splits_with_nan, {"n_estimators": 50},
         )
         # Should succeed without error (NaN is filled internally)
-        assert result is None or (0 in result and 1 in result)
+        assert 0 in result and 1 in result
 
     def test_caps_nontrad_estimators(self, splits):
         result = models._estimate_duplessis_weights(
             splits, {"n_estimators": 1000},
         )
         # Should not raise — n_estimators capped to 70 for non-trad RF
-        assert result is None or isinstance(result, dict)
+        assert isinstance(result, dict)
+
+    def test_floors_label_freq_when_estimate_near_zero(self, splits):
+        """When the non-traditional RF assigns near-zero probability to the
+        true positives in the validation set, label_freq must be floored to
+        _LABEL_FREQ_FLOOR instead of being left free to blow up the weight
+        estimate (or, previously, triggering a None return)."""
+        n_val = len(splits["y_val"])
+        with patch.object(
+            RF, "predict_proba",
+            return_value=np.column_stack([np.full(n_val, 1 - 1e-7), np.full(n_val, 1e-7)]),
+        ):
+            result = models._estimate_duplessis_weights(splits, {"n_estimators": 50})
+        label_prob = splits["y"].sum() / len(splits["y"])
+        expected_clpr = label_prob / models._LABEL_FREQ_FLOOR
+        assert result[1] == pytest.approx(2 * expected_clpr / label_prob)
+        assert np.isfinite(result[1])
 
 
 # ---------------------------------------------------------------------------
@@ -205,20 +255,157 @@ class TestTrainUnbiasedXgbForSplit:
         model = models.train_unbiased_xgb_for_split(
             splits_with_nan, n_estimators=20,
         )
-        if model is not None:
-            proba = model.predict_proba(splits_with_nan["X"])
-            assert proba.shape[0] == len(splits_with_nan["X"])
+        proba = model.predict_proba(splits_with_nan["X"])
+        assert proba.shape[0] == len(splits_with_nan["X"])
 
     def test_predictions_differ_from_rf(self, splits):
         """XGBoost and RF should produce different probability outputs."""
         rf = models.train_unbiased_rf_for_split(splits, n_estimators=20)
         xgb = models.train_unbiased_xgb_for_split(splits, n_estimators=20)
-        if rf is not None and xgb is not None:
-            rf_proba = rf.predict_proba(splits["X"])[:, 1]
-            xgb_proba = xgb.predict_proba(splits["X"])[:, 1]
-            assert not np.allclose(rf_proba, xgb_proba), (
-                "RF and XGBoost should produce different outputs"
+        rf_proba = rf.predict_proba(splits["X"])[:, 1]
+        xgb_proba = xgb.predict_proba(splits["X"])[:, 1]
+        assert not np.allclose(rf_proba, xgb_proba), (
+            "RF and XGBoost should produce different outputs"
+        )
+
+
+# ---------------------------------------------------------------------------
+# train_unbiased_concat_rf / train_unbiased_xgb_concat
+#
+# preprocess_matchedbps_for_pu is patched to the identity function: these
+# tests target the pooling refactor itself (uniform dict handling, DataFrame
+# vs. Path sources, concatenation), not the preprocessing step.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.slow
+class TestTrainUnbiasedConcatRf:
+
+    def test_single_source_dataframe(self, concat_workflow_config, concat_ground_truth_config):
+        df = _make_pu_ready_df(n=40)
+        with patch.object(mbps, "preprocess_matchedbps_for_pu", side_effect=lambda d, *a, **k: d):
+            X, rf_fit = models.train_unbiased_concat_rf(
+                {"target_sample": df}, concat_workflow_config,
+                concat_ground_truth_config, "gridss+manta_diploid",
             )
+        assert len(X) == len(df)
+        assert isinstance(rf_fit, RF)
+
+    def test_multi_source_mixes_dataframe_and_path(
+        self, concat_workflow_config, concat_ground_truth_config, tmp_path,
+    ):
+        df_a = _make_pu_ready_df(n=30, seed=1)
+        df_b = _make_pu_ready_df(n=20, seed=2)
+        csv_b = tmp_path / "sampleB_matched_bps.csv"
+        df_b.to_csv(csv_b, index=False)
+
+        with patch.object(mbps, "preprocess_matchedbps_for_pu", side_effect=lambda d, *a, **k: d):
+            X, rf_fit = models.train_unbiased_concat_rf(
+                {"sampleA": df_a, "sampleB": csv_b}, concat_workflow_config,
+                concat_ground_truth_config, "gridss+manta_diploid",
+            )
+        assert len(X) == len(df_a) + len(df_b)
+
+    def test_every_source_preprocessed_uniformly(
+        self, concat_workflow_config, concat_ground_truth_config,
+    ):
+        """No 'primary sample' branch: every entry in matched_bps_sources,
+        regardless of key, is passed through preprocessing exactly once."""
+        df_1 = _make_pu_ready_df(n=15, seed=3)
+        df_2 = _make_pu_ready_df(n=25, seed=4)
+        seen_lengths = []
+
+        def _track(d, *a, **k):
+            seen_lengths.append(len(d))
+            return d
+
+        with patch.object(mbps, "preprocess_matchedbps_for_pu", side_effect=_track):
+            models.train_unbiased_concat_rf(
+                {"other_1": df_1, "other_2": df_2}, concat_workflow_config,
+                concat_ground_truth_config, "gridss+manta_diploid",
+            )
+        assert sorted(seen_lengths) == sorted([len(df_1), len(df_2)])
+
+
+@pytest.mark.slow
+class TestTrainUnbiasedXgbConcat:
+
+    def test_single_source_dataframe(self, concat_workflow_config, concat_ground_truth_config):
+        df = _make_pu_ready_df(n=40)
+        with patch.object(mbps, "preprocess_matchedbps_for_pu", side_effect=lambda d, *a, **k: d):
+            X, xgb_fit = models.train_unbiased_xgb_concat(
+                {"target_sample": df}, concat_workflow_config,
+                concat_ground_truth_config, "gridss+manta_diploid",
+            )
+        assert len(X) == len(df)
+        assert isinstance(xgb_fit, XGB)
+
+    def test_multi_source_pools_and_concatenates(
+        self, concat_workflow_config, concat_ground_truth_config, tmp_path,
+    ):
+        df_a = _make_pu_ready_df(n=18, seed=5)
+        df_b = _make_pu_ready_df(n=22, seed=6)
+        csv_b = tmp_path / "sampleB_matched_bps.csv"
+        df_b.to_csv(csv_b, index=False)
+
+        with patch.object(mbps, "preprocess_matchedbps_for_pu", side_effect=lambda d, *a, **k: d):
+            X, xgb_fit = models.train_unbiased_xgb_concat(
+                {"sampleA": df_a, "sampleB": csv_b}, concat_workflow_config,
+                concat_ground_truth_config, "gridss+manta_diploid",
+            )
+        assert len(X) == len(df_a) + len(df_b)
+
+
+# ---------------------------------------------------------------------------
+# train_model dispatcher
+# ---------------------------------------------------------------------------
+
+class TestTrainModelDispatcher:
+
+    def _config(self, concat: bool) -> dict:
+        return {
+            "model": {
+                "name": "fake_model",
+                "training_params": {"function": "fake_function", "concat": concat},
+            }
+        }
+
+    def test_concat_model_without_sources_raises(self, monkeypatch):
+        monkeypatch.setitem(models.model_dispatch, "fake_function", lambda *a, **k: (None, None))
+        with pytest.raises(ValueError, match="matched_bps_sources"):
+            models.train_model(None, self._config(concat=True), {}, "ts")
+
+    def test_non_concat_model_without_joint_bp_df_raises(self, monkeypatch):
+        monkeypatch.setitem(models.model_dispatch, "fake_function", lambda *a, **k: (None, None))
+        with pytest.raises(ValueError, match="joint_bp_df"):
+            models.train_model(None, self._config(concat=False), {}, "ts")
+
+    def test_concat_model_dispatches_with_matched_bps_sources(self, monkeypatch):
+        captured = {}
+
+        def fake_fn(matched_bps_sources, workflow_config, ground_truth_config, training_set_name, verbose):
+            captured["matched_bps_sources"] = matched_bps_sources
+            return ("X", "model")
+
+        monkeypatch.setitem(models.model_dispatch, "fake_function", fake_fn)
+        sources = {"s1": pd.DataFrame({"a": [1]})}
+        result = models.train_model(
+            None, self._config(concat=True), {}, "ts", matched_bps_sources=sources,
+        )
+        assert result == ("X", "model")
+        assert captured["matched_bps_sources"] is sources
+
+    def test_non_concat_model_dispatches_with_joint_bp_df(self, monkeypatch):
+        captured = {}
+
+        def fake_fn(joint_bp_df, workflow_config, ground_truth_config, training_set_name, verbose):
+            captured["joint_bp_df"] = joint_bp_df
+            return ("X", "model")
+
+        monkeypatch.setitem(models.model_dispatch, "fake_function", fake_fn)
+        df = pd.DataFrame({"a": [1]})
+        result = models.train_model(df, self._config(concat=False), {}, "ts")
+        assert result == ("X", "model")
+        assert captured["joint_bp_df"] is df
 
 
 # ---------------------------------------------------------------------------
@@ -309,3 +496,22 @@ class TestModelConfigs:
             assert "matched_bps_suffix" in cfg, f"{name} missing matched_bps_suffix"
             assert "model_pkl_suffix" in cfg, f"{name} missing model_pkl_suffix"
             assert "feature_matrix_suffix" in cfg, f"{name} missing feature_matrix_suffix"
+
+    def test_all_configs_have_concat_flag(self):
+        for name, cfg in _model_configs.model_configs.items():
+            assert "concat" in cfg["training_params"], f"{name} missing training_params['concat']"
+
+    def test_only_concat_models_declare_concat_true(self):
+        concat_models = {
+            name for name, cfg in _model_configs.model_configs.items()
+            if cfg["training_params"]["concat"]
+        }
+        assert concat_models == {"unbiased_concat", "unbiased_xgb_concat"}
+
+    def test_concat_models_use_pooling_functions(self):
+        for name in ("unbiased_concat", "unbiased_xgb_concat"):
+            cfg = _model_configs.model_configs[name]
+            assert cfg["training_params"]["function"] == name
+            assert "function_params" not in cfg["training_params"], (
+                f"{name} should no longer bake a fixed samples list into the config"
+            )

@@ -1,1 +1,4 @@
 *.pyc
+.cursorindexingignore
+
+svensemble.egg-info/*

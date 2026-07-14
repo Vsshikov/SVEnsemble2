@@ -23,13 +23,13 @@ def parse_vcf_to_df(
     """
     Parse a VCF file into a pandas DataFrame with variant information.
 
-    Dispatches to :func:`parse_vcf_to_df_with_format` when
-    ``caller_params['parse_format']`` is True, otherwise to
-    :func:`parse_vcf_to_df_no_format`.
+    Dispatches to parse_vcf_to_df_with_format when
+    caller_params['parse_format'] is True, otherwise to
+    parse_vcf_to_df_no_format.
 
     Args:
         vcf_file: A pysam VariantFile object containing variant calls.
-        caller_params: Caller-specific parameters; see ``_caller_params.py``.
+        caller_params: Caller-specific parameters; see _caller_params.py.
         sample_name: Sample to extract FORMAT fields for (with-format path
             only). Defaults to the first sample in the header.
 
@@ -53,12 +53,12 @@ def parse_vcf_to_df_no_format(
     """
     Parse a VCF file into a pandas DataFrame, skipping FORMAT/sample fields.
 
-    Only columns specified by ``caller_params`` are created.
+    Only columns specified by caller_params are created.
 
     Args:
         vcf_file: A pysam VariantFile object containing variant calls.
-        caller_params: Caller-specific parameters; see ``_caller_params.py``.
-            Defaults to ``_caller_params.default_params`` when ``None``.
+        caller_params: Caller-specific parameters; see _caller_params.py.
+            Defaults to _caller_params.default_params when None.
 
     Returns:
         Tuple of (DataFrame of variants, VCF header).
@@ -96,12 +96,12 @@ def parse_vcf_to_df_with_format(
     """
     Parse a VCF file into a DataFrame including FORMAT/sample fields.
 
-    Only columns specified by ``caller_params`` are created.
+    Only columns specified by caller_params are created.
 
     Args:
         vcf_file: A pysam VariantFile object containing variant calls.
-        caller_params: Caller-specific parameters; see ``_caller_params.py``.
-            Defaults to ``_caller_params.default_params`` when ``None``.
+        caller_params: Caller-specific parameters; see _caller_params.py.
+            Defaults to _caller_params.default_params when None.
         sample_name: Sample to extract FORMAT fields for. Defaults to the
             first sample listed in the VCF header.
 

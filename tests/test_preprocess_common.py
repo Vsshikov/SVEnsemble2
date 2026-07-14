@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 
 from svensemble.breakpoints import common_bps_preprocess
-from svensemble.pipeline import parse_preprocess_common
+from svensemble.pipeline import parse_preprocess_model_specific
 from svensemble import _caller_params
 
 from .conftest import (
@@ -121,14 +121,14 @@ class TestParsePreprocessCommon:
     @patch('svensemble.pipeline.vcfw.write_vcf')
     def test_writes_bps_csv(self, mock_vcf_write, tmp_path):
         config = self._setup_config(tmp_path)
-        parse_preprocess_common('sample1', config)
+        parse_preprocess_model_specific('sample1', config)
         output_path = config['workflow_dir'] / 'gridss.bps.csv'
         assert output_path.exists()
 
     @patch('svensemble.pipeline.vcfw.write_vcf')
     def test_output_csv_schema(self, mock_vcf_write, tmp_path):
         config = self._setup_config(tmp_path, custom_cols=[])
-        parse_preprocess_common('sample1', config)
+        parse_preprocess_model_specific('sample1', config)
         output_df = pd.read_csv(config['workflow_dir'] / 'gridss.bps.csv')
         raw_df = pd.read_csv(config['callset_bps_dir'] / 'gridss.raw_bps.csv')
         assert set(raw_df.columns).issubset(set(output_df.columns))
@@ -136,14 +136,14 @@ class TestParsePreprocessCommon:
     @patch('svensemble.pipeline.vcfw.write_vcf')
     def test_output_csv_schema_with_custom(self, mock_vcf_write, tmp_path):
         config = self._setup_config(tmp_path, custom_cols=['SVTYPE'])
-        parse_preprocess_common('sample1', config)
+        parse_preprocess_model_specific('sample1', config)
         output_df = pd.read_csv(config['workflow_dir'] / 'gridss.bps.csv')
         assert_has_columns(output_df, ['CUSTOM_SVTYPE'])
 
     @patch('svensemble.pipeline.vcfw.write_vcf')
     def test_writes_vcf(self, mock_vcf_write, tmp_path):
         config = self._setup_config(tmp_path)
-        parse_preprocess_common('sample1', config)
+        parse_preprocess_model_specific('sample1', config)
         mock_vcf_write.assert_called_once()
         call_args = mock_vcf_write.call_args
         assert str(call_args[1].get('source', call_args[0][2] if len(call_args[0]) > 2 else '')) or True
@@ -158,7 +158,7 @@ class TestParsePreprocessCommon:
             'callsets': {'gridss': {'params': _make_callset_params_with_custom([])}},
         }
         with pytest.raises(FileNotFoundError, match='Raw breakpoints not found'):
-            parse_preprocess_common('sample1', config)
+            parse_preprocess_model_specific('sample1', config)
 
     @patch('svensemble.pipeline.vcfw.write_vcf')
     def test_creates_workflow_dir(self, mock_vcf_write, tmp_path):
@@ -166,12 +166,12 @@ class TestParsePreprocessCommon:
         wf_dir = tmp_path / 'new_workflow'
         config['workflow_dir'] = wf_dir
         assert not wf_dir.exists()
-        parse_preprocess_common('sample1', config)
+        parse_preprocess_model_specific('sample1', config)
         assert wf_dir.exists()
 
     @patch('svensemble.pipeline.vcfw.write_vcf')
     def test_multiple_callsets(self, mock_vcf_write, tmp_path):
         config = self._setup_config(tmp_path, callset_names=['gridss', 'survivor_short'])
-        parse_preprocess_common('sample1', config)
+        parse_preprocess_model_specific('sample1', config)
         assert (config['workflow_dir'] / 'gridss.bps.csv').exists()
         assert (config['workflow_dir'] / 'survivor_short.bps.csv').exists()

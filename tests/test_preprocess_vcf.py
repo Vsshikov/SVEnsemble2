@@ -1,7 +1,7 @@
 """Tests for parse_preprocess_vcf and parse_preprocess_raw in svensemble/pipeline.py.
 
 Mocks VariantFile and parse_vcf_to_df to avoid real VCF I/O.
-End-to-end schema tests run real caller_specific functions but with synthetic DataFrames.
+End-to-end schema tests run real callset_specific functions but with synthetic DataFrames.
 """
 
 from pathlib import Path
@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from svensemble import caller_specific as cs
+from svensemble import callset_specific as cs
 from svensemble import _caller_params
 from svensemble.pipeline import parse_preprocess_vcf, parse_preprocess_raw
 

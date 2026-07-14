@@ -13,13 +13,13 @@ dependencies = [
     "scikit-learn",
     "pysam",
     "xgboost",
+    "matplotlib",
+    "adjustText",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest",
-    "shap",
-]
+shap = ["shap"]
+dev = ["pytest", "shap"]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -31,5 +31,4 @@ markers = [
 addopts = "-m 'not slow'"
 
 [project.scripts]
-svensemble = "svensemble.pipeline:main"
-benchmark = "svensemble.benchmark:main"
+svensemble = "svensemble.cli:main"

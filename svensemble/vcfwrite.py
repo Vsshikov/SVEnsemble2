@@ -171,13 +171,13 @@ def _get_ins_svlen(row: pd.Series) -> int | None:
         seq = insert_info['insert_seq'].iloc[0]
         if seq:
             return len(seq)
-    except Exception:
+    except (KeyError, IndexError, ValueError, TypeError):
         pass
     return None
 
 
 def _strip_inv_event_suffix(event_id: str) -> str:
-    """Strip ``_e1`` / ``_e2`` suffixes added during inversion breakpoint expansion."""
+    """Strip _e1 / _e2 suffixes added during inversion breakpoint expansion."""
     if event_id.endswith(('_e1', '_e2')):
         return event_id[:-3]
     return event_id
@@ -286,8 +286,8 @@ def write_vcf(
     using the standard chromosome ordering.
 
     Inversions in the breakpoint DataFrame are represented as two events
-    (``_e1`` / ``_e2``).  By default these are collapsed back into a single
-    ``<INV>`` symbolic record.  When *inv_as_bnd* is ``True``, each event is
+    (_e1 / _e2).  By default these are collapsed back into a single
+    <INV> symbolic record.  When *inv_as_bnd* is True, each event is
     instead written as a BND pair (4 BND records total per inversion).
 
     Positions in the DataFrame are written through as-is via pysam (VCF POS
@@ -305,7 +305,7 @@ def write_vcf(
             INFO_INFERRED_SVTYPE is absent and no 'source' column exists.
         sample_name: Sample name to include in the VCF header.
         inv_as_bnd: If True, write inversions as BND pairs instead of
-            symbolic ``<INV>`` records.
+            symbolic <INV> records.
 
     Returns:
         Path to the written VCF file.

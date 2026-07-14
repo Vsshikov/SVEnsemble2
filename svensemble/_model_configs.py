@@ -28,6 +28,18 @@ model_configs = {
         'matched_bps_suffix': 'unbiased',
         'description': 'Unbiased random forest model for SV call probability estimation. Model with max depth 31 so GPUTreeExplainer can be used.'
     },
+    'unbiased_d31_nosvlen': {
+        'name': 'unbiased_d31_nosvlen',
+        'training_params': {
+            'function': 'unbiased_nosvlen',
+            'custom_cols': [],
+            'model_kwargs': {'max_depth': 31},
+            'fillna': None,
+        },
+        'bps_suffix': 'unbiased',
+        'matched_bps_suffix': 'unbiased',
+        'description': 'Unbiased random forest model for SV call probability estimation. Model with max depth 31 so GPUTreeExplainer can be used and all SVLEN columns removed from the feature matrix prior to training.'
+    },
     'unbiased_GT_d31': {
         'name': 'unbiased_GT_d31',
         'training_params': {
@@ -39,80 +51,18 @@ model_configs = {
         'matched_bps_suffix': 'unbiased_GT',
         'description': 'Unbiased random forest model for SV call probability estimation with extra genotyping step for all input callsets. Model with max depth 31 so GPUTreeExplainer can be used.'
     },
-    'unbiased_concat_NA12878': {
-        'name': 'unbiased_concat_NA12878',
+    'unbiased_concat': {
+        'name': 'unbiased_concat',
         'training_params': {
             'function': 'unbiased_concat',
-            'function_params': {
-                'samples': ['NA12878']
-            },
+            'concat': True,
             'custom_cols': [],
             'model_kwargs': {}
         },
         'bps_suffix': 'unbiased',
         'matched_bps_suffix': 'unbiased',
         'feature_matrix_suffix': 'unbiased',
-        'description': 'Unbiased random forest model for SV call probability estimation with cross-training on NA12878.'
-    },
-    'unbiased_concat_HG002': {
-        'name': 'unbiased_concat_HG002',
-        'training_params': {
-            'function': 'unbiased_concat',
-            'function_params': {
-                'samples': ['HG002']
-            },
-            'custom_cols': [],
-            'model_kwargs': {}
-        },
-        'bps_suffix': 'unbiased',
-        'matched_bps_suffix': 'unbiased',
-        'feature_matrix_suffix': 'unbiased',
-        'description': 'Unbiased random forest model for SV call probability estimation with cross-training on NA12878.'
-    },
-    'unbiased_concat_CHM13': {
-        'name': 'unbiased_concat_CHM13',
-        'training_params': {
-            'function': 'unbiased_concat',
-            'function_params': {
-                'samples': ['CHM13']
-            },
-            'custom_cols': [],
-            'model_kwargs': {}
-        },
-        'bps_suffix': 'unbiased',
-        'matched_bps_suffix': 'unbiased',
-        'feature_matrix_suffix': 'unbiased',
-        'description': 'Unbiased random forest model for SV call probability estimation with cross-training on NA12878.'
-    },
-    'unbiased_concat_HG00514': {
-        'name': 'unbiased_concat_HG00514',
-        'training_params': {
-            'function': 'unbiased_concat',
-            'function_params': {
-                'samples': ['HG00514']
-            },
-            'custom_cols': [],
-            'model_kwargs': {}
-        },
-        'bps_suffix': 'unbiased',
-        'matched_bps_suffix': 'unbiased',
-        'feature_matrix_suffix': 'unbiased',
-        'description': 'Unbiased random forest model for SV call probability estimation with cross-training on NA12878.'
-    },
-    'unbiased_concat_NA12878_HG002_CHM13_HG00514': {
-        'name': 'unbiased_concat_NA12878_HG002_CHM13_HG00514',
-        'training_params': {
-            'function': 'unbiased_concat',
-            'function_params': {
-                'samples': ['NA12878', 'HG002', 'CHM13', 'HG00514']
-            },
-            'custom_cols': [],
-            'model_kwargs': {}
-        },
-        'bps_suffix': 'unbiased',
-        'matched_bps_suffix': 'unbiased',
-        'feature_matrix_suffix': 'unbiased',
-        'description': 'Unbiased random forest model for SV call probability estimation with cross-training on NA12878, HG002, CHM13 and HG00514.'
+        'description': 'Unbiased random forest model trained on a pooled (concat/cross) training set from one or more samples, supplied via --train_samples/--train_matched_bps.'
     },
     'unbiased_xgb': {
         'name': 'unbiased_xgb',
@@ -126,6 +76,18 @@ model_configs = {
         'matched_bps_suffix': 'unbiased',
         'description': 'Unbiased XGBoost model for SV call probability estimation with native NaN handling.'
     },
+    'unbiased_xgb_nosvlen': {
+        'name': 'unbiased_xgb',
+        'training_params': {
+            'function': 'unbiased_xgb_nosvlen',
+            'custom_cols': [],
+            'model_kwargs': {},
+            'fillna': None,
+        },
+        'bps_suffix': 'unbiased',
+        'matched_bps_suffix': 'unbiased',
+        'description': 'Unbiased XGBoost model for SV call probability estimation with native NaN handling and all SVLEN columns removed from the feature matrix prior to training.'
+    },
     'unbiased_xgb_GT': {
         'name': 'unbiased_xgb_GT',
         'training_params': {
@@ -138,13 +100,11 @@ model_configs = {
         'matched_bps_suffix': 'unbiased_GT',
         'description': 'Unbiased XGBoost model for SV call probability estimation with extra genotyping step and native NaN handling.'
     },
-    'unbiased_xgb_concat_NA12878': {
-        'name': 'unbiased_xgb_concat_NA12878',
+    'unbiased_xgb_concat': {
+        'name': 'unbiased_xgb_concat',
         'training_params': {
             'function': 'unbiased_xgb_concat',
-            'function_params': {
-                'samples': ['NA12878']
-            },
+            'concat': True,
             'custom_cols': [],
             'model_kwargs': {},
             'fillna': None,
@@ -152,71 +112,7 @@ model_configs = {
         'bps_suffix': 'unbiased',
         'matched_bps_suffix': 'unbiased',
         'feature_matrix_suffix': 'unbiased_xgb',
-        'description': 'Unbiased XGBoost model for SV call probability estimation with cross-training on NA12878.'
-    },
-    'unbiased_xgb_concat_HG002': {
-        'name': 'unbiased_xgb_concat_HG002',
-        'training_params': {
-            'function': 'unbiased_xgb_concat',
-            'function_params': {
-                'samples': ['HG002']
-            },
-            'custom_cols': [],
-            'model_kwargs': {},
-            'fillna': None,
-        },
-        'bps_suffix': 'unbiased',
-        'matched_bps_suffix': 'unbiased',
-        'feature_matrix_suffix': 'unbiased_xgb',
-        'description': 'Unbiased XGBoost model for SV call probability estimation with cross-training on HG002.'
-    },
-    'unbiased_xgb_concat_CHM13': {
-        'name': 'unbiased_xgb_concat_CHM13',
-        'training_params': {
-            'function': 'unbiased_xgb_concat',
-            'function_params': {
-                'samples': ['CHM13']
-            },
-            'custom_cols': [],
-            'model_kwargs': {},
-            'fillna': None,
-        },
-        'bps_suffix': 'unbiased',
-        'matched_bps_suffix': 'unbiased',
-        'feature_matrix_suffix': 'unbiased_xgb',
-        'description': 'Unbiased XGBoost model for SV call probability estimation with cross-training on CHM13.'
-    },
-    'unbiased_xgb_concat_HG00514': {
-        'name': 'unbiased_xgb_concat_HG00514',
-        'training_params': {
-            'function': 'unbiased_xgb_concat',
-            'function_params': {
-                'samples': ['HG00514']
-            },
-            'custom_cols': [],
-            'model_kwargs': {},
-            'fillna': None,
-        },
-        'bps_suffix': 'unbiased',
-        'matched_bps_suffix': 'unbiased',
-        'feature_matrix_suffix': 'unbiased_xgb',
-        'description': 'Unbiased XGBoost model for SV call probability estimation with cross-training on HG00514.'
-    },
-    'unbiased_xgb_concat_NA12878_HG002_CHM13_HG00514': {
-        'name': 'unbiased_xgb_concat_NA12878_HG002_CHM13_HG00514',
-        'training_params': {
-            'function': 'unbiased_xgb_concat',
-            'function_params': {
-                'samples': ['NA12878', 'HG002', 'CHM13', 'HG00514']
-            },
-            'custom_cols': [],
-            'model_kwargs': {},
-            'fillna': None,
-        },
-        'bps_suffix': 'unbiased',
-        'matched_bps_suffix': 'unbiased',
-        'feature_matrix_suffix': 'unbiased_xgb',
-        'description': 'Unbiased XGBoost model for SV call probability estimation with cross-training on NA12878, HG002, CHM13 and HG00514.'
+        'description': 'Unbiased XGBoost model trained on a pooled (concat/cross) training set from one or more samples, supplied via --train_samples/--train_matched_bps.'
     },
 }
 
@@ -231,3 +127,7 @@ for model_name, model_config in model_configs.items():
         model_config['model_pkl_suffix'] = model_name
     if 'feature_matrix_suffix' not in model_config.keys():
         model_config['feature_matrix_suffix'] = model_name
+    # Non-concat models pool a single sample implicitly; only concat-style
+    # models (trained via matched_bps_sources, see models.train_model) opt in.
+    if 'concat' not in model_config['training_params'].keys():
+        model_config['training_params']['concat'] = False

@@ -1,4 +1,4 @@
-"""Tests for caller-specific preprocessing functions in svensemble/caller_specific.py.
+"""Tests for callset-specific preprocessing functions in svensemble/callset_specific.py.
 
 Each test class validates both transform correctness and output DataFrame schema
 against the downstream contracts (event_to_bnd, bnd_to_bp).
@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from svensemble import caller_specific as cs
+from svensemble import callset_specific as cs
 from svensemble import _caller_params
 
 from .conftest import (

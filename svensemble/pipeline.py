@@ -1,13 +1,13 @@
-#! /usr/bin/env python3
+"""
+Python-API entry point for the SVEnsemble2 pipeline.
 
+Exposes `svensemble2(...)` and per-stage helpers (`parse_preprocess_raw`,
+`parse_preprocess_model_specific`, `match_sample_breakpoints`,
+`pu_train_sample`, `pu_predict_sample`, ...). The command-line surface lives
+in svensemble.cli.
 """
-A top-level script to run the SVEnsemble pipeline.
-This module provides preprocessing and matching utilities for SV callsets.
-"""
-#for s in NA12878 NA12878_30x HG002 CHM13; do sbatch svensemble/pipeline.py --sample_name $s --ground_truth_sample_name gnomad --ref_path /home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/hg38.no_decoys.fa --preprocess --match --train --verbose --use_cached_preprocessed_truth; done
 
 import os
-import sys
 import pickle
 import time
 from datetime import datetime
@@ -41,7 +41,7 @@ from . import vcfwrite as vcfw  # noqa: E402
 from . import breakends as bnds  # noqa: E402
 from . import breakpoints as bps  # noqa: E402
 from . import events as evts  # noqa: E402
-from . import caller_specific as caller_specific  # noqa: E402
+from . import callset_specific as callset_specific  # noqa: E402
 from . import utils as sv_utils  # noqa: E402
 from . import chunk_match as chunk_match  # noqa: E402
 from . import matched_breakpoints as mbps  # noqa: E402
@@ -101,7 +101,7 @@ def parse_preprocess_gnomad(
     if verbose:
         _log(f"Preprocessing {gnomad_path}")
 
-    gnomad_df = caller_specific.gnomad_preprocess(
+    gnomad_df = callset_specific.gnomad_preprocess(
         gnomad_df,
         caller_params=gnomad_params,
         verbose=verbose
@@ -110,7 +110,7 @@ def parse_preprocess_gnomad(
     if verbose:
         _log(f"Converting variants in {gnomad_path} to breakends")
 
-    gnomad_bnd_df = caller_specific.gnomad_event_to_bnd(gnomad_df)
+    gnomad_bnd_df = callset_specific.gnomad_event_to_bnd(gnomad_df)
 
     if verbose:
         _log(f"Converting breakends in {gnomad_path} to breakpoints")
@@ -163,7 +163,7 @@ def parse_preprocess_delly(
         vcf_file=delly_bnd_only_vcf,
         caller_params=callset['params']
     )
-    delly_bnd_only_df = caller_specific.delly_preprocess_bnds_only(
+    delly_bnd_only_df = callset_specific.delly_preprocess_bnds_only(
         delly_bnd_only_df, caller_params=callset['params']
     )
     os.remove(temp_dir / 'delly_bnd.tmp.vcf')
@@ -176,7 +176,7 @@ def parse_preprocess_delly(
         caller_params=callset['params']
     )
     delly_evt_only_df = delly_df[~delly_df['INFO_SVTYPE'].isin(['BND', 'TRA'])]
-    delly_evt_only_df = caller_specific.delly_preprocess_evts_only(
+    delly_evt_only_df = callset_specific.delly_preprocess_evts_only(
         delly_evt_only_df, caller_params=callset['params']
     )
     if verbose:
@@ -200,7 +200,7 @@ def parse_preprocess_vcf(
     callset: dict,
     verbose: bool = False
 ) -> pd.DataFrame:
-    """Generic VCF-to-breakpoints preprocessor driven by caller_specific.parse_recipes.
+    """Generic VCF-to-breakpoints preprocessor driven by callset_specific.parse_recipes.
 
     Handles three VCF layouts via the recipe's bnd_svtypes field:
       None  - entire VCF is BND (no event_to_bnd step)
@@ -215,7 +215,7 @@ def parse_preprocess_vcf(
     Returns:
         DataFrame of breakpoints.
     """
-    recipe = caller_specific.parse_recipes[callset_name]
+    recipe = callset_specific.parse_recipes[callset_name]
 
     if verbose:
         _log(f"Loading {callset_name} VCF from {callset['path']}")
@@ -321,9 +321,9 @@ def parse_preprocess_raw(
         if callset_name in _derived_callset_config:
             continue
         if callset_name not in _custom_parsers and \
-                callset_name not in caller_specific.parse_recipes:
+                callset_name not in callset_specific.parse_recipes:
             raise ValueError(f"Callset '{callset_name}' has no parser registered "
-                             "(not in caller_specific.parse_recipes or custom parsers)")
+                             "(not in callset_specific.parse_recipes or custom parsers)")
         output_path = callset_bps_dir / f'{callset_name}.raw_bps.csv'
         if output_path.exists():
             if verbose:
@@ -377,7 +377,7 @@ def parse_preprocess_raw(
             _log(f"Saved raw breakpoints to {output_path}")
 
 
-def parse_preprocess_common(
+def parse_preprocess_model_specific(
     sample_name: str,
     workflow_config: dict,
     verbose: bool = False
@@ -653,7 +653,7 @@ def svensemble2(
         raise FileNotFoundError(f"Preprocessed truth breakpoints not found for {ground_truth_sample_name}")
 
     if preprocess:
-        parse_preprocess_common(sample_name=sample_name, workflow_config=workflow_config, verbose=verbose)
+        parse_preprocess_model_specific(sample_name=sample_name, workflow_config=workflow_config, verbose=verbose)
 
     if match:
         match_sample_breakpoints(sample_name=sample_name, workflow_config=workflow_config, ground_truth_config=ground_truth_config, max_dist=match_max_dist, insert_delta_threshold=match_insert_delta_threshold, verbose=verbose)
@@ -666,143 +666,7 @@ def svensemble2(
         pu_predict_sample(sample_name=sample_name, workflow_config=workflow_config, verbose=verbose)
 
 
-if __name__ == '__main__':
-    import argparse
-
-    # Create the argument parser for command-line execution
-    parser = argparse.ArgumentParser(
-        description="Run the SVEnsemble2 pipeline for structural variant analysis."
-    )
-    parser.add_argument(
-        '--sample_name',
-        type=str,
-        required=True,
-        help="Name of the sample to process."
-    )
-    parser.add_argument(
-        '--ground_truth_sample_name',
-        type=str,
-        required=True,
-        help="Name of the reference sample."
-    )
-    parser.add_argument(
-        '--model_name',
-        type=str,
-        required=False,
-        default=None,
-        help="Name of the PU learning model to use. If not provided, will use the default model."
-    )
-    parser.add_argument(
-        '--ref_path',
-        type=str,
-        required=True,
-        help="Path to the reference genome."
-    )
-    parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help="Enable verbose output for progress messages."
-    )
-    parser.add_argument(
-        '--preprocess_raw',
-        action='store_true',
-        default=False,
-        help="If set, parse caller VCFs into raw breakpoints in the shared callset_bps directory and exit."
-    )
-    parser.add_argument(
-        '--callsets',
-        type=str,
-        nargs='*',
-        default=None,
-        help="Explicit callset list for --preprocess_raw (overrides training-set-derived list)."
-    )
-    parser.add_argument(
-        '--additional_callsets',
-        type=str,
-        nargs='*',
-        default=None,
-        help="Additional callsets to include (e.g. survivor_short gridss_H sniffles_H)."
-    )
-    parser.add_argument(
-        '--preprocess',
-        action='store_true',
-        default=False,
-        help="If set, apply model-specific preprocessing (reads from shared callset_bps)."
-    )
-    parser.add_argument(
-        '--match',
-        action='store_true',
-        default=False,
-        help="If set, perform breakpoint matching."
-    )
-    parser.add_argument(
-        '--train',
-        action='store_true',
-        default=False,
-        help="If set, train the PU model."
-    )
-    parser.add_argument(
-        '--predict',
-        action='store_true',
-        default=False,
-        help="If set, run predictions on breakpoints."
-    )
-    parser.add_argument(
-        '--training_set',
-        type=str,
-        required=False,
-        default='default',
-        help="Training set or sets for model building."
-    )
-    parser.add_argument(
-        '--match_max_dist',
-        type=int,
-        required=False,
-        default=100,
-        help="Maximum distance for breakpoint matching."
-    )
-    parser.add_argument(
-        '--match_insert_delta_threshold',
-        type=float,
-        required=False,
-        default=0.7,
-        help="Insert delta threshold for breakpoint matching."
-    )
-    args = parser.parse_args()
-
-    if args.preprocess_raw:
-        workflow_config = sv_utils.create_config_dict(
-            args.sample_name,
-            ref_path=args.ref_path,
-            model_name=args.model_name,
-            callsets=args.callsets,
-            additional_callsets=args.additional_callsets,
-            is_ground_truth=False
-        )[args.sample_name]
-        parse_preprocess_raw(
-            sample_name=args.sample_name,
-            workflow_config=workflow_config,
-            verbose=args.verbose
-        )
-        sys.exit(0)
-
-    svensemble2(
-        sample_name=args.sample_name,
-        ground_truth_sample_name=args.ground_truth_sample_name,
-        ref_path=args.ref_path,
-        model_name=args.model_name,
-        training_set=args.training_set,
-        verbose=args.verbose,
-        preprocess=args.preprocess,
-        match=args.match,
-        train=args.train,
-        predict=args.predict,
-        match_max_dist=args.match_max_dist,
-        match_insert_delta_threshold=args.match_insert_delta_threshold
-    )
-
-# Unbiased  GT preset
-# for s in NA12878 NA12878_30x HG002 CHM13; do sbatch svensemble/pipeline.py --sample_name $s --ground_truth_sample_name gnomad --ref_path /home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/hg38.no_decoys.fa --preprocess --match --train --verbose --model_name unbiased_GT --use_cached_preprocessed_truth; done
-
-# Unbiased preset
-# for s in NA12878 NA12878_30x HG002 CHM13; do sbatch svensemble/pipeline.py --sample_name $s --ground_truth_sample_name gnomad --ref_path /home/users/allstaff/shikov.v/projects/Papenfuss_SVEnsemble2/data/hg38/downloads/hg38.no_decoys.fa --preprocess --match --train --verbose --model_name unbiased --use_cached_preprocessed_truth; done
+# The command-line entry point for the SVEnsemble2 pipeline lives in
+# svensemble.cli (`svensemble run` and per-stage subcommands). This module
+# retains only the Python-API entry point `svensemble2(...)` above; there is
+# no `__main__` block by design -- keep the CLI surface in one place.

@@ -6,7 +6,8 @@ import copy
 import pandas as pd
 from pathlib import Path
 from collections import abc
-from ._caller_params import caller_param_dict, callset_path_configs, training_set_presets, default_reference_set, default_training_set
+import itertools
+from ._caller_params import callset_param_dict, callset_path_configs, training_set_presets, default_reference_set, default_training_set
 from ._sample_params import sample_val_sets, sample_val_set_template, default_model_name
 from ._model_configs import model_configs
 from typing import Dict, Any
@@ -31,27 +32,27 @@ def update(d, u):
 
 human_chroms = [f'chr{i}' for i in range(1, 23)] + ['chrX', 'chrY', 'chrM']
 
-def _get_caller_callset_dict(sample_name: str, caller_name: str, base_dir: Path | None = None) -> dict:
-    """Build a callset config dict for a given caller and sample.
+def _get_callset_dict(sample_name: str, callset_name: str, base_dir: Path | None = None) -> dict:
+    """Build a callset config dict for a given callset and sample.
 
     Paths are resolved from callset_path_configs (_caller_params) using sample_name substitution.
-    The params key always matches caller_name, so _H variants (gridss_H, sniffles_H)
+    The params key always matches callset_name, so _H variants (gridss_H, sniffles_H)
     share paths with their base caller but carry separate parameter sets.
     """
     if base_dir is None:
         base_dir = BASE_DIR
     try:
-        source, svensemble_dir_tmpl, path_tmpl = callset_path_configs[caller_name]
+        source, svensemble_dir_tmpl, path_tmpl = callset_path_configs[callset_name]
     except KeyError:
         raise KeyError(
-            f'Unknown caller: {caller_name!r}. '
+            f'Unknown callset: {callset_name!r}. '
             f'Available: {list(callset_path_configs)}'
         )
     return {
         'source': source,
         'svensemble_dir': base_dir / Path(svensemble_dir_tmpl.format(s=sample_name)),
         'path': base_dir / Path(path_tmpl.format(s=sample_name)),
-        'params': copy.deepcopy(caller_param_dict[caller_name]),
+        'params': copy.deepcopy(callset_param_dict[callset_name]),
     }
 
 def create_config_dict(
@@ -69,14 +70,132 @@ def create_config_dict(
     """
     Based on _caller_params, create a config dictionary for the sample.
 
-    When `callsets` is provided it is used as the exact callset list,
-    bypassing the training-set-derived list and `additional_callsets`.
+    The returned dictionary is keyed by sample_name and resolves all caller
+    callset paths, parameters, training/validation sets and model configuration
+    from _caller_params (and related modules) relative to base_dir.
+
+    Two structurally different dictionaries are produced depending on
+    is_ground_truth:
+
+    - is_ground_truth=True returns a minimal "reference" config. It marks the
+      sample as a reference (is_reference=True) and contains a single callset
+      whose name equals sample_name (the ground-truth callset). No training
+      sets, validation set or model are attached, and all other arguments
+      (training_set, val_set, model_name, additional_callsets, callsets,
+      ground_truth_name) are ignored.
+    - is_ground_truth=False returns the full config used for training and
+      prediction. It includes the resolved callsets, the selected training
+      set(s), an optional validation set, the model configuration and a
+      bps_path for every callset.
+
+    When callsets is provided it is used as the exact callset list, bypassing
+    the training-set-derived list and additional_callsets.
+
+    Args:
+        sample_name: Name of the sample, used as the top-level dictionary key
+            and for resolving data paths.
+        ref_path: Optional path to the reference genome, stored verbatim under
+            'ref_path'. Only used when is_ground_truth is False.
+        is_ground_truth: If True, build the minimal reference config (see above),
+            otherwise build the full training/prediction config.
+        training_set: Either 'default', a preset name in training_set_presets,
+            or an explicit list of caller names. A list is stored under a key
+            formed by joining the names with '+'. Ignored when callsets is given.
+        val_set: Validation set specification. May be None (no validation set),
+            'use_name' to look up the sample's entry in sample_val_sets, a key in
+            sample_val_sets, or a dict matching sample_val_set_template. The
+            validation set's 'name' must be a key in callset_param_dict.
+        model_name: Key in model_configs. Defaults to default_model_name when
+            None.
+        additional_callsets: Extra caller names to append to the
+            training-set-derived callset list. Ignored when callsets is given.
+        callsets: Explicit list of caller names to use as the callset list,
+            bypassing training_set and additional_callsets.
+        ground_truth_name: Optional name of the ground-truth set. When set and
+            different from default_reference_set, a '.gt_<name>' suffix is
+            appended to the workflow directory path.
+        base_dir: Base directory for resolving all relative data paths. Defaults
+            to BASE_DIR when None.
+
+    Returns:
+        Dictionary keyed by sample_name whose value is the sample config.
+
+        For is_ground_truth=True the value has the shape:
+            {
+                'sample_dir': Path('<base_dir>/data/<sample>'),
+                'callset_bps_dir': Path('<base_dir>/data/<sample>/callset_bps'),
+                'workflow_dir': Path('<base_dir>/data/<sample>/svensemble2'),
+                'is_reference': True,
+                'callsets': {
+                    '<sample>': {
+                        'source': ...,
+                        'svensemble_dir': Path(...),
+                        'path': Path(...),
+                        'params': {...},
+                    }
+                },
+            }
+
+        For is_ground_truth=False the value has the shape:
+            {
+                'sample_name': '<sample>',
+                'sample_dir': Path(...),
+                'callset_bps_dir': Path(...),
+                'workflow_dir': Path(...),
+                'is_reference': False,
+                'callsets': {
+                    '<caller>': {
+                        'source': ...,
+                        'svensemble_dir': Path(...),
+                        'path': Path(...),
+                        'params': {...},
+                        'bps_path': Path(...),
+                    },
+                    ...
+                },
+                'training_sets': {'<training_set_name>': ['<caller>', ...]},
+                'ref_path': <ref_path>,
+                'val_set': None | {...},
+                'model': {...},
+            }
+
+    Raises:
+        ValueError: If callsets or additional_callsets contain unknown caller
+            names, if training_set, val_set or model_name are invalid, or if no
+            config could be created.
+        KeyError: If a caller name cannot be resolved in callset_path_configs
+            (raised by _get_callset_dict).
+
+    Examples:
+        Ground-truth (reference) config, where extra arguments are ignored:
+            cfg = create_config_dict('COLO829', is_ground_truth=True)
+            # cfg['COLO829']['is_reference'] -> True
+            # list(cfg['COLO829']['callsets']) -> ['COLO829']
+            # 'model' in cfg['COLO829'] -> False
+
+        Full training/prediction config using the default training set:
+            cfg = create_config_dict(
+                'COLO829',
+                is_ground_truth=False,
+                model_name='default',
+            )
+            # cfg['COLO829']['is_reference'] -> False
+            # 'model' in cfg['COLO829'] -> True
+            # every callset in cfg['COLO829']['callsets'] has a 'bps_path'
+
+        Full config with an explicit callset list (bypasses the training set):
+            cfg = create_config_dict(
+                'COLO829',
+                is_ground_truth=False,
+                callsets=['gridss', 'manta'],
+            )
+            # sorted(cfg['COLO829']['callsets']) -> ['gridss', 'manta']
     """
     if base_dir is None:
         base_dir = BASE_DIR
 
     if callsets is not None:
-        invalid = [c for c in callsets if c not in caller_param_dict]
+        invalid = [c for c in callsets if c not in callset_param_dict]
         if invalid:
             raise ValueError(f'Unknown callsets: {invalid}')
         callset_names = list(callsets)
@@ -100,7 +219,7 @@ def create_config_dict(
                 callset_names.add(callset_name)
         callset_names = list(callset_names)
         if isinstance(additional_callsets, list):
-            if any(callset_name not in caller_param_dict.keys() for callset_name in additional_callsets):
+            if any(callset_name not in callset_param_dict.keys() for callset_name in additional_callsets):
                 raise ValueError(f'Invalid extra callsets: {additional_callsets}')
             callset_names.extend(additional_callsets)
 
@@ -137,14 +256,14 @@ def create_config_dict(
         if not val_name or not str(val_name).strip():
             raise ValueError(
                 f"Validation set has an empty or missing 'name'. "
-                f"Ensure 'name' is set to a key in _caller_params.caller_param_dict. Got: {repr(val_name)}"
+                f"Ensure 'name' is set to a key in _caller_params.callset_param_dict. Got: {repr(val_name)}"
             )
         try:
-            val_set['params'] = caller_param_dict[val_name]
+            val_set['params'] = callset_param_dict[val_name]
         except KeyError as e:
             raise ValueError(
                 f'Validation set "{val_name}" does not have a callable param setup in _caller_params.py. '
-                f'Available names: {list(caller_param_dict.keys())}. Error: {e}'
+                f'Available names: {list(callset_param_dict.keys())}. Error: {e}'
             )
 
 
@@ -162,7 +281,7 @@ def create_config_dict(
                 'workflow_dir': base_dir / Path(f'data/{sample_name}/svensemble2'),
                 'is_reference': True,
                 'callsets': {
-                    sample_name: _get_caller_callset_dict(sample_name, sample_name, base_dir=base_dir)
+                    sample_name: _get_callset_dict(sample_name, sample_name, base_dir=base_dir)
                 }
             }
         }
@@ -186,8 +305,8 @@ def create_config_dict(
             ),
             'is_reference': False,
             'callsets': {
-                callset_name: _get_caller_callset_dict(
-                    sample_name, caller_name=callset_name, base_dir=base_dir
+                callset_name: _get_callset_dict(
+                    sample_name, callset_name, base_dir=base_dir
                 )
                 for callset_name in callset_names
             },
@@ -252,6 +371,93 @@ def create_config_dict(
         raise ValueError(f"No config dictionary created for sample {sample_name}")
 
     return config_dict
+
+
+def build_cli_workflow_config(
+    sample_name: str,
+    callers: list[str] | None = None,
+    model_name: str | None = None,
+    training_set: str | None = None,
+    ref_path: Path | None = None,
+) -> dict:
+    """
+    Build a workflow_config dict for CLI/Nextflow subcommands.
+
+    This is a flat-path sibling of create_config_dict for the case where the
+    files being consumed are already staged into the current working directory
+    (Nextflow work dir, or the user's cwd for standalone CLI invocations) and
+    the standard data/{sample}/... directory templating does not apply.
+
+    Compared to create_config_dict:
+      - Paths are all Path('.') (or bare filenames); no data/{sample}/ prefix
+        derivation, no filesystem existence checks.
+      - training_set is treated as a free-form name: if it matches a preset in
+        training_set_presets, the preset's caller list is used; otherwise the
+        provided `callers` list is stored under that name.
+      - No ground-truth suffix or validation-set logic; ground truth is passed
+        to downstream stages as its own bps CSV.
+
+    Args:
+        sample_name: Sample identifier (str). Stored under 'sample_name'.
+        callers: List of callset names present in this sample's matched_bps.
+        model_name: Key in model_configs; controls custom_cols_pred injection.
+        training_set: Name to key the training_sets dict; matched against
+            training_set_presets before falling back to `callers`.
+        ref_path: Optional reference FASTA, stored verbatim under 'ref_path'.
+
+    Returns:
+        Dict with the shape consumed by pipeline.parse_preprocess_delly,
+        pipeline.parse_preprocess_vcf, breakpoints.common_bps_preprocess and
+        models.train_model.
+    """
+    if callers is None:
+        callers = []
+
+    model_cfg = model_configs.get(model_name, {}).copy() if model_name else {}
+    training_params = model_cfg.get('training_params', {})
+    custom_cols = training_params.get('custom_cols', [])
+
+    if training_set and training_set in training_set_presets:
+        resolved_callers = training_set_presets[training_set]
+    else:
+        resolved_callers = callers
+
+    callsets = {}
+    for callset_name in resolved_callers:
+        params = copy.deepcopy(callset_param_dict.get(callset_name, {}))
+        if custom_cols:
+            params['custom_cols_pred'] = custom_cols
+        callsets[callset_name] = {
+            'source': callset_name,
+            'path': Path(f'{callset_name}.vcf'),
+            'params': params,
+        }
+
+    training_sets = {}
+    if training_set:
+        training_sets[training_set] = resolved_callers
+
+    workflow_dir = Path('.')
+
+    config = {
+        'sample_name': sample_name,
+        'callsets': callsets,
+        'callset_bps_dir': workflow_dir,
+        'workflow_dir': workflow_dir,
+        'is_reference': False,
+        'training_sets': training_sets,
+        'model': {
+            'name': model_name or default_model_name,
+            'training_params': training_params,
+            'matched_bps_path': workflow_dir / 'matched_bps.csv',
+            'feature_matrix_path': workflow_dir / 'feature_matrix.csv',
+        },
+    }
+
+    if ref_path is not None:
+        config['ref_path'] = ref_path
+
+    return config
 
 
 def generate_chrom_key_dict(chrom_series: pd.Series) -> dict:
@@ -346,3 +552,18 @@ def create_samples_config_table(samples: Dict[str, Dict[str, Any]]) -> pd.DataFr
         'training_set_name': training_set_names,
         'model_name': model_names
     })
+
+
+def generate_callset_combinations(callset_names: list[str]) -> list[str]:
+    """
+    Generate all possible combinations - from single to pairs to triplets to ... to all of the callsets.
+    Callsets are sorted alphabetically to ensure consistent ordering.
+    Duplicate combinations are removed.
+
+    Args:
+        callset_names: List of callset names.
+
+    Returns:
+        List of all possible combinations of callsets.
+    """
+    return sorted(list(set(['+'.join(sorted(comb)) for r in range(1, len(callset_names) + 1) for comb in itertools.combinations(callset_names, r)])))

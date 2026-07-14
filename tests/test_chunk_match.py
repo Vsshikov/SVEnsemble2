@@ -8,7 +8,7 @@ returns the exact integer distance between positions.  ALT strings use the
 standard BND VCF format so that process_breakend_alt produces consistent
 relative_pos values and chunker groups all chr1 DEL rows together.
 
-Source names ('delly', 'sniffles') must be keys in _caller_params.caller_param_dict
+Source names ('delly', 'sniffles') must be keys in _caller_params.callset_param_dict
 because get_insert_size dispatches on them.  Both callers use svlen_source='svlen',
 so raw insert_size is derived from INFO_SVLEN (non-zero only for INFO_SVTYPE='INS').
 """

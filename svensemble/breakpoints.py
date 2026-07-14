@@ -255,7 +255,7 @@ def get_insert_size(bp_df: pd.DataFrame, source: str | None = None) -> pd.Series
 
     for source in bp_df_['source'].unique():
         insert_sizes.loc[bp_df_['source'] == source] = (
-            insert_source_dispatch[caller_params.caller_param_dict[source]['svlen_source']](
+            insert_source_dispatch[caller_params.callset_param_dict[source]['svlen_source']](
                 bp_df_[bp_df_['source'] == source]
             )
         )
@@ -274,9 +274,9 @@ def annotate_svtypes(bps_df, source, insertion_length_threshold=0.7):
 
     Classification of complex indels (events with both a reference gap and assembled
     insertion) follows the StructuralVariantAnnotation approach: an event is classified
-    as INS when ``ins_lens >= abs(net_event_length) * insertion_length_threshold``,
-    where net_event_length is ``ins_lens + 1 - pos_diff`` for DEL-like orientations
-    and ``ins_lens + 1 + pos_diff`` for DUP-like orientations.
+    as INS when ins_lens >= abs(net_event_length) * insertion_length_threshold,
+    where net_event_length is ins_lens + 1 - pos_diff for DEL-like orientations
+    and ins_lens + 1 + pos_diff for DUP-like orientations.
 
     Args:
         bps_df (pd.DataFrame): DataFrame with breakpoint-pair records.

@@ -145,14 +145,22 @@ def matchedbps_to_bps(
 
         # Assign chromosome from the first non-null value among callsets
         chrom_cols = [f"{callset}_CHROM_bnd{bnd}" for callset in callsets]
+        def _first_chrom(row):
+            vals = row.dropna()
+            if vals.empty:
+                raise ValueError(
+                    f"All callsets have NaN for CHROM_bnd{bnd} "
+                    f"at index {row.name!r}; cannot determine chromosome"
+                )
+            return vals.iloc[0]
         merged_coords_matched_bps.loc[:, f"CHROM_bnd{bnd}"] = (
             merged_coords_matched_bps.loc[:, chrom_cols]
-            .apply(lambda x: x.dropna().iloc[0], axis=1)
+            .apply(_first_chrom, axis=1)
         )
 
-        # Using caller priorty list from caller_params, assign ALT_bnd1 and ALT_bnd2
+        # Using callset priorty list from caller_params, assign ALT_bnd1 and ALT_bnd2
         merged_coords_matched_bps.loc[:, f"ALT_bnd{bnd}"] = np.nan
-        for callset_name in caller_params.caller_alt_priority:
+        for callset_name in caller_params.callset_alt_priority:
             # Skip if callset not in the data
             if callset_name not in callsets:
                 continue
@@ -321,13 +329,13 @@ def get_X_y_from_training_df(
     This function:
         - Drops the match column (default: 'ref_match') from the input DataFrame.
         - Applies one-hot encoding to categorical columns.
-        - Optionally fills missing values (controlled by ``fillna``).
+        - Optionally fills missing values (controlled by fillna).
         - Returns the resulting feature matrix X and the target vector y (the match column).
 
     Args:
         training_df (pd.DataFrame): DataFrame containing features and a match column.
         match_col (str): Name of the column indicating reference match (target).
-        fillna (int | float | None): Value to fill NaN with. Set to ``None`` to
+        fillna (int | float | None): Value to fill NaN with. Set to None to
             preserve NaN (e.g. for models with native missing-value support).
         verbose (bool): If True, print information about dropped columns.
 

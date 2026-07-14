@@ -2,7 +2,6 @@
 PU models for SV call probability estimation.
 """
 import os
-import time
 from pathlib import Path
 from typing import Any
 
@@ -13,57 +12,43 @@ from sklearn.ensemble import RandomForestClassifier as RF
 from xgboost import XGBClassifier as XGB
 
 from . import matched_breakpoints as mbps
-from . import utils as sv_utils
-
-
-def _wait_for_file(path: str | Path, timeout: int = 1800, poll: int = 30) -> Path:
-    """Block until *path* exists on disk, polling every *poll* seconds.
-
-    Useful when concurrent SLURM jobs produce files that this job depends on
-    (e.g. cross-sample training data).  Raises ``FileNotFoundError`` after
-    *timeout* seconds.
-    """
-    path = Path(path)
-    if path.exists():
-        return path
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        print(
-            f"[wait_for_file] {path.name} not found yet, "
-            f"retrying in {poll}s (timeout in {int(deadline - time.monotonic())}s)..."
-        )
-        time.sleep(poll)
-        if path.exists():
-            return path
-    raise FileNotFoundError(
-        f"Timed out after {timeout}s waiting for {path}"
-    )
 
 
 # ---------------------------------------------------------------------------
 # Duplessis PU weight estimation (shared across classifiers)
 # ---------------------------------------------------------------------------
 
+# Floor for the estimated label frequency c = p(s=1|y=1) (Elkan & Noto 2008,
+# Sec. 2). Guards against a degenerate weight blow-up (clpr = label_prob /
+# label_freq) on training sets with very few true positives, where even the
+# e1 estimator can land arbitrarily close to zero.
+_LABEL_FREQ_FLOOR = 1e-3
+
+
 def _estimate_duplessis_weights(
     training_set_train_test_split: dict,
     model_kwargs: dict,
-) -> dict[int, float] | None:
+) -> dict[int, float]:
     """
     Estimate PU class weights using the Duplessis method.
 
-    Trains a small "non-traditional" Random Forest on the train split,
-    predicts on the validation split, and derives class weights from the
-    label frequency estimate.
+    Trains a small "non-traditional" Random Forest on the train split, then
+    estimates the label frequency c = p(s=1|y=1) on the validation split
+    using the e1 estimator of Elkan & Noto (2008, Sec. 2): the average
+    predicted probability of the non-traditional classifier over the
+    labeled (true-positive) validation examples. Elkan & Noto recommend e1
+    over their alternative e2/e3 estimators specifically for its lower
+    variance. Class weights are then derived from the label frequency
+    estimate (Duplessis method).
 
     Args:
         training_set_train_test_split: Dict with keys
-            ``X``, ``y``, ``X_train``, ``y_train``, ``X_val``, ``y_val``.
+            X, y, X_train, y_train, X_val, y_val.
         model_kwargs: Keyword arguments forwarded to the non-traditional RF
-            (only ``n_estimators`` and ``max_depth`` are used).
+            (only n_estimators and max_depth are used).
 
     Returns:
-        Weight dict ``{0: w_neg, 1: w_pos}`` or ``None`` when estimation
-        fails (no positives or zero label frequency).
+        Weight dict {0: w_neg, 1: w_pos}.
     """
     X = training_set_train_test_split['X']
     y = training_set_train_test_split['y']
@@ -74,7 +59,10 @@ def _estimate_duplessis_weights(
 
     if y_train.sum() == 0 or y_val.sum() == 0:
         print("No positive labels in the training or validation set, skipping")
-        return None
+        return {
+            0: y.sum() / len(y),
+            1: 0,
+        }
 
     # The non-traditional RF used for label-frequency estimation always
     # receives 0-filled data (no NaN) regardless of the final classifier.
@@ -93,18 +81,21 @@ def _estimate_duplessis_weights(
         **nontrad_kwargs,
     )
     rf_nontrad.fit(X_train_filled, y_train)
-    y_nontrad = rf_nontrad.predict(X_val_filled)
 
-    label_freq = (y_nontrad & y_val).sum() / y_val.sum()
+    # e1 = (1/n) * sum_{x in P} g(x), P = labeled (true-positive) validation
+    # examples, g(x) = predicted probability of the non-traditional RF.
+    y_proba_nontrad = rf_nontrad.predict_proba(X_val_filled)[:, 1]
+    label_freq = y_proba_nontrad[y_val == 1].mean()
     label_prob = y.sum() / len(y)
 
-    if label_freq == 0:
+    if label_freq < _LABEL_FREQ_FLOOR:
         print(
-            "label_freq is 0: the non-traditional RF predicted no true positives "
-            "in the validation set. This means no matches to ground truth were "
-            "found in this dataset. Skipping this split."
+            f"label_freq estimate ({label_freq:.2e}) is below the floor "
+            f"({_LABEL_FREQ_FLOOR:.2e}): the non-traditional RF assigned "
+            "near-zero probability to the true positives in the validation "
+            "set. Flooring label_freq to avoid an unstable weight estimate."
         )
-        return None
+        label_freq = _LABEL_FREQ_FLOOR
 
     clpr = label_prob / label_freq
 
@@ -121,7 +112,7 @@ def _estimate_duplessis_weights(
 def train_unbiased_rf_for_split(
     training_set_train_test_split: dict,
     **model_kwargs,
-) -> RF | None:
+) -> RF:
     """
     Train an unbiased Random Forest for a single split using the Duplessis method.
     """
@@ -134,8 +125,6 @@ def train_unbiased_rf_for_split(
     weight_dict = _estimate_duplessis_weights(
         training_set_train_test_split, _model_kwargs,
     )
-    if weight_dict is None:
-        return None
 
     X_train = training_set_train_test_split['X_train']
     y_train = training_set_train_test_split['y_train']
@@ -166,7 +155,7 @@ def train_unbiased_rf_for_split(
 def train_unbiased_xgb_for_split(
     training_set_train_test_split: dict,
     **model_kwargs,
-) -> XGB | None:
+) -> XGB:
     """
     Train an unbiased XGBoost classifier for a single split using the Duplessis method.
     """
@@ -182,8 +171,6 @@ def train_unbiased_xgb_for_split(
     weight_dict = _estimate_duplessis_weights(
         training_set_train_test_split, _model_kwargs,
     )
-    if weight_dict is None:
-        return None
 
     X_train = training_set_train_test_split['X_train']
     y_train = training_set_train_test_split['y_train']
@@ -222,7 +209,7 @@ def train_unbiased_rf(
     ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
-) -> tuple[pd.DataFrame, RF | None]:
+) -> tuple[pd.DataFrame, RF]:
     """
     Train an unbiased Random Forest for a single training set using the Duplessis method.
     """
@@ -261,43 +248,62 @@ def train_unbiased_rf(
     return X, rf_fit
 
 
-def train_unbiased_concat_rf(
+def train_unbiased_nosvlen(
     joint_bp_df: pd.DataFrame,
     workflow_config: dict,
     ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
-) -> tuple[pd.DataFrame, RF | None]:
+) -> tuple[pd.DataFrame, RF]:
     """
-    Train an unbiased Random Forest on a concatenated training set from multiple samples.
+    Train an unbiased XGBoost model for a single training set, with all SVLEN
+    columns removed from the feature matrix prior to training.
+    """
+    svlen_cols = [col for col in joint_bp_df.columns if 'INFO_SVLEN' in col]
+    joint_bp_df_nosvlen = joint_bp_df.drop(columns=svlen_cols)
+
+    return train_unbiased_rf(
+        joint_bp_df_nosvlen,
+        workflow_config,
+        ground_truth_config,
+        training_set_name,
+        verbose=verbose,
+    )
+
+
+def train_unbiased_concat_rf(
+    matched_bps_sources: dict[str, pd.DataFrame | Path],
+    workflow_config: dict,
+    ground_truth_config: dict,
+    training_set_name: str,
+    verbose: bool = False,
+) -> tuple[pd.DataFrame, RF]:
+    """
+    Train an unbiased Random Forest on a training set pooled from one or more samples.
+
+    Args:
+        matched_bps_sources: Mapping of sample_name -> matched_bps DataFrame or
+            path to a matched_bps CSV. Every source is treated uniformly; there
+            is no distinguished "primary" sample. Pass a single-entry dict for
+            ordinary held-in training, or multiple entries to pool several
+            samples (concat/cross-training). All sources must share the same
+            training_set/callers as workflow_config.
     """
     _gt_name = ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source']
     training_set_dfs = []
-    for sample in workflow_config['model']['training_params']['function_params']['samples']:
-        if sample == workflow_config['sample_name']:
-            sample_workflow_config = workflow_config
-            sample_joint_bp_df = joint_bp_df
-        else:
-            sample_workflow_config = sv_utils.create_config_dict(
-                sample,
-                model_name=workflow_config['model']['name'],
-                training_set=training_set_name,
-                ground_truth_name=_gt_name,
-            )[sample]
-            _wait_for_file(sample_workflow_config['model']['matched_bps_path'])
-            sample_joint_bp_df = pd.read_csv(
-                sample_workflow_config['model']['matched_bps_path'],
-                low_memory=False,
-            )
+
+    for sample_name, source in matched_bps_sources.items():
+        source_df = source if isinstance(source, pd.DataFrame) else pd.read_csv(source, low_memory=False)
         sample_training_set_df = mbps.preprocess_matchedbps_for_pu(
-            sample_joint_bp_df,
-            sample_workflow_config,
-            ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source'],
+            source_df,
+            workflow_config,
+            _gt_name,
             training_set_name,
             verbose=verbose,
         )
-        del sample_joint_bp_df
+        del source_df
         training_set_dfs.append(sample_training_set_df)
+
     training_set_df = pd.concat(training_set_dfs, ignore_index=True)
     del training_set_dfs
 
@@ -333,7 +339,7 @@ def train_unbiased_xgb(
     ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
-) -> tuple[pd.DataFrame, XGB | None]:
+) -> tuple[pd.DataFrame, XGB]:
     """
     Train an unbiased XGBoost model for a single training set using the Duplessis method.
     """
@@ -373,42 +379,38 @@ def train_unbiased_xgb(
 
 
 def train_unbiased_xgb_concat(
-    joint_bp_df: pd.DataFrame,
+    matched_bps_sources: dict[str, pd.DataFrame | Path],
     workflow_config: dict,
     ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
-) -> tuple[pd.DataFrame, XGB | None]:
+) -> tuple[pd.DataFrame, XGB]:
     """
-    Train an unbiased XGBoost model with cross-training on one or multiple samples.
+    Train an unbiased XGBoost model on a training set pooled from one or more samples.
+
+    Args:
+        matched_bps_sources: Mapping of sample_name -> matched_bps DataFrame or
+            path to a matched_bps CSV. Every source is treated uniformly; there
+            is no distinguished "primary" sample. Pass a single-entry dict for
+            ordinary held-in training, or multiple entries to pool several
+            samples (concat/cross-training). All sources must share the same
+            training_set/callers as workflow_config.
     """
     _gt_name = ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source']
     training_set_dfs = []
-    for sample in workflow_config['model']['training_params']['function_params']['samples']:
-        if sample == workflow_config['sample_name']:
-            sample_workflow_config = workflow_config
-            sample_joint_bp_df = joint_bp_df
-        else:
-            sample_workflow_config = sv_utils.create_config_dict(
-                sample,
-                model_name=workflow_config['model']['name'],
-                training_set=training_set_name,
-                ground_truth_name=_gt_name,
-            )[sample]
-            _wait_for_file(sample_workflow_config['model']['matched_bps_path'])
-            sample_joint_bp_df = pd.read_csv(
-                sample_workflow_config['model']['matched_bps_path'],
-                low_memory=False,
-            )
+
+    for sample_name, source in matched_bps_sources.items():
+        source_df = source if isinstance(source, pd.DataFrame) else pd.read_csv(source, low_memory=False)
         sample_training_set_df = mbps.preprocess_matchedbps_for_pu(
-            sample_joint_bp_df,
-            sample_workflow_config,
-            ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source'],
+            source_df,
+            workflow_config,
+            _gt_name,
             training_set_name,
             verbose=verbose,
         )
-        del sample_joint_bp_df
+        del source_df
         training_set_dfs.append(sample_training_set_df)
+
     training_set_df = pd.concat(training_set_dfs, ignore_index=True)
     del training_set_dfs
 
@@ -438,6 +440,28 @@ def train_unbiased_xgb_concat(
     return X, xgb_fit
 
 
+def train_unbiased_xgb_nosvlen(
+    joint_bp_df: pd.DataFrame,
+    workflow_config: dict,
+    ground_truth_config: dict,
+    training_set_name: str,
+    verbose: bool = False,
+) -> tuple[pd.DataFrame, XGB]:
+    """
+    Train an unbiased XGBoost model for a single training set, with all SVLEN
+    columns removed from the feature matrix prior to training.
+    """
+    svlen_cols = [col for col in joint_bp_df.columns if 'INFO_SVLEN' in col]
+    joint_bp_df_nosvlen = joint_bp_df.drop(columns=svlen_cols)
+
+    return train_unbiased_xgb(
+        joint_bp_df_nosvlen,
+        workflow_config,
+        ground_truth_config,
+        training_set_name,
+        verbose=verbose,
+    )
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -445,31 +469,55 @@ def train_unbiased_xgb_concat(
 model_dispatch = {
     'unbiased': train_unbiased_rf,
     'unbiased_concat': train_unbiased_concat_rf,
+    'unbiased_nosvlen': train_unbiased_nosvlen,
     'unbiased_xgb': train_unbiased_xgb,
     'unbiased_xgb_concat': train_unbiased_xgb_concat,
+    'unbiased_xgb_nosvlen': train_unbiased_xgb_nosvlen,
 }
 
 
 def train_model(
-    joint_bp_df: pd.DataFrame,
+    joint_bp_df: pd.DataFrame | None,
     workflow_config: dict,
     ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
-) -> tuple[pd.DataFrame, RF | XGB | None]:
+    matched_bps_sources: dict[str, pd.DataFrame | Path] | None = None,
+) -> tuple[pd.DataFrame, RF | XGB]:
     """
-    Train a model following workflow_config using joint_bp_df.
+    Train a model following workflow_config using joint_bp_df or matched_bps_sources.
 
     Args:
-        joint_bp_df: DataFrame containing matched breakpoints for the training set.
+        joint_bp_df: DataFrame containing matched breakpoints for the training
+            set. Required for ordinary (non-pooled) models; ignored for
+            pooled (concat/cross) models.
         workflow_config: Dictionary containing the workflow configuration.
         ground_truth_config: Dictionary containing the ground truth configuration.
         training_set_name: Name of the training set.
         verbose: If True, print verbose output.
+        matched_bps_sources: Mapping of sample_name -> matched_bps DataFrame or
+            path, for pooled (concat/cross) models (see model_configs
+            entries with training_params['concat'] = True). Required for
+            those models; ignored otherwise.
     Returns:
         Tuple of (feature matrix, trained model).
     """
-    model_function = model_dispatch[workflow_config['model']['training_params']['function']]
+    training_params = workflow_config['model']['training_params']
+    model_function = model_dispatch[training_params['function']]
+
+    if training_params['concat']:
+        if matched_bps_sources is None:
+            raise ValueError(
+                f"Model '{workflow_config['model']['name']}' is a concat/pooled model but no "
+                f"matched_bps_sources were provided (pass --train_samples/--train_matched_bps)."
+            )
+        return model_function(
+            matched_bps_sources, workflow_config, ground_truth_config,
+            training_set_name, verbose,
+        )
+
+    if joint_bp_df is None:
+        raise ValueError(f"Model '{workflow_config['model']['name']}' requires joint_bp_df.")
     return model_function(
         joint_bp_df, workflow_config, ground_truth_config,
         training_set_name, verbose,

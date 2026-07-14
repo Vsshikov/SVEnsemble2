@@ -194,8 +194,8 @@ def _extract_relative_pos(alt_series: pd.Series) -> np.ndarray:
     """Extract BND relative-position strings from an ALT series without full regex parsing.
 
     relative_pos is determined solely by whether the ALT string starts with a bracket
-    (orientation is to the left of the anchor base → `[N` / `]N`) or with a nucleotide
-    (orientation is to the right → `N[` / `N]`).  A single bracket-extraction regex is
+    (orientation is to the left of the anchor base → [N / ]N) or with a nucleotide
+    (orientation is to the right → N[ / N]).  A single bracket-extraction regex is
     an order of magnitude faster than the full process_breakend_alt parse.
 
     Returns:
@@ -275,7 +275,7 @@ def get_pairwise_matches(
     Match breakpoints from multiple sources based on position and insert delta similarity.
 
     For intra-chromosomal events the insert delta is the net event size
-    ``abs(insert_size - (pos_diff - 1))``; for inter-chromosomal events it
+    abs(insert_size - (pos_diff - 1)); for inter-chromosomal events it
     equals the raw insert size.
 
     Args:

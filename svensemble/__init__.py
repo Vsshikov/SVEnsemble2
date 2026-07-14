@@ -7,7 +7,7 @@ from . import vcfwrite
 from . import breakends
 from . import breakpoints
 from . import events
-from . import caller_specific
+from . import callset_specific
 from . import benchmark
 from . import models
 from . import chunk_match
@@ -20,7 +20,7 @@ __all__ = [
     "breakends",
     "breakpoints",
     "events",
-    "caller_specific",
+    "callset_specific",
     "benchmark",
     "chunk_match",
     "models",

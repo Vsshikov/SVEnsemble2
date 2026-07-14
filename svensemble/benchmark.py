@@ -714,6 +714,32 @@ _style_mappings = {
     },
 }
 
+_model_style_mappings = {
+    'unbiased_xgb': {
+        'line': {
+            'linewidth': 1,
+        }
+    },
+    'unbiased_d31': {
+        'line': {
+            'linewidth': 2,
+            'linestyle': '-.',
+        }
+    },
+    'unbiased_xgb_nosvlen': {
+        'line': {
+            'linewidth': 1,
+            'linestyle': '--',
+        }
+    },
+    'unbiased_d31_nosvlen': {
+        'line': {
+            'linewidth': 2,
+            'linestyle': '--',
+        }
+    },
+}
+
 default_style_mapping = {
     'line': {
         'linewidth': 1
@@ -730,7 +756,22 @@ default_style_mapping = {
     }
 }
 
-def get_style_mapping(callset, default_style_mapping=default_style_mapping):
+def get_style_mapping(callset, model=None, default_style_mapping=default_style_mapping):
+    """Build the merged style dict for a callset, optionally overlayed with model-specific overrides.
+
+    Args:
+        callset: Callset name used to look up the entry in ``_style_mappings``.
+        model: Optional model name. If provided and present in
+            ``_model_style_mappings``, that entry is recursively merged on top
+            of the callset style (so it can override e.g. ``line.linewidth``
+            or ``line.linestyle``). Unknown model names are silently ignored.
+        default_style_mapping: Base style dict that callset/model entries are
+            merged into.
+
+    Returns:
+        dict with ``line`` and ``text`` sub-dicts ready to splat into
+        matplotlib calls.
+    """
     _default_style_mapping = deepcopy(default_style_mapping)
     if callset in _style_mappings:
         style_mapping = sv_utils.update(_default_style_mapping, _style_mappings[callset])
@@ -739,6 +780,9 @@ def get_style_mapping(callset, default_style_mapping=default_style_mapping):
         _default_style_mapping['line']['color'] = _fallback_color
         _default_style_mapping['line']['label'] = callset
         style_mapping = _default_style_mapping
+    if model is not None and model in _model_style_mappings:
+        style_mapping = sv_utils.update(style_mapping, deepcopy(_model_style_mappings[model]))
+        style_mapping['line']['label'] = f'{style_mapping["line"]["label"]} ({model})'
     if 'color' in style_mapping['line']:
         style_mapping['text']['bbox']['ec'] = style_mapping['line']['color']
         style_mapping['text']['bbox']['fc'] = style_mapping['line']['color']
@@ -774,9 +818,13 @@ class HandlerLineWithBadge(HandlerLine2D):
         return artists
 
 
-def _build_badge_handler(callset):
-    """Return a ``HandlerLineWithBadge`` for *callset*, or *None* if no badge text is defined."""
-    style = get_style_mapping(callset)
+def _build_badge_handler(callset, model=None):
+    """Return a HandlerLineWithBadge for *callset*, or *None* if no badge text is defined.
+
+    *model* is forwarded to ``get_style_mapping`` so model-specific overrides
+    (e.g. line width / linestyle) are reflected in the legend swatch.
+    """
+    style = get_style_mapping(callset, model=model)
     badge_label = style['text'].get('label', '')
     if not badge_label:
         return None
@@ -839,6 +887,25 @@ _callset_order = [
     'svensemble2_sniffles+severus+cutesv+gridss+manta_diploid+delly',
     'svensemble2_sniffles+severus+cutesv+gridss+manta_diploid+delly+svaba',
 ]
+
+def n_callsets(callset: str) -> int:
+    """Number of underlying callers combined in a callset name."""
+    return len(callset.removeprefix('svensemble2_').split('+'))
+
+def base_name(callset: str) -> str:
+    """Canonical identity: strips the svensemble2_ prefix and sorts multi-caller
+    components alphabetically, so a standalone callset and its svensemble2 pair
+    (and equivalent-composition training sets) collate under the same key."""
+    return '+'.join(sorted(callset.removeprefix('svensemble2_').split('+')))
+
+
+def callset_order_generator(callsets):
+    return sorted(
+        callsets,
+        key=lambda c: (n_callsets(c), base_name(c), c.startswith('svensemble2_'), c),
+    )
+
+
 # def order_legend(plt, callsets):
 #     """
 #     Rearrange legend items by callset order
@@ -860,10 +927,10 @@ def _ordered_callset_enumerate(callsets, callset_order):
         yield len(callset_order) + idx, callset
 
 
-def style_svensemble_lines(line, callset):
+def style_svensemble_lines(line, callset, model=None):
     # If svensemble2 in in the callset name, plot the curve normally
     # Otherwise, plot a dotted line instead
-    style_mapping = get_style_mapping(callset)['line']
+    style_mapping = get_style_mapping(callset, model=model)['line']
     # line.set_color(style_mapping['color'])
     # line.set_linewidth(style_mapping['linewidth'])
     # line.set_dashes(dashes)
@@ -871,22 +938,22 @@ def style_svensemble_lines(line, callset):
     line.set(**style_mapping)
 
 
-def style_text(text: mpl.text.Text, callset):
-    style_mapping = get_style_mapping(callset)['text']
+def style_text(text: mpl.text.Text, callset, model=None):
+    style_mapping = get_style_mapping(callset, model=model)['text']
     text.set(**style_mapping)
 
 
 def plot_roc_curves(
     sample_val_dict, ax=None, use_counts=True, title=None,
     svensemble2_cutoff=None, verbose=False,
-    xlim=None, ylim=None,
+    xlim=None, ylim=None, model=None,
 ):
     """Plot ROC curves for multiple callsets.
 
     Args:
         sample_val_dict: Dict of {callset_name: DataFrame} where each
             DataFrame has a prediction score as the 2nd column and a
-            boolean truth column ``is_in_val``.
+            boolean truth column is_in_val.
         ax: Matplotlib axis.  Created if *None*.
         use_counts: Plot as counts (True) or rates (False).
         title: Plot title.
@@ -895,6 +962,9 @@ def plot_roc_curves(
         verbose: Print skipped callsets.
         xlim: Tuple (xmin, xmax) to set x-axis limits.
         ylim: Tuple (ymin, ymax) to set y-axis limits.
+        model: Optional svensemble2 model name. When provided and present in
+            ``_model_style_mappings``, the model-specific style overrides are
+            applied to ``svensemble2_*`` curves only.
 
     Returns:
         Matplotlib axis with plotted ROC curves.
@@ -910,7 +980,7 @@ def plot_roc_curves(
     callsets = list(sample_val_dict.keys())
     callsets.sort()
 
-    for idx, callset in _ordered_callset_enumerate(callsets, _callset_order):
+    for idx, callset in _ordered_callset_enumerate(callsets, callset_order_generator(callsets)):
         callset_val_df = sample_val_dict[callset].dropna().copy()
 
         truth_series = callset_val_df['is_in_val']
@@ -933,13 +1003,14 @@ def plot_roc_curves(
             tpr = tpr * total_tp
             fpr = fpr * total_tn
 
-        ax.plot(fpr, tpr, **get_style_mapping(callset)['line'])
+        style_model = model if callset.startswith('svensemble2_') else None
+        ax.plot(fpr, tpr, **get_style_mapping(callset, model=style_model)['line'])
 
         if (svensemble2_cutoff is not None) and ('svensemble2' in callset):
             threshold_idx = np.argmin(np.abs(thresholds - svensemble2_cutoff))
             ax.plot(
                 fpr[threshold_idx], tpr[threshold_idx], 'o',
-                color=get_style_mapping(callset)['line']['color'],
+                color=get_style_mapping(callset, model=style_model)['line']['color'],
             )
 
     if xlim is not None:
@@ -966,7 +1037,7 @@ def plot_roc_curves(
 def plot_reverse_roc_curves(
     sample_val_dict, svtype=None, ax=None, use_counts=True,
     filter_pass=False, title=None, svensemble2_cutoff=None,
-    verbose=False, xlim=None, ylim=None,
+    verbose=False, xlim=None, ylim=None, model=None,
 ):
     """Plot log-scale reverse ROC curves (1/FP vs TP/FP) for multiple callsets.
 
@@ -977,7 +1048,7 @@ def plot_reverse_roc_curves(
     Args:
         sample_val_dict: Dict of {callset_name: DataFrame} where each
             DataFrame has a prediction score as the 2nd column and a
-            boolean truth column ``is_in_val``.
+            boolean truth column is_in_val.
         svtype: If set, restrict to rows where INFO_INFERRED_SVTYPE
             matches this value.
         ax: Matplotlib axis.  Created if *None*.
@@ -990,6 +1061,9 @@ def plot_reverse_roc_curves(
         verbose: Print skipped callsets.
         xlim: Tuple (xmin, xmax) to set x-axis limits.
         ylim: Tuple (ymin, ymax) to set y-axis limits.
+        model: Optional svensemble2 model name. When provided and present in
+            ``_model_style_mappings``, the model-specific style overrides are
+            applied to ``svensemble2_*`` curves only.
 
     Returns:
         Matplotlib axis with plotted reverse ROC curves.
@@ -1005,7 +1079,7 @@ def plot_reverse_roc_curves(
     callsets = list(sample_val_dict.keys())
     callsets.sort()
 
-    for idx, callset in _ordered_callset_enumerate(callsets, _callset_order):
+    for idx, callset in _ordered_callset_enumerate(callsets, callset_order_generator(callsets)):
         callset_val_df = sample_val_dict[callset].dropna().copy()
 
         if filter_pass and 'FILTER_PASS' in sample_val_dict[callset].columns:
@@ -1053,13 +1127,14 @@ def plot_reverse_roc_curves(
             tp_fp_metric = tpr
             thresholds_no_zeros = thresholds
 
-        ax.plot(fp_metric, tp_fp_metric, **get_style_mapping(callset)['line'])
+        style_model = model if callset.startswith('svensemble2_') else None
+        ax.plot(fp_metric, tp_fp_metric, **get_style_mapping(callset, model=style_model)['line'])
 
         if (svensemble2_cutoff is not None) and ('svensemble2' in callset) and len(thresholds_no_zeros):
             threshold_idx = np.argmin(np.abs(thresholds_no_zeros - svensemble2_cutoff))
             ax.plot(
                 fp_metric[threshold_idx], tp_fp_metric[threshold_idx], 'o',
-                color=get_style_mapping(callset)['line']['color'],
+                color=get_style_mapping(callset, model=style_model)['line']['color'],
             )
 
     if xlim is not None:
@@ -1081,7 +1156,7 @@ def plot_reverse_roc_curves(
 def plot_precision_recall_curves(
     sample_val_dict, ax=None, use_counts=True, title=None,
     svensemble2_cutoff=None, n_truth=None, verbose=False,
-    xlim=None, ylim=None,
+    xlim=None, ylim=None, model=None,
 ):
     """
     Plot precision-recall curves for multiple prediction arrays against corresponding truth series
@@ -1096,6 +1171,9 @@ def plot_precision_recall_curves(
             drawn on top of the plot.
         xlim: Tuple (xmin, xmax) to set x-axis limits. Defaults to auto.
         ylim: Tuple (ymin, ymax) to set y-axis limits. Defaults to (0, 1).
+        model: Optional svensemble2 model name. When provided and present in
+            ``_model_style_mappings``, the model-specific style overrides are
+            applied to ``svensemble2_*`` curves only.
 
     Returns:
         matplotlib axis with plotted precision-recall curves
@@ -1116,7 +1194,7 @@ def plot_precision_recall_curves(
             if raw_name in sample_val_dict:
                 paired_raw_callers.add(raw_name)
 
-    for idx, callset in _ordered_callset_enumerate(callsets, _callset_order):
+    for idx, callset in _ordered_callset_enumerate(callsets, callset_order_generator(callsets)):
         callset_val_df = sample_val_dict[callset].dropna().copy()
         truth_series = callset_val_df['is_in_val']
         if sum(truth_series) == 0:
@@ -1144,21 +1222,22 @@ def plot_precision_recall_curves(
             tp_metric = recall
             precision_metric = precision
 
-        line, = ax.plot(tp_metric, precision_metric, **get_style_mapping(callset)['line'])
+        style_model = model if callset.startswith('svensemble2_') else None
+        line, = ax.plot(tp_metric, precision_metric, **get_style_mapping(callset, model=style_model)['line'])
 
-        badge_handler = _build_badge_handler(callset)
+        badge_handler = _build_badge_handler(callset, model=style_model)
         if badge_handler is not None:
             handler_map[line] = badge_handler
 
         if callset not in paired_raw_callers:
             text_label = callset if callset not in _style_mappings else _style_mappings[callset]['text']['label']
-            text_style = {k: v for k, v in get_style_mapping(callset)['text'].items() if k != 'label'}
+            text_style = {k: v for k, v in get_style_mapping(callset, model=style_model)['text'].items() if k != 'label'}
             t = ax.text(tp_metric[0], precision_metric[0], text_label, **text_style)
             text_objects.append(t)
 
         if (svensemble2_cutoff is not None) and ('svensemble2' in callset):
             threshold_idx = np.argmin(np.abs(thresholds - svensemble2_cutoff))
-            ax.plot(tp_metric[threshold_idx], precision_metric[threshold_idx], 'o', color=get_style_mapping(callset)['line']['color'])
+            ax.plot(tp_metric[threshold_idx], precision_metric[threshold_idx], 'o', color=get_style_mapping(callset, model=style_model)['line']['color'])
 
     if xlim is not None:
         ax.set_xlim(*xlim)
@@ -1208,7 +1287,7 @@ def plot_precision_recall_gain_curves(
     sample_val_dict, ax=None, title=None,
     svensemble2_cutoff=None, verbose=False,
     text_labels=False,
-    xlim=None, ylim=None,
+    xlim=None, ylim=None, model=None,
 ):
     """Plot Precision-Recall-Gain curves (Flach & Kull, 2015).
 
@@ -1226,7 +1305,7 @@ def plot_precision_recall_gain_curves(
     Args:
         sample_val_dict: Dict of {callset_name: DataFrame} where each
             DataFrame has a prediction score as the 2nd column and a
-            boolean truth column ``is_in_val``.
+            boolean truth column is_in_val.
         ax: Matplotlib axis.  Created if *None*.
         title: Plot title.
         svensemble2_cutoff: If set, mark the operating point closest to
@@ -1234,6 +1313,9 @@ def plot_precision_recall_gain_curves(
         verbose: Print skipped callsets.
         xlim: Tuple (xmin, xmax).  Defaults to (0, 1).
         ylim: Tuple (ymin, ymax).  Defaults to (0, 1).
+        model: Optional svensemble2 model name. When provided and present in
+            ``_model_style_mappings``, the model-specific style overrides are
+            applied to ``svensemble2_*`` curves only.
 
     Returns:
         Matplotlib axis with plotted PRG curves.
@@ -1256,7 +1338,7 @@ def plot_precision_recall_gain_curves(
             if raw_name in sample_val_dict:
                 paired_raw_callers.add(raw_name)
 
-    for _, callset in _ordered_callset_enumerate(callsets, _callset_order):
+    for _, callset in _ordered_callset_enumerate(callsets, callset_order_generator(callsets)):
         callset_val_df = sample_val_dict[callset].dropna().copy()
         truth_series = callset_val_df['is_in_val']
         n_pos = sum(truth_series)
@@ -1297,15 +1379,16 @@ def plot_precision_recall_gain_curves(
                 print(f'{callset} has no points above baseline prevalence, skipping')
             continue
 
-        line, = ax.plot(rec_gain, prec_gain, **get_style_mapping(callset)['line'])
+        style_model = model if callset.startswith('svensemble2_') else None
+        line, = ax.plot(rec_gain, prec_gain, **get_style_mapping(callset, model=style_model)['line'])
 
-        badge_handler = _build_badge_handler(callset)
+        badge_handler = _build_badge_handler(callset, model=style_model)
         if badge_handler is not None:
             handler_map[line] = badge_handler
 
         if (callset not in paired_raw_callers) and text_labels:
             text_label = callset if callset not in _style_mappings else _style_mappings[callset]['text']['label']
-            text_style = {k: v for k, v in get_style_mapping(callset)['text'].items() if k != 'label'}
+            text_style = {k: v for k, v in get_style_mapping(callset, model=style_model)['text'].items() if k != 'label'}
             t = ax.text(rec_gain[0], prec_gain[0], text_label, **text_style)
             text_objects.append(t)
 
@@ -1313,7 +1396,7 @@ def plot_precision_recall_gain_curves(
             threshold_idx = np.argmin(np.abs(thresholds_valid - svensemble2_cutoff))
             ax.plot(
                 rec_gain[threshold_idx], prec_gain[threshold_idx], 'o',
-                color=get_style_mapping(callset)['line']['color'],
+                color=get_style_mapping(callset, model=style_model)['line']['color'],
             )
 
     ax.set_xlim(*(xlim or (0, 1)))
@@ -1390,9 +1473,9 @@ def ensure_val_set(sample_config: dict, force_rerun: bool = False) -> Path:
 
     Args:
         sample_config: A *single-sample* config dict — the inner dict for one
-            sample as returned by ``create_config_dict(name)[name]``.
-            Must contain a ``'val_set'`` key with ``path``, ``name``, and
-            ``raw_path``.
+            sample as returned by create_config_dict(name)[name].
+            Must contain a 'val_set' key with path, name, and
+            raw_path.
         force_rerun: Regenerate even when the output CSV already exists.
 
     Returns:
@@ -1654,19 +1737,19 @@ def preprocess_hgsvc2_val_set(sample, vcf_path, force_rerun=False, sample_name='
     Preprocess the HGSVC2 freeze-4 integrated SV callset for benchmarking.
 
     The HGSVC2 VCF is a multi-sample file (35 genomes).  This function
-    parses it via ``parse_vcf_to_df``, filters for records where
+    parses it via parse_vcf_to_df, filters for records where
     *sample_name* carries at least one ALT allele, restricts to canonical
     chromosomes and DEL/INS types, then converts events to breakpoints.
 
     Args:
-        sample (dict): Sample config with ``sample['val_set']['path']`` pointing
+        sample (dict): Sample config with sample['val_set']['path'] pointing
             to the desired output CSV.
-        vcf_path (str or Path): Path to ``variants_freeze4_sv_insdel_alt.vcf.gz``.
+        vcf_path (str or Path): Path to variants_freeze4_sv_insdel_alt.vcf.gz.
         force_rerun (bool, optional): If True, regenerate even if the output exists.
         sample_name (str, optional): Sample to extract from the multi-sample VCF.
 
     Saves:
-        CSV file at ``sample['val_set']['path']`` with breakpoint-format variants.
+        CSV file at sample['val_set']['path'] with breakpoint-format variants.
     """
     out_path = Path(sample['val_set']['path'])
 
@@ -1756,17 +1839,22 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
             callset_bps_['INFO_DOWNSTREAM_PAIR_COUNT'] + \
             callset_bps_['INFO_PAIR_COUNT']
 
+    # INFO_INFERRED_SVTYPE is required downstream for svtype-stratified filtering.
+    # Compute it from breakpoint geometry when the callset was not pre-annotated.
+    if 'INFO_INFERRED_SVTYPE' not in callset_bps_.columns:
+        callset_bps_.loc[:, 'INFO_INFERRED_SVTYPE'] = bps.annotate_svtypes(callset_bps_, callset_name)
+
     val_key = sample_config['val_set']['name']
     if val_key == callset_name:
         i = 0
         val_key = f'{val_key}_{i}'
-        if val_key not in caller_params.caller_param_dict:
-            caller_params.caller_param_dict[val_key] = caller_params.caller_param_dict[sample_config['val_set']['name']]
+        if val_key not in caller_params.callset_param_dict:
+            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[sample_config['val_set']['name']]
         else:
-            while val_key in caller_params.caller_param_dict:
+            while val_key in caller_params.callset_param_dict:
                 i += 1
-                val_key = 'val_key'.replace(f'_{i-1}', f'_{i}')
-            caller_params.caller_param_dict[val_key] = caller_params.caller_param_dict[sample_config['val_set']['name']]
+                val_key = val_key.replace(f'_{i-1}', f'_{i}')
+            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[sample_config['val_set']['name']]
             if i > 1000000:
                 raise ValueError(f'Too many temporary validation set names generated for {val_key}')
 
@@ -1793,21 +1881,40 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
 
 
 
-def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name, model_name, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True):
+def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name=None, model_name=None, pred_col=None, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True):
     svens_calls_ = svensemble2_bps.copy()
     val_set_ = val_set.copy()
+
+    # Resolve the single prediction column. Callers may pass it explicitly,
+    # supply training_set_name + model_name to reconstruct it, or rely on
+    # auto-detection of the unique '*_pred' column written by get_svensemble2_calls.
+    if pred_col is None:
+        if training_set_name is not None and model_name is not None:
+            pred_col = f'{training_set_name}_{model_name}_pred'
+        else:
+            pred_candidates = [c for c in svens_calls_.columns if c.endswith('_pred')]
+            if len(pred_candidates) != 1:
+                raise ValueError(
+                    f"Expected exactly one '*_pred' column in svensemble2 calls, found {pred_candidates}"
+                )
+            pred_col = pred_candidates[0]
+
+    # INFO_INFERRED_SVTYPE is required downstream for svtype-stratified filtering.
+    # Compute it from breakpoint geometry when the calls were not pre-annotated.
+    if 'INFO_INFERRED_SVTYPE' not in svens_calls_.columns:
+        svens_calls_.loc[:, 'INFO_INFERRED_SVTYPE'] = bps.annotate_svtypes(svens_calls_, 'svensemble2')
 
     val_key = sample_config['val_set']['name']
     if val_key == 'svensemble2':
         i = 0
         val_key = f'{val_key}_val_{i}'
-        if val_key not in caller_params.caller_param_dict:
-            caller_params.caller_param_dict[val_key] = caller_params.caller_param_dict[sample_config['val_set']['name']]
+        if val_key not in caller_params.callset_param_dict:
+            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[sample_config['val_set']['name']]
         else:
-            while val_key in caller_params.caller_param_dict:
+            while val_key in caller_params.callset_param_dict:
                 i += 1
-                val_key = f'{val_key}_val_{i}'
-            caller_params.caller_param_dict[val_key] = caller_params.caller_param_dict[sample_config['val_set']['name']]
+                val_key = val_key.replace(f'_val_{i-1}', f'_val_{i}')
+            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[sample_config['val_set']['name']]
             if i > 1000000:
                 raise ValueError(f'Too many temporary validation set names generated for {val_key}')
 
@@ -1823,13 +1930,13 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, tr
     )
 
     svens_calls_.loc[:, 'is_in_val'] = svens_calls_['INFO_EVENT'].astype(str).isin(matched_ids['svensemble2_INFO_EVENT'])
-    cols_to_keep = ['INFO_EVENT', f'{training_set_name}_{model_name}_pred', 'is_in_val']
+    cols_to_keep = ['INFO_EVENT', pred_col, 'is_in_val']
     if 'INFO_INFERRED_SVTYPE' in svens_calls_.columns:
         cols_to_keep.append('INFO_INFERRED_SVTYPE')
     if isinstance(additional_cols, list):
         cols_to_keep.extend([col for col in additional_cols if ((col not in cols_to_keep) and (col in svens_calls_.columns))])
     val_df = svens_calls_[cols_to_keep]
-    val_df = val_df[val_df[f'{training_set_name}_{model_name}_pred'].notna()]
+    val_df = val_df[val_df[pred_col].notna()]
 
     return val_df
 
@@ -1875,6 +1982,172 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, tr
 #         )
 
 #     return sample_
+
+
+def run_benchmark(
+    calls_csv: Path,
+    caller_bps_paths: List[Path],
+    callers: List[str],
+    val_bps_path: Path,
+    val_name: str,
+    sample_name: str,
+    model_name: str,
+    training_set: str,
+    output_dir: Path,
+    verbose: bool = False,
+):
+    """
+    DEPRECATED - use run_single_callset_benchmark instead.
+
+    Pipeline-friendly benchmark entry point.  Accepts file paths directly
+    rather than discovering them via sample/caller configs.
+
+    Writes one CSV per caller and one for SVEnsemble2 into output_dir:
+      {caller}.benchmark.csv
+      svensemble2_{training_set}.benchmark.csv
+    """
+    val_set = pd.read_csv(val_bps_path)
+
+    # Validate original callsets (non-ensemble predictions)
+    for caller, bps_path in zip(callers, caller_bps_paths):
+        callset_bps = pd.read_csv(bps_path)
+        sample_config = {
+            'val_set': {'name': val_name},
+            'callsets': {caller: {'params': caller_params.callset_param_dict[caller]}},
+        }
+        val_df = validate_basic_callset(
+            callset_bps=callset_bps,
+            val_set=val_set,
+            sample_config=sample_config,
+            callset_name=caller,
+            verbose=verbose
+        )
+        if verbose:
+            match_count = val_df["is_in_val"].sum()
+            total_count = len(val_df)
+            print(
+                f"{caller} callset for {sample_name} processed "
+                f"({match_count} matches out of {total_count} predictions)"
+            )
+        val_df.to_csv(output_dir / f'{caller}.benchmark.csv', index=False)
+
+    # Validate SVEnsemble2 predictions
+    svensemble_preds = pd.read_csv(calls_csv)
+    val_df = validate_svensemble2_predictions(
+        svensemble2_bps=svensemble_preds,
+        val_set=val_set,
+        sample_config={'val_set': {'name': val_name}},
+        training_set_name=training_set,
+        model_name=model_name,
+        verbose=verbose
+    )
+    if verbose:
+        match_count = val_df["is_in_val"].sum()
+        total_count = len(val_df)
+        print(
+            f"SVEnsemble2 predictions ({training_set}) for {sample_name} processed "
+            f"({match_count} matches out of {total_count} predictions)"
+        )
+    val_df.to_csv(output_dir / f'svensemble2_{training_set}.benchmark.csv', index=False)
+
+
+def run_single_callset_benchmark(
+    callset_bps_path: Path,
+    callset_name: str,
+    val_bps_path: Path,
+    val_name: str,
+    output_dir: Path | None = None,
+    svtypes: list[str] | None = None,
+    svlen_min: int | None = None,
+    svlen_max: int | None = None,
+    verbose: bool = False,
+):
+    """Benchmark one callset against a validation set and write a single CSV.
+
+    Dispatch is by callset_name: names prefixed svensemble2 are ensemble
+    prediction sets (validated via validate_svensemble2_predictions); all
+    other names are basic caller callsets (validated via
+    validate_basic_callset, with qual_metric resolved from
+    callset_param_dict[callset_name]). This unifies individual callers
+    (gridss, delly, survivor_*, ...) and ensemble predictions behind one entry
+    point.
+
+    Optional SV-length and SV-type filtering is each applied independently. When
+    any filter is set it is applied to BOTH the callset and the validation set
+    (mirroring benchmark_model) so metrics are computed within the category.
+
+    Args:
+        callset_bps_path (Path): Path to the callset breakpoints CSV.
+        callset_name (str): Callset identifier. Names prefixed svensemble2
+            are treated as ensemble prediction sets; all others are basic
+            caller callsets resolved against callset_param_dict.
+        val_bps_path (Path): Path to the validation set breakpoints CSV.
+        val_name (str): Name of the validation set.
+        output_dir (Path, optional): Directory to write
+            {callset_name}.benchmark.csv into. If None, the validation
+            dataframe is returned instead. Default: None.
+        svtypes (list[str], optional): INFO_INFERRED_SVTYPE values to keep.
+            None keeps all types. Default: None.
+        svlen_min (int, optional): Inclusive lower SV-length bound. None means
+            0. Default: None.
+        svlen_max (int, optional): Inclusive upper SV-length bound. None means
+            unbounded. Default: None.
+        verbose (bool, optional): Whether to print processing info.
+            Default: False.
+
+    Returns:
+        pandas.DataFrame or None:
+        - The validation dataframe when output_dir is None;
+        - None after writing {callset_name}.benchmark.csv to output_dir when output_dir is not None.
+    """
+    val_set = pd.read_csv(val_bps_path)
+    callset_bps = pd.read_csv(callset_bps_path, low_memory=False)
+    sample_config = {'val_set': {'name': val_name}}
+
+    source = 'svensemble2' if callset_name.startswith('svensemble2') else callset_name
+
+    if svtypes is not None or svlen_min is not None or svlen_max is not None:
+        svlens = (
+            svlen_min if svlen_min is not None else 0,
+            svlen_max if svlen_max is not None else np.inf,
+        )
+        callset_bps = bps.svlen_svtype_filter(callset_bps, source, svtypes=svtypes, svlens=svlens)
+        val_set = bps.svlen_svtype_filter(val_set, val_name, svtypes=svtypes, svlens=svlens)
+        if verbose:
+            print(f"Filtered {callset_name} and {val_name} to svtypes={svtypes}, svlens={svlens}")
+
+    if callset_name.startswith('svensemble2'):
+        val_df = validate_svensemble2_predictions(
+            svensemble2_bps=callset_bps,
+            val_set=val_set,
+            sample_config=sample_config,
+            verbose=verbose,
+        )
+    else:
+        sample_config['callsets'] = {
+            callset_name: {'params': caller_params.callset_param_dict[callset_name]}
+        }
+        val_df = validate_basic_callset(
+            callset_bps=callset_bps,
+            val_set=val_set,
+            sample_config=sample_config,
+            callset_name=callset_name,
+            verbose=verbose,
+        )
+
+    if verbose:
+        match_count = val_df["is_in_val"].sum()
+        total_count = len(val_df)
+        print(
+            f"{callset_name} callset processed against {val_name} "
+            f"({match_count} matches out of {total_count} predictions)"
+        )
+
+    if output_dir is None:
+        return val_df
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    val_df.to_csv(output_dir / f'{callset_name}.benchmark.csv', index=False)
 
 
 # Benchmark a single sample's callsets and SVEnsemble2 ensemble predictions against a validation set,

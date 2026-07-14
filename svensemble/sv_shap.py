@@ -48,8 +48,8 @@ def resolve_shap_paths(
 ) -> dict[str, Path]:
     """Resolve SVEnsemble2 paths for SHAP analysis via the unified config system.
 
-    Delegates to ``sv_utils.create_config_dict`` so that the ``gt_`` suffix
-    (e.g. ``.gt_gnomad_pass``) is applied consistently with the training
+    Delegates to sv_utils.create_config_dict so that the gt_ suffix
+    (e.g. .gt_gnomad_pass) is applied consistently with the training
     pipeline.
     """
     config = sv_utils.create_config_dict(
@@ -81,7 +81,7 @@ def align_features(
 
     Drops extra columns present in *X* but absent from the model, raises
     if *X* is missing features required by the model, and reorders columns
-    to match ``model.feature_names_in_``.
+    to match model.feature_names_in_.
     """
     if not hasattr(model, 'feature_names_in_'):
         return X
@@ -206,13 +206,13 @@ def compute_shap_values(
     Args:
         model: Trained sklearn-compatible tree model.
         X: Feature matrix.
-        use_gpu: Use ``shap.explainers.GPUTreeExplainer`` when True.
+        use_gpu: Use shap.explainers.GPUTreeExplainer when True.
         max_samples: If set, subsample *X* to at most this many rows for
             the background dataset and explanation (useful for large datasets).
         verbose: Print progress information.
 
     Returns:
-        ``shap.Explanation`` object.
+        shap.Explanation object.
     """
     if max_samples is not None and len(X) > max_samples:
         if verbose:
@@ -328,6 +328,62 @@ def generate_shap_plots(
 # ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
+def run_shap(
+    model_pkl: Path,
+    feature_matrix: Path,
+    sample_name: str,
+    model_name: str,
+    training_set: str,
+    output_dir: Path,
+    verbose: bool = False,
+) -> Path:
+    """
+    Pipeline-friendly SHAP entry point.  Accepts file paths directly
+    rather than discovering them via sample/model configs.
+
+    Writes {prefix}.shap_summary.csv and {prefix}.shap_values.pkl into output_dir.
+    """
+    # Load model
+    with open(model_pkl, 'rb') as f:
+        model = pickle.load(f)
+
+    # Load and preprocess feature matrix (mirrors load_from_workflow)
+    fm = pd.read_csv(feature_matrix, low_memory=False)
+    fm = fm.drop(columns=['ref_match'], errors='ignore')
+    id_cols = [c for c in fm.columns if c.endswith('_INFO_EVENT')]
+    if id_cols:
+        fm = fm.set_index(id_cols)
+
+    from . import _model_configs
+    fillna = _model_configs.model_configs.get(model_name, {}).get(
+        'training_params', {},
+    ).get('fillna', 0)
+    X = pd.get_dummies(fm)
+    if fillna is not None:
+        X = X.fillna(fillna)
+
+    X = align_features(model, X, verbose=verbose)
+
+    if verbose:
+        print(f"Feature matrix shape: {X.shape}")
+
+    shap_values = compute_shap_values(model, X, verbose=verbose)
+
+    prefix = f'{sample_name}.{model_name}.{training_set}'
+    summary = summarise_shap_values(shap_values)
+    summary_csv_path = output_dir / f'{prefix}.shap_summary.csv'
+    summary.to_csv(summary_csv_path, index=False)
+    print(f"Saved SHAP summary (top {len(summary)}): {summary_csv_path}")
+    print(summary.to_string(index=False))
+
+    shap_pkl_path = output_dir / f'{prefix}.shap_values.pkl'
+    with open(shap_pkl_path, 'wb') as f:
+        pickle.dump(shap_values, f)
+    print(f"Saved SHAP values: {shap_pkl_path}")
+
+    return shap_pkl_path
+
+
 def run_shap_assessment(
     sample_name: str,
     model_name: str,
@@ -352,7 +408,7 @@ def run_shap_assessment(
     print(f"{'='*65}")
 
     # --- Load ---
-    model, X, y = load_model_and_data(
+    model, X, _ = load_model_and_data(
         sample_name, model_name, training_set_name,
         ground_truth_name=ground_truth_name, verbose=verbose,
     )
