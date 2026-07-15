@@ -1,4 +1,13 @@
 model_configs = {
+    'consensus_majority': {
+        'name': 'consensus_majority',
+        'training_params': {
+            'function': 'consensus',
+            'custom_cols': [],
+            'model_kwargs': {'min_matches_mode': 'majority'},
+        },
+        'description': 'Consensus classifier for SV call probability estimation using majority voting.'
+    },
     'unbiased': {
         'name': 'unbiased',
         'training_params': {

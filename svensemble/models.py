@@ -11,6 +11,12 @@ import sklearn.model_selection as skm
 from sklearn.ensemble import RandomForestClassifier as RF
 from xgboost import XGBClassifier as XGB
 
+# Imports for custom classifiers
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.utils.validation import validate_data, check_is_fitted
+from sklearn.utils.multiclass import unique_labels
+from sklearn.metrics import euclidean_distances
+
 from . import matched_breakpoints as mbps
 
 
@@ -23,6 +29,87 @@ from . import matched_breakpoints as mbps
 # label_freq) on training sets with very few true positives, where even the
 # e1 estimator can land arbitrarily close to zero.
 _LABEL_FREQ_FLOOR = 1e-3
+_VALID_MIN_MATCHES_MODES = ['majority', 'all']
+
+
+class SVEnsembleConsensusClassifier(ClassifierMixin, BaseEstimator):
+    """
+    Simple consensus classifier mimicking SURVIVOR's functionality but capable of utilizing SVEnsemble2's matching machinery.
+    """
+    def __init__(self, min_matches_mode: int | str = "majority"):
+        self.min_matches_mode = min_matches_mode
+
+    def fit(self, X, y):
+        # Check that X and y have correct shape, set n_features_in_, etc.
+        X, y = validate_data(self, X, y, ensure_all_finite='allow-nan')
+        # Store the classes seen during fit
+        self.classes_ = unique_labels(y)
+
+        if isinstance(self.min_matches_mode, int):
+            self.min_matches_ = self.min_matches_mode
+        elif self.min_matches_mode == 'majority':
+            self.min_matches_ = np.ceil(X.shape[1] * 0.5)
+        elif self.min_matches_mode == 'all':
+            self.min_matches_ = X.shape[1]
+        else:
+            raise ValueError(f"Invalid min_matches mode: {self.min_matches_mode}")
+
+        return self
+
+    def predict_proba(self, X):
+        """
+        SURVIVOR-analog QUAL surrogate for ranking, packed into the sklearn
+        ``(n_samples, 2)`` ``predict_proba`` contract.
+
+        X is expected to be an ``(n_samples, m)`` matrix of per-caller quality
+        scores, with NaN encoding "this caller did not call this row". Each
+        column is min-max normalized across the input X (so, per caller, the
+        highest QUAL seen in X maps to 1 and the lowest to 0), then the
+        per-row score is the NaN-aware max across callers (mimicking
+        SURVIVOR's merged-QUAL behaviour). Rows failing the ``min_matches_``
+        consensus rule are forced to 0 so downstream ROC/PRC sweeps treat
+        them as never called.
+
+        Callers whose QUAL is constant across X (min == max) carry no
+        ranking information and are excluded from the row-wise aggregation
+        by setting their normalized column to NaN. If a row's only voting
+        callers all fall in such degenerate columns, the row's aggregated
+        score falls through to 1.0 (max confidence): the consensus mask
+        already separates it from consensus-failing rows, and 1.0 correctly
+        represents "these callers committed to the call, no QUAL
+        discriminator available".
+
+        Returns
+        -------
+        proba : ndarray of shape (n_samples, 2)
+            ``proba[:, 1]`` is the SURVIVOR QUAL surrogate; ``proba[:, 0]``
+            is ``1 - proba[:, 1]`` to satisfy the sklearn probability
+            contract.
+        """
+        check_is_fitted(self)
+        X = validate_data(self, X, reset=False, ensure_all_finite='allow-nan')
+
+        X_maxs = np.nanmax(X, axis=0)
+        X_mins = np.nanmin(X, axis=0)
+        denom = X_maxs - X_mins
+        degenerate_cols = denom == 0
+        with np.errstate(invalid='ignore', divide='ignore'):
+            X_norm = (X - X_mins) / denom
+        X_norm[:, degenerate_cols] = np.nan
+
+        votes = np.sum(~np.isnan(X), axis=1)
+        p_pos = np.full(X.shape[0], 1.0, dtype=float)
+        row_has_any = np.any(~np.isnan(X_norm), axis=1)
+        p_pos[row_has_any] = np.nanmax(X_norm[row_has_any], axis=1)
+        p_pos = np.where(votes >= self.min_matches_, p_pos, 0.0)
+
+        return np.column_stack([1.0 - p_pos, p_pos])
+
+    def predict(self, X):
+        check_is_fitted(self)
+        X = validate_data(self, X, reset=False, ensure_all_finite='allow-nan')
+        pos = (np.sum(~np.isnan(X), axis=1) >= self.min_matches_).astype(int)
+        return self.classes_[pos]
 
 
 def _estimate_duplessis_weights(
@@ -201,6 +288,45 @@ def train_unbiased_xgb_for_split(
 def _get_fillna(workflow_config: dict) -> int | float | None:
     """Read the fillna strategy from workflow config, defaulting to 0."""
     return workflow_config['model']['training_params'].get('fillna', 0)
+
+
+def train_consensus_classifier(
+    joint_bp_df: pd.DataFrame,
+    workflow_config: dict,
+    ground_truth_config: dict,
+    training_set_name: str,
+    verbose: bool = False,
+) -> tuple[pd.DataFrame, SVEnsembleConsensusClassifier]:
+    """
+    Adapter for consensus classifier so it can be included into the pipeline despite not requiring actual `training`
+    """
+    training_set_df = mbps.preprocess_matchedbps_for_pu(
+        joint_bp_df,
+        workflow_config,
+        ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source'],
+        training_set_name,
+        verbose=verbose,
+    )
+    del joint_bp_df
+
+
+    X, y = mbps.get_X_y_from_training_df(
+        training_set_df, match_col='ref_match', fillna=None,
+    )
+    del training_set_df
+
+    # Retain only the qual metric columns
+    cols_to_retain = []
+    for callset_name in workflow_config['callsets']:
+        qual_metric = workflow_config['callsets'][callset_name]['params']['qual_metric']
+        cols_to_retain.append(f'{callset_name}_{qual_metric}')
+    X = X[cols_to_retain]
+
+    model_kwargs = workflow_config['model']['training_params']['model_kwargs']
+    consensus_classifier = SVEnsembleConsensusClassifier(**model_kwargs)
+    consensus_classifier.fit(X, y)
+
+    return X, consensus_classifier
 
 
 def train_unbiased_rf(
@@ -467,6 +593,7 @@ def train_unbiased_xgb_nosvlen(
 # ---------------------------------------------------------------------------
 
 model_dispatch = {
+    'consensus': train_consensus_classifier,
     'unbiased': train_unbiased_rf,
     'unbiased_concat': train_unbiased_concat_rf,
     'unbiased_nosvlen': train_unbiased_nosvlen,

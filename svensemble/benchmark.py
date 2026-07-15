@@ -134,606 +134,611 @@ xgfs_fancy_new = [
 ]
 xgfs_fancy_new = [tuple(c / 255 for c in rgb) for rgb in xgfs_fancy_new]
 
-_style_mappings = {
-    'gridss': {
-        'line': {
-            'color': xgfs_fancy6[0],
-            'linewidth': 0.7,
-            'dashes': (2, 2),
-            'label': 'GRIDSS',
-        },
-        'text': {
-            'label': 'GR',
-        }
-    },
-    'gridss_H': {
-        'line': {
-            'color': xgfs_fancy6[0],
-            'linewidth': 1,
-            'dashes': (2, 2),
-            'label': 'GRIDSS (High Confidence Calls)',
-        },
-        'text': {
-            'label': 'GR_H',
-        }
-    },
-    'gridss_H_lazy': {
-        'line': {
-            'color': tuple([c * 1.2 for c in xgfs_fancy6[0] if c * 1.2 < 1]),
-            'linewidth': 1,
-            'dashes': (2, 2),
-            'label': 'GRIDSS (High Confidence Calls, Lazy Loading)',
-        },
-        'text': {
-            'label': 'GR_H_lazy',
-        }
-    },
-    'svensemble2_gridss': {
-        'line': {
-            'color': xgfs_fancy6[0],
-            'linewidth': 0.8,
-            'label': 'SVEnsemble2 (GRIDSS)',
-        },
-        'text': {
-            'label': 'GR',
-        }
-    },
-    'manta_diploid': {
-        'line': {
-            'color': xgfs_fancy6[3],
-            'linewidth': 0.7,
-            'dashes': (2, 2),
-            'label': 'Manta',
-        },
-        'text': {
-            'label': 'MA',
-        }
-    },
-    'svensemble2_manta_diploid': {
-        'line': {
-            'color': xgfs_fancy6[3],
-            'linewidth': 0.8,
-            'label': 'SVEnsemble2 (Manta)',
-        },
-        'text': {
-            'label': 'MA',
-        }
-    },
-    'delly': {
-        'line': {
-            'color': xgfs_fancy6[2],
-            'linewidth': 0.7,
-            'dashes': (2, 2),
-            'label': 'Delly',
-        },
-        'text': {
-            'label': 'DE',
-        }
-    },
-    'svensemble2_delly': {
-        'line': {
-            'color': xgfs_fancy6[2],
-            'linewidth': 0.8,
-            'label': 'SVEnsemble2 (Delly)',
-        },
-        'text': {
-            'label': 'DE',
-        }
-    },
-    'survivor_short': {
-        'line': {
-            'color': (0.55, 0.45, 0.95),
-            'linewidth': 1,
-            'dashes': (6, 2.5),
-            'label': 'SURVIVOR Short-Read Consensus',
-        },
-        'text': {
-            'label': 'SU-S',
-        }
-    },
-    'survivor_long': {
-        'line': {
-            'color': (0.88, 0.45, 0.72),
-            'linewidth': 1,
-            'dashes': (6, 2.5),
-            'label': 'SURVIVOR Long-Read Consensus',
-        },
-        'text': {
-            'label': 'SU-L',
-        }
-    },
-    'survivor_all': {
-        'line': {
-            'color': (0.45, 0.35, 0.65),
-            'linewidth': 1,
-            'dashes': (6, 2.5),
-            'label': 'SURVIVOR All-Caller Consensus',
-        },
-        'text': {
-            'label': 'SU-A',
-        }
-    },
-    'svensemble2_delly+manta_diploid': {
-        'line': {
-            'color': xgfs_fancy6[4],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Delly + Manta)',
-        },
-        'text': {
-            'label': 'DE+MA',
-        }
-    },
-    'svensemble2_delly+manta_candidate': {
-        'line': {
-            'color': (0.71, 0.37, 0.49),
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Delly + Manta Candidate)',
-        },
-        'text': {
-            'label': 'DE+MC',
-        }
-    },
-    'svensemble2_gridss+manta_diploid': {
-        'line': {
-            'color': xgfs_fancy6[5],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (GRIDSS + Manta)',
-        },
-        'text': {
-            'label': 'GR+MA',
-        }
-    },
-    'svensemble2_gridss+manta_candidate': {
-        'line': {
-            'color': (0.25, 0.69, 0.57),
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (GRIDSS + Manta Candidate)',
-        },
-        'text': {
-            'label': 'GR+MC',
-        }
-    },
-    'svensemble2_gridss+delly': {
-        'line': {
-            'color': (0.40, 0.60, 0.30),
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (GRIDSS + Delly)',
-        },
-        'text': {
-            'label': 'GR+DE',
-        }
-    },
-    'svensemble2_gridss+manta_diploid+delly': {
-        'line': {
-            'color': xgfs_fancy6[6],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (GRIDSS + Manta + Delly)',
-        },
-        'text': {
-            'label': 'GR+MA+DE',
-        }
-    },
-    'svensemble2_gridss+manta_candidate+delly': {
-        'line': {
-            'color': (0.67, 0.67, 0.76),
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (GRIDSS + Manta Candidate + Delly)',
-        },
-        'text': {
-            'label': 'GR+MC+DE',
-        }
-    },
-    'manta_candidate': {
-        'line': {
-            'color': xgfs_fancy6[3],
-            'linewidth': 0.7,
-            'dashes': (4, 2),
-            'label': 'Manta (Candidate)',
-        },
-        'text': {
-            'label': 'MC',
-        }
-    },
-    'svensemble2_manta_candidate': {
-        'line': {
-            'color': (0.16, 0.51, 0.65),
-            'linewidth': 0.8,
-            'label': 'SVEnsemble2 (Manta Candidate)',
-        },
-        'text': {
-            'label': 'MC',
-        }
-    },
-    'sniffles': {
-        'line': {
-            'color': xgfs_fancy_ext[0],
-            'linewidth': 0.7,
-            'dashes': (2, 2),
-            'label': 'Sniffles',
-        },
-        'text': {
-            'label': 'SN',
-        }
-    },
-    'sniffles_H': {
-        'line': {
-            'color': xgfs_fancy_ext[0],
-            'linewidth': 1,
-            'dashes': (2, 2),
-            'label': 'Sniffles (High Confidence Calls)',
-        },
-        'text': {
-            'label': 'SN_H',
-        }
-    },
-    'severus': {
-        'line': {
-            'color': xgfs_fancy_ext[3],
-            'linewidth': 0.7,
-            'dashes': (2, 2),
-            'label': 'Severus',
-        },
-        'text': {
-            'label': 'SV',
-        }
-    },
-    'severus_H': {
-        'line': {
-            'color': xgfs_fancy_ext[3],
-            'linewidth': 1,
-            'dashes': (2, 2),
-            'label': 'Severus (High Confidence Calls)',
-        },
-        'text': {
-            'label': 'SV_H',
-        }
-    },
-    'cutesv': {
-        'line': {
-            'color': xgfs_fancy_ext[4],
-            'linewidth': 0.7,
-            'dashes': (2, 2),
-            'label': 'CuteSV',
-        },
-        'text': {
-            'label': 'CS',
-        }
-    },
-    'cutesv_H': {
-        'line': {
-            'color': xgfs_fancy_ext[4],
-            'linewidth': 1,
-            'dashes': (2, 2),
-            'label': 'CuteSV (High Confidence Calls)',
-        },
-        'text': {
-            'label': 'CS_H',
-        }
-    },
-    'svensemble2_cutesv': {
-        'line': {
-            'color': xgfs_fancy_ext[4],
-            'linewidth': 0.8,
-            'label': 'SVEnsemble2 (CuteSV)',
-        },
-        'text': {
-            'label': 'CS',
-        }
-    },
-    'svensemble2_sniffles': {
-        'line': {
-            'color': xgfs_fancy_ext[0],
-            'linewidth': 0.8,
-            'label': 'SVEnsemble2 (Sniffles)',
-        },
-        'text': {
-            'label': 'SN',
-        }
-    },
-    'svensemble2_sniffles+gridss': {
-        'line': {
-            'color': xgfs_fancy_ext[1],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + GRIDSS)',
-        },
-        'text': {
-            'label': 'SN+GR',
-        }
-    },
-    'svensemble2_sniffles+manta_candidate': {
-        'line': {
-            'color': xgfs_fancy_ext[2],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + Manta Candidate)',
-        },
-        'text': {
-            'label': 'SN+MC',
-        }
-    },
-    'svensemble2_sniffles+manta_diploid': {
-        'line': {
-            'color': xgfs_fancy_ext[3],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + Manta)',
-        },
-        'text': {
-            'label': 'SN+MA',
-        }
-    },
-    'svensemble2_sniffles+delly': {
-        'line': {
-            'color': (0.58, 0.25, 0.58),
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + Delly)',
-        },
-        'text': {
-            'label': 'SN+DE',
-        }
-    },
-    'svensemble2_sniffles+manta_candidate+delly': {
-        'line': {
-            'color': xgfs_fancy_ext[5],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + Manta Candidate + Delly)',
-        },
-        'text': {
-            'label': 'SN+MC+DE',
-        }
-    },
-    'svensemble2_sniffles+manta_diploid+delly': {
-        'line': {
-            'color': xgfs_fancy_ext[6],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + Manta + Delly)',
-        },
-        'text': {
-            'label': 'SN+MA+DE',
-        }
-    },
-    'svensemble2_sniffles+gridss+manta_diploid': {
-        'line': {
-            'color': (0.65, 0.59, 0.16),
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + GRIDSS + Manta)',
-        },
-        'text': {
-            'label': 'SN+GR+MA',
-        }
-    },
-    'svensemble2_sniffles+gridss+manta_candidate': {
-        'line': {
-            'color': (0.55, 0.67, 0.24),
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + GRIDSS + Manta Candidate)',
-        },
-        'text': {
-            'label': 'SN+GR+MC',
-        }
-    },
-    'svensemble2_sniffles+gridss+manta_diploid+delly': {
-        'line': {
-            'color': xgfs_fancy_ext[7],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + GRIDSS + Manta + Delly)',
-        },
-        'text': {
-            'label': 'SN+GR+MA+DE',
-        }
-    },
-    'svensemble2_sniffles+gridss+manta_candidate+delly': {
-        'line': {
-            'color': (0.71, 0.61, 0.31),
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + GRIDSS + Manta Candidate + Delly)',
-        },
-        'text': {
-            'label': 'SN+GR+MC+DE',
-        }
-    },
-    'svaba': {
-        'line': {
-            'color': xgfs_fancy6[1],
-            'linewidth': 0.7,
-            'dashes': (2, 2),
-            'label': 'SvABA',
-        },
-        'text': {
-            'label': 'SB',
-        }
-    },
-    'svaba_H': {
-        'line': {
-            'color': xgfs_fancy6[1],
-            'linewidth': 1,
-            'dashes': (2, 2),
-            'label': 'SvABA (High Confidence Calls)',
-        },
-        'text': {
-            'label': 'SB_H',
-        }
-    },
-    'svensemble2_severus': {
-        'line': {
-            'color': (0.10, 0.55, 0.45),
-            'linewidth': 0.8,
-            'label': 'SVEnsemble2 (Severus)',
-        },
-        'text': {
-            'label': 'SV',
-        }
-    },
-    'svensemble2_svaba': {
-        'line': {
-            'color': xgfs_fancy6[1],
-            'linewidth': 0.8,
-            'label': 'SVEnsemble2 (SvABA)',
-        },
-        'text': {
-            'label': 'SB',
-        }
-    },
-    'svensemble2_sniffles+severus': {
-        'line': {
-            'color': xgfs_fancy_new[0],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + Severus)',
-        },
-        'text': {
-            'label': 'SN+SV',
-        }
-    },
-    'svensemble2_cutesv+sniffles': {
-        'line': {
-            'color': xgfs_fancy_new[1],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (CuteSV + Sniffles)',
-        },
-        'text': {
-            'label': 'CS+SN',
-        }
-    },
-    'svensemble2_cutesv+severus': {
-        'line': {
-            'color': xgfs_fancy_new[2],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (CuteSV + Severus)',
-        },
-        'text': {
-            'label': 'CS+SV',
-        }
-    },
-    'svensemble2_cutesv+sniffles+severus': {
-        'line': {
-            'color': xgfs_fancy_new[3],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (CuteSV + Sniffles + Severus)',
-        },
-        'text': {
-            'label': 'CS+SN+SV',
-        }
-    },
-    'svensemble2_sniffles+severus+cutesv': {
-        'line': {
-            'color': xgfs_fancy_new[3],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + Severus + CuteSV)',
-        },
-        'text': {
-            'label': 'SN+SV+CS',
-        }
-    },
-    'svensemble2_svaba+gridss': {
-        'line': {
-            'color': xgfs_fancy_new[4],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (SvABA + GRIDSS)',
-        },
-        'text': {
-            'label': 'SB+GR',
-        }
-    },
-    'svensemble2_svaba+manta_diploid': {
-        'line': {
-            'color': xgfs_fancy_new[5],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (SvABA + Manta)',
-        },
-        'text': {
-            'label': 'SB+MA',
-        }
-    },
-    'svensemble2_svaba+delly': {
-        'line': {
-            'color': xgfs_fancy_new[6],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (SvABA + Delly)',
-        },
-        'text': {
-            'label': 'SB+DE',
-        }
-    },
-    'svensemble2_svaba+manta_diploid+delly': {
-        'line': {
-            'color': xgfs_fancy_new[7],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (SvABA + Manta + Delly)',
-        },
-        'text': {
-            'label': 'SB+MA+DE',
-        }
-    },
-    'svensemble2_gridss+manta_diploid+delly+svaba': {
-        'line': {
-            'color': xgfs_fancy_new[8],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (GRIDSS + Manta + Delly + SvABA)',
-        },
-        'text': {
-            'label': 'GR+MA+DE+SB',
-        }
-    },
-    'svensemble2_gridss+manta_diploid+delly+sniffles+severus': {
-        'line': {
-            'color': xgfs_fancy_new[9],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (GRIDSS + Manta + Delly + Sniffles + Severus)',
-        },
-        'text': {
-            'label': 'GR+MA+DE+SN+SV',
-        }
-    },
-    'svensemble2_sniffles+gridss+manta_diploid+delly+svaba': {
-        'line': {
-            'color': xgfs_fancy_new[10],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (Sniffles + GRIDSS + Manta + Delly + SvABA)',
-        },
-        'text': {
-            'label': 'SN+GR+MA+DE+SB',
-        }
-    },
-    'svensemble2_sniffles+severus+cutesv+gridss+manta_diploid+delly': {
-        'line': {
-            'color': xgfs_fancy_new[11],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (6-Caller Ensemble)',
-        },
-        'text': {
-            'label': '6c',
-        }
-    },
-    'svensemble2_sniffles+severus+cutesv+gridss+manta_diploid+delly+svaba': {
-        'line': {
-            'color': xgfs_fancy_new[12],
-            'linewidth': 1,
-            'label': 'SVEnsemble2 (7-Caller Ensemble)',
-        },
-        'text': {
-            'label': '7c',
-        }
-    },
-}
+_style_mappings = {}
+# _style_mappings = {
+#     'gridss': {
+#         'line': {
+#             'color': xgfs_fancy6[0],
+#             'linewidth': 0.7,
+#             'dashes': (2, 2),
+#             'label': 'GRIDSS',
+#         },
+#         'text': {
+#             'label': 'GR',
+#         }
+#     },
+#     'gridss_H': {
+#         'line': {
+#             'color': xgfs_fancy6[0],
+#             'linewidth': 1,
+#             'dashes': (2, 2),
+#             'label': 'GRIDSS (High Confidence Calls)',
+#         },
+#         'text': {
+#             'label': 'GR_H',
+#         }
+#     },
+#     'gridss_H_lazy': {
+#         'line': {
+#             'color': tuple([c * 1.2 for c in xgfs_fancy6[0] if c * 1.2 < 1]),
+#             'linewidth': 1,
+#             'dashes': (2, 2),
+#             'label': 'GRIDSS (High Confidence Calls, Lazy Loading)',
+#         },
+#         'text': {
+#             'label': 'GR_H_lazy',
+#         }
+#     },
+#     'svensemble2_gridss': {
+#         'line': {
+#             'color': xgfs_fancy6[0],
+#             'linewidth': 0.8,
+#             'label': 'SVEnsemble2 (GRIDSS)',
+#         },
+#         'text': {
+#             'label': 'GR',
+#         }
+#     },
+#     'manta_diploid': {
+#         'line': {
+#             'color': xgfs_fancy6[3],
+#             'linewidth': 0.7,
+#             'dashes': (2, 2),
+#             'label': 'Manta',
+#         },
+#         'text': {
+#             'label': 'MA',
+#         }
+#     },
+#     'svensemble2_manta_diploid': {
+#         'line': {
+#             'color': xgfs_fancy6[3],
+#             'linewidth': 0.8,
+#             'label': 'SVEnsemble2 (Manta)',
+#         },
+#         'text': {
+#             'label': 'MA',
+#         }
+#     },
+#     'delly': {
+#         'line': {
+#             'color': xgfs_fancy6[2],
+#             'linewidth': 0.7,
+#             'dashes': (2, 2),
+#             'label': 'Delly',
+#         },
+#         'text': {
+#             'label': 'DE',
+#         }
+#     },
+#     'svensemble2_delly': {
+#         'line': {
+#             'color': xgfs_fancy6[2],
+#             'linewidth': 0.8,
+#             'label': 'SVEnsemble2 (Delly)',
+#         },
+#         'text': {
+#             'label': 'DE',
+#         }
+#     },
+#     'survivor_short': {
+#         'line': {
+#             'color': (0.55, 0.45, 0.95),
+#             'linewidth': 1,
+#             'dashes': (6, 2.5),
+#             'label': 'SURVIVOR Short-Read Consensus',
+#         },
+#         'text': {
+#             'label': 'SU-S',
+#         }
+#     },
+#     'survivor_long': {
+#         'line': {
+#             'color': (0.88, 0.45, 0.72),
+#             'linewidth': 1,
+#             'dashes': (6, 2.5),
+#             'label': 'SURVIVOR Long-Read Consensus',
+#         },
+#         'text': {
+#             'label': 'SU-L',
+#         }
+#     },
+#     'survivor_all': {
+#         'line': {
+#             'color': (0.45, 0.35, 0.65),
+#             'linewidth': 1,
+#             'dashes': (6, 2.5),
+#             'label': 'SURVIVOR All-Caller Consensus',
+#         },
+#         'text': {
+#             'label': 'SU-A',
+#         }
+#     },
+#     'svensemble2_delly+manta_diploid': {
+#         'line': {
+#             'color': xgfs_fancy6[4],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Delly + Manta)',
+#         },
+#         'text': {
+#             'label': 'DE+MA',
+#         }
+#     },
+#     'svensemble2_delly+manta_candidate': {
+#         'line': {
+#             'color': (0.71, 0.37, 0.49),
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Delly + Manta Candidate)',
+#         },
+#         'text': {
+#             'label': 'DE+MC',
+#         }
+#     },
+#     'svensemble2_gridss+manta_diploid': {
+#         'line': {
+#             'color': xgfs_fancy6[5],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (GRIDSS + Manta)',
+#         },
+#         'text': {
+#             'label': 'GR+MA',
+#         }
+#     },
+#     'svensemble2_gridss+manta_candidate': {
+#         'line': {
+#             'color': (0.25, 0.69, 0.57),
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (GRIDSS + Manta Candidate)',
+#         },
+#         'text': {
+#             'label': 'GR+MC',
+#         }
+#     },
+#     'svensemble2_gridss+delly': {
+#         'line': {
+#             'color': (0.40, 0.60, 0.30),
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (GRIDSS + Delly)',
+#         },
+#         'text': {
+#             'label': 'GR+DE',
+#         }
+#     },
+#     'svensemble2_gridss+manta_diploid+delly': {
+#         'line': {
+#             'color': xgfs_fancy6[6],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (GRIDSS + Manta + Delly)',
+#         },
+#         'text': {
+#             'label': 'GR+MA+DE',
+#         }
+#     },
+#     'svensemble2_gridss+manta_candidate+delly': {
+#         'line': {
+#             'color': (0.67, 0.67, 0.76),
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (GRIDSS + Manta Candidate + Delly)',
+#         },
+#         'text': {
+#             'label': 'GR+MC+DE',
+#         }
+#     },
+#     'manta_candidate': {
+#         'line': {
+#             'color': xgfs_fancy6[3],
+#             'linewidth': 0.7,
+#             'dashes': (4, 2),
+#             'label': 'Manta (Candidate)',
+#         },
+#         'text': {
+#             'label': 'MC',
+#         }
+#     },
+#     'svensemble2_manta_candidate': {
+#         'line': {
+#             'color': (0.16, 0.51, 0.65),
+#             'linewidth': 0.8,
+#             'label': 'SVEnsemble2 (Manta Candidate)',
+#         },
+#         'text': {
+#             'label': 'MC',
+#         }
+#     },
+#     'sniffles': {
+#         'line': {
+#             'color': xgfs_fancy_ext[0],
+#             'linewidth': 0.7,
+#             'dashes': (2, 2),
+#             'label': 'Sniffles',
+#         },
+#         'text': {
+#             'label': 'SN',
+#         }
+#     },
+#     'sniffles_H': {
+#         'line': {
+#             'color': xgfs_fancy_ext[0],
+#             'linewidth': 1,
+#             'dashes': (2, 2),
+#             'label': 'Sniffles (High Confidence Calls)',
+#         },
+#         'text': {
+#             'label': 'SN_H',
+#         }
+#     },
+#     'severus': {
+#         'line': {
+#             'color': xgfs_fancy_ext[3],
+#             'linewidth': 0.7,
+#             'dashes': (2, 2),
+#             'label': 'Severus',
+#         },
+#         'text': {
+#             'label': 'SV',
+#         }
+#     },
+#     'severus_H': {
+#         'line': {
+#             'color': xgfs_fancy_ext[3],
+#             'linewidth': 1,
+#             'dashes': (2, 2),
+#             'label': 'Severus (High Confidence Calls)',
+#         },
+#         'text': {
+#             'label': 'SV_H',
+#         }
+#     },
+#     'cutesv': {
+#         'line': {
+#             'color': xgfs_fancy_ext[4],
+#             'linewidth': 0.7,
+#             'dashes': (2, 2),
+#             'label': 'CuteSV',
+#         },
+#         'text': {
+#             'label': 'CS',
+#         }
+#     },
+#     'cutesv_H': {
+#         'line': {
+#             'color': xgfs_fancy_ext[4],
+#             'linewidth': 1,
+#             'dashes': (2, 2),
+#             'label': 'CuteSV (High Confidence Calls)',
+#         },
+#         'text': {
+#             'label': 'CS_H',
+#         }
+#     },
+#     'svensemble2_cutesv': {
+#         'line': {
+#             'color': xgfs_fancy_ext[4],
+#             'linewidth': 0.8,
+#             'label': 'SVEnsemble2 (CuteSV)',
+#         },
+#         'text': {
+#             'label': 'CS',
+#         }
+#     },
+#     'svensemble2_sniffles': {
+#         'line': {
+#             'color': xgfs_fancy_ext[0],
+#             'linewidth': 0.8,
+#             'label': 'SVEnsemble2 (Sniffles)',
+#         },
+#         'text': {
+#             'label': 'SN',
+#         }
+#     },
+#     'svensemble2_sniffles+gridss': {
+#         'line': {
+#             'color': xgfs_fancy_ext[1],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + GRIDSS)',
+#         },
+#         'text': {
+#             'label': 'SN+GR',
+#         }
+#     },
+#     'svensemble2_sniffles+manta_candidate': {
+#         'line': {
+#             'color': xgfs_fancy_ext[2],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + Manta Candidate)',
+#         },
+#         'text': {
+#             'label': 'SN+MC',
+#         }
+#     },
+#     'svensemble2_sniffles+manta_diploid': {
+#         'line': {
+#             'color': xgfs_fancy_ext[3],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + Manta)',
+#         },
+#         'text': {
+#             'label': 'SN+MA',
+#         }
+#     },
+#     'svensemble2_sniffles+delly': {
+#         'line': {
+#             'color': (0.58, 0.25, 0.58),
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + Delly)',
+#         },
+#         'text': {
+#             'label': 'SN+DE',
+#         }
+#     },
+#     'svensemble2_sniffles+manta_candidate+delly': {
+#         'line': {
+#             'color': xgfs_fancy_ext[5],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + Manta Candidate + Delly)',
+#         },
+#         'text': {
+#             'label': 'SN+MC+DE',
+#         }
+#     },
+#     'svensemble2_sniffles+manta_diploid+delly': {
+#         'line': {
+#             'color': xgfs_fancy_ext[6],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + Manta + Delly)',
+#         },
+#         'text': {
+#             'label': 'SN+MA+DE',
+#         }
+#     },
+#     'svensemble2_sniffles+gridss+manta_diploid': {
+#         'line': {
+#             'color': (0.65, 0.59, 0.16),
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + GRIDSS + Manta)',
+#         },
+#         'text': {
+#             'label': 'SN+GR+MA',
+#         }
+#     },
+#     'svensemble2_sniffles+gridss+manta_candidate': {
+#         'line': {
+#             'color': (0.55, 0.67, 0.24),
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + GRIDSS + Manta Candidate)',
+#         },
+#         'text': {
+#             'label': 'SN+GR+MC',
+#         }
+#     },
+#     'svensemble2_sniffles+gridss+manta_diploid+delly': {
+#         'line': {
+#             'color': xgfs_fancy_ext[7],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + GRIDSS + Manta + Delly)',
+#         },
+#         'text': {
+#             'label': 'SN+GR+MA+DE',
+#         }
+#     },
+#     'svensemble2_sniffles+gridss+manta_candidate+delly': {
+#         'line': {
+#             'color': (0.71, 0.61, 0.31),
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + GRIDSS + Manta Candidate + Delly)',
+#         },
+#         'text': {
+#             'label': 'SN+GR+MC+DE',
+#         }
+#     },
+#     'svaba': {
+#         'line': {
+#             'color': xgfs_fancy6[1],
+#             'linewidth': 0.7,
+#             'dashes': (2, 2),
+#             'label': 'SvABA',
+#         },
+#         'text': {
+#             'label': 'SB',
+#         }
+#     },
+#     'svaba_H': {
+#         'line': {
+#             'color': xgfs_fancy6[1],
+#             'linewidth': 1,
+#             'dashes': (2, 2),
+#             'label': 'SvABA (High Confidence Calls)',
+#         },
+#         'text': {
+#             'label': 'SB_H',
+#         }
+#     },
+#     'svensemble2_severus': {
+#         'line': {
+#             'color': (0.10, 0.55, 0.45),
+#             'linewidth': 0.8,
+#             'label': 'SVEnsemble2 (Severus)',
+#         },
+#         'text': {
+#             'label': 'SV',
+#         }
+#     },
+#     'svensemble2_svaba': {
+#         'line': {
+#             'color': xgfs_fancy6[1],
+#             'linewidth': 0.8,
+#             'label': 'SVEnsemble2 (SvABA)',
+#         },
+#         'text': {
+#             'label': 'SB',
+#         }
+#     },
+#     'svensemble2_sniffles+severus': {
+#         'line': {
+#             'color': xgfs_fancy_new[0],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + Severus)',
+#         },
+#         'text': {
+#             'label': 'SN+SV',
+#         }
+#     },
+#     'svensemble2_cutesv+sniffles': {
+#         'line': {
+#             'color': xgfs_fancy_new[1],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (CuteSV + Sniffles)',
+#         },
+#         'text': {
+#             'label': 'CS+SN',
+#         }
+#     },
+#     'svensemble2_cutesv+severus': {
+#         'line': {
+#             'color': xgfs_fancy_new[2],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (CuteSV + Severus)',
+#         },
+#         'text': {
+#             'label': 'CS+SV',
+#         }
+#     },
+#     'svensemble2_cutesv+sniffles+severus': {
+#         'line': {
+#             'color': xgfs_fancy_new[3],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (CuteSV + Sniffles + Severus)',
+#         },
+#         'text': {
+#             'label': 'CS+SN+SV',
+#         }
+#     },
+#     'svensemble2_sniffles+severus+cutesv': {
+#         'line': {
+#             'color': xgfs_fancy_new[3],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + Severus + CuteSV)',
+#         },
+#         'text': {
+#             'label': 'SN+SV+CS',
+#         }
+#     },
+#     'svensemble2_svaba+gridss': {
+#         'line': {
+#             'color': xgfs_fancy_new[4],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (SvABA + GRIDSS)',
+#         },
+#         'text': {
+#             'label': 'SB+GR',
+#         }
+#     },
+#     'svensemble2_svaba+manta_diploid': {
+#         'line': {
+#             'color': xgfs_fancy_new[5],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (SvABA + Manta)',
+#         },
+#         'text': {
+#             'label': 'SB+MA',
+#         }
+#     },
+#     'svensemble2_svaba+delly': {
+#         'line': {
+#             'color': xgfs_fancy_new[6],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (SvABA + Delly)',
+#         },
+#         'text': {
+#             'label': 'SB+DE',
+#         }
+#     },
+#     'svensemble2_svaba+manta_diploid+delly': {
+#         'line': {
+#             'color': xgfs_fancy_new[7],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (SvABA + Manta + Delly)',
+#         },
+#         'text': {
+#             'label': 'SB+MA+DE',
+#         }
+#     },
+#     'svensemble2_gridss+manta_diploid+delly+svaba': {
+#         'line': {
+#             'color': xgfs_fancy_new[8],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (GRIDSS + Manta + Delly + SvABA)',
+#         },
+#         'text': {
+#             'label': 'GR+MA+DE+SB',
+#         }
+#     },
+#     'svensemble2_gridss+manta_diploid+delly+sniffles+severus': {
+#         'line': {
+#             'color': xgfs_fancy_new[9],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (GRIDSS + Manta + Delly + Sniffles + Severus)',
+#         },
+#         'text': {
+#             'label': 'GR+MA+DE+SN+SV',
+#         }
+#     },
+#     'svensemble2_sniffles+gridss+manta_diploid+delly+svaba': {
+#         'line': {
+#             'color': xgfs_fancy_new[10],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (Sniffles + GRIDSS + Manta + Delly + SvABA)',
+#         },
+#         'text': {
+#             'label': 'SN+GR+MA+DE+SB',
+#         }
+#     },
+#     'svensemble2_sniffles+severus+cutesv+gridss+manta_diploid+delly': {
+#         'line': {
+#             'color': xgfs_fancy_new[11],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (6-Caller Ensemble)',
+#         },
+#         'text': {
+#             'label': '6c',
+#         }
+#     },
+#     'svensemble2_sniffles+severus+cutesv+gridss+manta_diploid+delly+svaba': {
+#         'line': {
+#             'color': xgfs_fancy_new[12],
+#             'linewidth': 1,
+#             'label': 'SVEnsemble2 (7-Caller Ensemble)',
+#         },
+#         'text': {
+#             'label': '7c',
+#         }
+#     },
+# }
 
 _model_style_mappings = {
     'unbiased_xgb': {
         'line': {
+            'color': (192 / 255, 57 / 255, 43 / 255),
             'linewidth': 1,
         }
     },
     'unbiased_d31': {
         'line': {
+            'color': (39 / 255, 174 / 255, 96 / 255),
             'linewidth': 2,
             'linestyle': '-.',
         }
     },
     'unbiased_xgb_nosvlen': {
         'line': {
+            'color': (231 / 255, 138 / 255, 128 / 255),
             'linewidth': 1,
             'linestyle': '--',
         }
     },
     'unbiased_d31_nosvlen': {
         'line': {
+            'color': (125 / 255, 206 / 255, 160 / 255),
             'linewidth': 2,
             'linestyle': '--',
         }
