@@ -466,17 +466,6 @@ class TestModelConfigs:
     @pytest.mark.parametrize("config_name", [
         k for k in _model_configs.model_configs if "xgb" in k
     ])
-    def test_xgb_config_shares_bps_suffix(self, config_name):
-        """XGBoost configs should share preprocessed data with an RF counterpart."""
-        cfg = _model_configs.model_configs[config_name]
-        assert cfg.get("bps_suffix") is not None
-        assert "xgb" not in cfg["bps_suffix"], (
-            "bps_suffix should point to RF's preprocessed data"
-        )
-
-    @pytest.mark.parametrize("config_name", [
-        k for k in _model_configs.model_configs if "xgb" in k
-    ])
     def test_xgb_config_has_xgb_function(self, config_name):
         cfg = _model_configs.model_configs[config_name]
         func_name = cfg["training_params"]["function"]
@@ -485,17 +474,24 @@ class TestModelConfigs:
     @pytest.mark.parametrize("config_name", [
         k for k in _model_configs.model_configs if "xgb" not in k
     ])
-    def test_rf_config_fillna_defaults_to_zero(self, config_name):
+    def test_rf_config_fillna_defaults_to_zero_or_none(self, config_name):
         cfg = _model_configs.model_configs[config_name]
         fillna = cfg["training_params"].get("fillna", 0)
-        assert fillna == 0
+        # RF variants either fill NaN with 0 or (nosvlen variants) leave NaN.
+        assert fillna == 0 or fillna is None
 
-    def test_all_configs_have_defaults_applied(self):
+    def test_all_configs_have_base_applied(self):
         for name, cfg in _model_configs.model_configs.items():
-            assert "bps_suffix" in cfg, f"{name} missing bps_suffix"
-            assert "matched_bps_suffix" in cfg, f"{name} missing matched_bps_suffix"
-            assert "model_pkl_suffix" in cfg, f"{name} missing model_pkl_suffix"
-            assert "feature_matrix_suffix" in cfg, f"{name} missing feature_matrix_suffix"
+            assert "base" in cfg, f"{name} missing base"
+            assert cfg["base"] in _model_configs.BASE_MODELS, (
+                f"{name} base {cfg['base']!r} is not a canonical base preset"
+            )
+
+    def test_no_legacy_suffix_keys_remain(self):
+        for name, cfg in _model_configs.model_configs.items():
+            for suffix_key in ("bps_suffix", "matched_bps_suffix",
+                               "model_pkl_suffix", "feature_matrix_suffix"):
+                assert suffix_key not in cfg, f"{name} still has {suffix_key}"
 
     def test_all_configs_have_concat_flag(self):
         for name, cfg in _model_configs.model_configs.items():

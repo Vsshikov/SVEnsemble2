@@ -3,13 +3,16 @@ Utility functions for SVEnsemble
 """
 import os
 import copy
+import hashlib
+import json
 import pandas as pd
 from pathlib import Path
 from collections import abc
 import itertools
 from ._caller_params import callset_param_dict, callset_path_configs, training_set_presets, default_reference_set, default_training_set
 from ._sample_params import sample_val_sets, sample_val_set_template, default_model_name
-from ._model_configs import model_configs
+from ._model_configs import model_configs, BASE_MODELS
+from . import config_io
 from typing import Dict, Any
 
 def get_base_dir() -> Path:
@@ -29,6 +32,170 @@ def update(d, u):
         else:
             d[k] = v
     return d
+
+
+# ---------------------------------------------------------------------------
+# Model config resolution + reconstructible identity (model_id)
+#
+# _model_configs.py holds pure preset data; the two-branch resolver, the hasher
+# and model_id live here (they need the deep-merge `update` and config_io
+# canonicalisation, and _model_configs must never import from utils).
+# ---------------------------------------------------------------------------
+
+_MODEL_ID_HASH_VERSION = "v1"
+
+
+def resolve_model_config(name: str | None = None, config: dict | None = None) -> dict:
+    """Resolve a full model config (two-branch).
+
+    Branch 1 -- ``resolve_model_config(name="unbiased_xgb")``: return the named
+    preset from ``model_configs`` (enriched, deep-copied).
+
+    Branch 2 -- ``resolve_model_config(config={"base": "unbiased_xgb", ...})``:
+    take the ``base`` preset and deep-merge the remaining keys of ``config``
+    (``training_params`` overrides, plus optional ``name``/``description``
+    labels) on top of it. ``base`` is preserved from the override.
+
+    The resolved config's ``training_params`` fully determine the reconstructible
+    ``model_id`` (see :func:`model_id`); ``name``/``description``/``base`` are
+    human labels and do not affect identity.
+    """
+    if config is not None:
+        base = config.get("base")
+        if not base:
+            raise ValueError("Model config override must specify a 'base' preset.")
+        if base not in model_configs:
+            raise ValueError(
+                f"Unknown base preset '{base}'. Known presets: {sorted(model_configs)}"
+            )
+        resolved = copy.deepcopy(model_configs[base])
+        overrides = {k: v for k, v in config.items() if k != "base"}
+        resolved = update(resolved, copy.deepcopy(overrides))
+        resolved["base"] = base
+        resolved.setdefault("name", base)
+        return _validate_model_config(resolved)
+    if name is not None:
+        if name not in model_configs:
+            raise ValueError(
+                f"Unknown model preset '{name}'. Known presets: {sorted(model_configs)}"
+            )
+        return _validate_model_config(copy.deepcopy(model_configs[name]))
+    raise ValueError("resolve_model_config requires either name= or config=.")
+
+
+def _validate_model_config(resolved: dict) -> dict:
+    """Sanity-check a resolved model config; return it unchanged on success."""
+    fn = resolved.get("training_params", {}).get("function")
+    # Deferred import: models imports from this package, so import lazily to
+    # avoid an import cycle at module load time.
+    from .models import model_dispatch
+    if fn not in model_dispatch:
+        raise ValueError(
+            f"Model config 'function' {fn!r} is not a known training function "
+            f"(model_dispatch keys: {sorted(model_dispatch)})."
+        )
+    return resolved
+
+
+def model_config_hash(resolved_cfg: dict, length: int = 8) -> str:
+    """Reconstructible content hash of a resolved model config.
+
+    Hashes ONLY the behavioural ``training_params``; human labels
+    (name/description/base) and derived keys (model_id, *_path) are ignored, so
+    the digest is stable and pollution-free even when passed a full
+    workflow_config['model'] sub-dict. Canonicalised for cross-process stability.
+    """
+    payload = resolved_cfg.get("training_params", {})
+    canonical = json.dumps(
+        config_io._sanitize_for_json(payload), sort_keys=True, separators=(",", ":")
+    )
+    digest = hashlib.blake2b(
+        f"{_MODEL_ID_HASH_VERSION}:{canonical}".encode(), digest_size=16
+    ).hexdigest()
+    return digest[:length]
+
+
+def model_id(resolved_cfg: dict) -> str:
+    """Reconstructible model identity: ``{base}-{hash8}``."""
+    return f"{resolved_cfg['base']}-{model_config_hash(resolved_cfg)}"
+
+
+def list_preset_ids() -> dict:
+    """Map every preset name -> its model_id. Display convenience for humans."""
+    return {name: model_id(resolve_model_config(name=name)) for name in model_configs}
+
+
+def model_results_dir(
+    base_dir,
+    sample_name: str,
+    model,
+    training_set,
+    ground_truth_name: str | None = None,
+) -> Path:
+    """Reconstruct a model's results directory from its config (fetch-by-config).
+
+    ``model`` may be a preset name (str), a freeform override dict (with
+    ``base``), or an already-resolved config. Mirrors the data-tree layout built
+    by :func:`create_config_dict`, so a config + sample + training_set is enough
+    to locate results in a Jupyter session without knowing the hash up front.
+    """
+    base_dir = Path(base_dir)
+    if isinstance(model, str):
+        resolved = resolve_model_config(name=model)
+    elif isinstance(model, dict) and 'base' in model and 'training_params' in model:
+        resolved = model
+    else:
+        resolved = resolve_model_config(config=model)
+    mid = model_id(resolved)
+
+    if isinstance(training_set, (list, tuple)):
+        ts_name = '+'.join(training_set)
+    elif training_set in training_set_presets:
+        ts_name = training_set
+    elif training_set in (None, 'default'):
+        ts_name = default_training_set
+    else:
+        ts_name = training_set
+
+    gt_suffix = ''
+    if ground_truth_name and ground_truth_name != default_reference_set:
+        gt_suffix = f'.gt_{ground_truth_name}'
+
+    return base_dir / Path(
+        f'data/{sample_name}/sv_calling/svensemble2/'
+        f'{sample_name}.{mid}.{ts_name}{gt_suffix}'
+    )
+
+
+def list_models(base_dir, sample_name: str) -> list[dict]:
+    """Discover existing svensemble2 result dirs for a sample.
+
+    Returns one dict per directory with its path and, when a ``config_out.json``
+    is present, the recorded ``model_id`` and human ``name`` -- the reverse of
+    :func:`model_results_dir` (model_id -> human label).
+    """
+    base_dir = Path(base_dir)
+    root = base_dir / f'data/{sample_name}/sv_calling/svensemble2'
+    out: list[dict] = []
+    if not root.exists():
+        return out
+    for d in sorted(p for p in root.iterdir() if p.is_dir()):
+        info = {'dir': d, 'dirname': d.name}
+        cfg_path = d / 'config_out.json'
+        if cfg_path.exists():
+            try:
+                cfg = config_io.load_config(cfg_path)
+                info['model_id'] = cfg.get('model_id')
+                model_block = cfg.get('model')
+                info['model_name'] = (
+                    model_block.get('name') if isinstance(model_block, dict)
+                    else cfg.get('model_name')
+                )
+            except Exception:
+                pass
+        out.append(info)
+    return out
+
 
 human_chroms = [f'chr{i}' for i in range(1, 23)] + ['chrX', 'chrY', 'chrM']
 
@@ -293,6 +460,12 @@ def create_config_dict(
     if ground_truth_name and ground_truth_name != default_reference_set:
         gt_suffix = f'.gt_{ground_truth_name}'
 
+    # Resolve the model config and its reconstructible identity. model_id
+    # ({base}-{hash8}) replaces the free-text model name in the data-tree path.
+    model_cfg = resolve_model_config(name=model_name)
+    mid = model_id(model_cfg)
+    model_cfg['model_id'] = mid
+
     config_dict = {
         sample_name: {
             'sample_name': sample_name,
@@ -300,7 +473,7 @@ def create_config_dict(
             'callset_bps_dir': base_dir / Path(f'data/{sample_name}/sv_calling/callset_bps'),
             'workflow_dir': base_dir / Path(
                 f'data/{sample_name}/sv_calling/svensemble2/'
-                f'{sample_name}.{model_name}.'
+                f'{sample_name}.{mid}.'
                 f'{training_set_name}{gt_suffix}'
             ),
             'is_reference': False,
@@ -313,7 +486,8 @@ def create_config_dict(
             'training_sets': _training_sets,
             'ref_path': ref_path,
             'val_set': val_set,
-            'model': model_configs[model_name].copy()
+            'model': model_cfg,
+            'model_id': mid,
         }
     }
 
@@ -324,34 +498,12 @@ def create_config_dict(
         for callset_name in callset_names:
             config_dict[sample_name]['callsets'][callset_name]['params']['custom_cols_pred'] = config_dict[sample_name]['model']['training_params']['custom_cols']
 
-    # Specify the path to the matched breakpoints used for training the model.
-    # When a *_suffix config references another model's workflow (e.g. XGBoost
-    # reusing RF breakpoints), fall back to the current workflow_dir if the
-    # shared directory does not exist yet.
+    # matched_bps / feature_matrix live in the model's own workflow_dir. Model
+    # identity is now the config hash (model_id), so there is no cross-model
+    # suffix sharing -- every model_id owns its own intermediates.
     workflow_dir = config_dict[sample_name]['workflow_dir']
-
-    if 'matched_bps_suffix' in config_dict[sample_name]['model'].keys():
-        shared_matched = base_dir / Path(
-                f'data/{sample_name}/sv_calling/svensemble2/'
-                f'{sample_name}.{config_dict[sample_name]["model"]["matched_bps_suffix"]}.'
-                f'{training_set_name}{gt_suffix}'
-                '/matched_bps.csv'
-            )
-        local_matched = workflow_dir / 'matched_bps.csv'
-        config_dict[sample_name]['model']['matched_bps_path'] = (
-            shared_matched if shared_matched.exists() else local_matched
-        )
-    if 'feature_matrix_suffix' in config_dict[sample_name]['model'].keys():
-        shared_fm = base_dir / Path(
-                f'data/{sample_name}/sv_calling/svensemble2/'
-                f'{sample_name}.{config_dict[sample_name]["model"]["feature_matrix_suffix"]}.'
-                f'{training_set_name}{gt_suffix}'
-                '/feature_matrix.csv'
-            )
-        local_fm = workflow_dir / 'feature_matrix.csv'
-        config_dict[sample_name]['model']['feature_matrix_path'] = (
-            shared_fm if shared_fm.exists() else local_fm
-        )
+    config_dict[sample_name]['model']['matched_bps_path'] = workflow_dir / 'matched_bps.csv'
+    config_dict[sample_name]['model']['feature_matrix_path'] = workflow_dir / 'feature_matrix.csv'
 
     _additional_set = set(additional_callsets) if isinstance(additional_callsets, list) else set()
     for callset_name in callset_names:
@@ -359,14 +511,10 @@ def create_config_dict(
             config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['callset_bps_dir'] / f'{callset_name}.raw_bps.csv'
         elif config_dict[sample_name]['callsets'][callset_name]['params']['override_bps_path']:
             config_dict[sample_name]['callsets'][callset_name]['bps_path'] = config_dict[sample_name]['sample_dir'] / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
-        elif 'bps_suffix' in config_dict[sample_name]['model'].keys():
-            shared_bps = config_dict[sample_name]['sample_dir'] / f'sv_calling/svensemble2/{sample_name}.{config_dict[sample_name]["model"]["bps_suffix"]}.{training_set_name}{gt_suffix}' / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
-            local_bps = workflow_dir / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
-            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = (
-                shared_bps if shared_bps.exists() else local_bps
-            )
         else:
-            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = workflow_dir / f'{callset_name}.bps.csv'
+            config_dict[sample_name]['callsets'][callset_name]['bps_path'] = (
+                workflow_dir / config_dict[sample_name]['callsets'][callset_name]['params']['bps_path']
+            )
     if not config_dict:
         raise ValueError(f"No config dictionary created for sample {sample_name}")
 
@@ -379,6 +527,7 @@ def build_cli_workflow_config(
     model_name: str | None = None,
     training_set: str | None = None,
     ref_path: Path | None = None,
+    model_config: dict | None = None,
 ) -> dict:
     """
     Build a workflow_config dict for CLI/Nextflow subcommands.
@@ -413,8 +562,14 @@ def build_cli_workflow_config(
     if callers is None:
         callers = []
 
-    model_cfg = model_configs.get(model_name, {}).copy() if model_name else {}
-    training_params = model_cfg.get('training_params', {})
+    # Two-branch model resolution: a freeform override (Branch 2, self-contained
+    # with `base`) wins over a preset name (Branch 1); otherwise the default.
+    if model_config is not None:
+        model_cfg = resolve_model_config(config=model_config)
+    else:
+        model_cfg = resolve_model_config(name=model_name or default_model_name)
+    mid = model_id(model_cfg)
+    training_params = model_cfg['training_params']
     custom_cols = training_params.get('custom_cols', [])
 
     if training_set and training_set in training_set_presets:
@@ -447,11 +602,12 @@ def build_cli_workflow_config(
         'is_reference': False,
         'training_sets': training_sets,
         'model': {
-            'name': model_name or default_model_name,
-            'training_params': training_params,
+            **model_cfg,
+            'model_id': mid,
             'matched_bps_path': workflow_dir / 'matched_bps.csv',
             'feature_matrix_path': workflow_dir / 'feature_matrix.csv',
         },
+        'model_id': mid,
     }
 
     if ref_path is not None:
@@ -545,7 +701,7 @@ def create_samples_config_table(samples: Dict[str, Dict[str, Any]]) -> pd.DataFr
         for training_set_name in sample_config['training_sets']:
             sample_names.append(sample_name)
             training_set_names.append(training_set_name)
-            model_names.append('unbiased')
+            model_names.append('unbiased_rf')
 
     return pd.DataFrame({
         'sample_name': sample_names,

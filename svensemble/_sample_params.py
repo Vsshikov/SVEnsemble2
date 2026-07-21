@@ -1,6 +1,6 @@
 from pathlib import Path
 
-default_model_name = 'unbiased'
+default_model_name = 'unbiased_rf'
 
 sample_val_set_template = {
     'name': '',

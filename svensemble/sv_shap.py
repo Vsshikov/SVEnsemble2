@@ -65,6 +65,7 @@ def resolve_shap_paths(
         'model_pkl': workflow_dir / 'model.pkl',
         'feature_matrix': workflow_dir / 'feature_matrix.csv',
         'shap_dir': workflow_dir / 'shap_values',
+        'model_id': config[sample_name]['model_id'],
     }
 
 
@@ -335,6 +336,7 @@ def run_shap(
     model_name: str,
     training_set: str,
     output_dir: Path,
+    model_config: dict | None = None,
     verbose: bool = False,
 ) -> Path:
     """
@@ -354,10 +356,12 @@ def run_shap(
     if id_cols:
         fm = fm.set_index(id_cols)
 
-    from . import _model_configs
-    fillna = _model_configs.model_configs.get(model_name, {}).get(
-        'training_params', {},
-    ).get('fillna', 0)
+    resolved = (
+        sv_utils.resolve_model_config(config=model_config) if model_config
+        else sv_utils.resolve_model_config(name=model_name)
+    )
+    mid = sv_utils.model_id(resolved)
+    fillna = resolved['training_params'].get('fillna', 0)
     X = pd.get_dummies(fm)
     if fillna is not None:
         X = X.fillna(fillna)
@@ -369,7 +373,7 @@ def run_shap(
 
     shap_values = compute_shap_values(model, X, verbose=verbose)
 
-    prefix = f'{sample_name}.{model_name}.{training_set}'
+    prefix = f'{sample_name}.{mid}.{training_set}'
     summary = summarise_shap_values(shap_values)
     summary_csv_path = output_dir / f'{prefix}.shap_summary.csv'
     summary.to_csv(summary_csv_path, index=False)
@@ -424,7 +428,7 @@ def run_shap_assessment(
     shap_dir = paths['shap_dir']
     shap_dir.mkdir(parents=True, exist_ok=True)
 
-    prefix = f'{sample_name}.{model_name}.{training_set_name}'
+    prefix = f'{sample_name}.{paths["model_id"]}.{training_set_name}'
     shap_pkl_path = shap_dir / f'{prefix}.shap_values.pkl'
     with open(shap_pkl_path, 'wb') as f:
         pickle.dump(shap_values, f)
@@ -463,7 +467,7 @@ if __name__ == "__main__":
         help="Sample name (e.g. NA12878, HG002)",
     )
     parser.add_argument(
-        '--model_name', type=str, default='unbiased',
+        '--model_name', type=str, default='unbiased_rf',
         help="Model name (default: unbiased)",
     )
     parser.add_argument(

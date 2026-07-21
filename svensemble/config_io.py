@@ -83,30 +83,38 @@ def _rehydrate_from_json(obj, path_keys=frozenset(), inf_keys=frozenset()):
 
 
 def dump_config(config: dict, path: Path) -> None:
-    """Sanitize and write a config dict to path as JSON.
+    """Sanitize and write a config dict to path as JSON or YAML (by suffix).
 
     Args:
         config: Config dict to write. May contain Path, np.inf/np.nan,
             numpy scalars, tuples and sets - all converted to JSON-safe
             equivalents by _sanitize_for_json before writing.
-        path: Output path. Parent directories are created if missing.
+        path: Output path. A ``.yaml``/``.yml`` suffix writes YAML; anything
+            else writes JSON. Parent directories are created if missing.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     sanitized = _sanitize_for_json(config)
     with open(path, "w") as f:
-        json.dump(sanitized, f, indent=2)
+        if path.suffix.lower() in (".yaml", ".yml"):
+            import yaml  # lazy: only required when YAML is actually used
+            yaml.safe_dump(sanitized, f, sort_keys=False, default_flow_style=False)
+        else:
+            json.dump(sanitized, f, indent=2)
 
 
 def load_config(path: Path) -> dict:
-    """Read a config dict back from a JSON file written by dump_config.
+    """Read a config dict from a JSON or YAML file (by suffix).
 
-    This is a plain json.load - Paths stay strings and sanitized inf/nan
-    values stay None. Use rehydrate_config on the result if the consumer
-    needs those back as Path/np.inf.
+    A ``.yaml``/``.yml`` suffix parses YAML; anything else parses JSON. Plain
+    load - Paths stay strings and sanitized inf/nan values stay None. Use
+    rehydrate_config on the result if the consumer needs those back.
     """
     path = Path(path)
     with open(path) as f:
+        if path.suffix.lower() in (".yaml", ".yml"):
+            import yaml  # lazy: only required when YAML is actually used
+            return yaml.safe_load(f)
         return json.load(f)
 
 
