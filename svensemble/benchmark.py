@@ -11,6 +11,7 @@ import pickle
 from typing import Dict, Any, List, Tuple
 from collections import defaultdict
 from copy import deepcopy
+from dataclasses import dataclass, field
 from pathlib import Path
 import os
 import sys
@@ -134,30 +135,30 @@ xgfs_fancy_new = [
 ]
 xgfs_fancy_new = [tuple(c / 255 for c in rgb) for rgb in xgfs_fancy_new]
 
-_style_mappings = {}
-# _style_mappings = {
-#     'gridss': {
-#         'line': {
-#             'color': xgfs_fancy6[0],
-#             'linewidth': 0.7,
-#             'dashes': (2, 2),
-#             'label': 'GRIDSS',
-#         },
-#         'text': {
-#             'label': 'GR',
-#         }
-#     },
-#     'gridss_H': {
-#         'line': {
-#             'color': xgfs_fancy6[0],
-#             'linewidth': 1,
-#             'dashes': (2, 2),
-#             'label': 'GRIDSS (High Confidence Calls)',
-#         },
-#         'text': {
-#             'label': 'GR_H',
-#         }
-#     },
+# _style_mappings = {}
+_style_mappings = {
+    'gridss': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'GRIDSS',
+        },
+        'text': {
+            'label': 'GR',
+        }
+    },
+    'gridss_H': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 1,
+            'dashes': (2, 2),
+            'label': 'GRIDSS (High Confidence Calls)',
+        },
+        'text': {
+            'label': 'GR_H',
+        }
+    },
 #     'gridss_H_lazy': {
 #         'line': {
 #             'color': tuple([c * 1.2 for c in xgfs_fancy6[0] if c * 1.2 < 1]),
@@ -179,17 +180,17 @@ _style_mappings = {}
 #             'label': 'GR',
 #         }
 #     },
-#     'manta_diploid': {
-#         'line': {
-#             'color': xgfs_fancy6[3],
-#             'linewidth': 0.7,
-#             'dashes': (2, 2),
-#             'label': 'Manta',
-#         },
-#         'text': {
-#             'label': 'MA',
-#         }
-#     },
+    'manta_diploid': {
+        'line': {
+            'color': xgfs_fancy6[3],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'Manta',
+        },
+        'text': {
+            'label': 'MA',
+        }
+    },
 #     'svensemble2_manta_diploid': {
 #         'line': {
 #             'color': xgfs_fancy6[3],
@@ -200,17 +201,17 @@ _style_mappings = {}
 #             'label': 'MA',
 #         }
 #     },
-#     'delly': {
-#         'line': {
-#             'color': xgfs_fancy6[2],
-#             'linewidth': 0.7,
-#             'dashes': (2, 2),
-#             'label': 'Delly',
-#         },
-#         'text': {
-#             'label': 'DE',
-#         }
-#     },
+    'delly': {
+        'line': {
+            'color': xgfs_fancy6[2],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'Delly',
+        },
+        'text': {
+            'label': 'DE',
+        }
+    },
 #     'svensemble2_delly': {
 #         'line': {
 #             'color': xgfs_fancy6[2],
@@ -220,40 +221,40 @@ _style_mappings = {}
 #         'text': {
 #             'label': 'DE',
 #         }
-#     },
-#     'survivor_short': {
-#         'line': {
-#             'color': (0.55, 0.45, 0.95),
-#             'linewidth': 1,
-#             'dashes': (6, 2.5),
-#             'label': 'SURVIVOR Short-Read Consensus',
-#         },
-#         'text': {
-#             'label': 'SU-S',
-#         }
-#     },
-#     'survivor_long': {
-#         'line': {
-#             'color': (0.88, 0.45, 0.72),
-#             'linewidth': 1,
-#             'dashes': (6, 2.5),
-#             'label': 'SURVIVOR Long-Read Consensus',
-#         },
-#         'text': {
-#             'label': 'SU-L',
-#         }
-#     },
-#     'survivor_all': {
-#         'line': {
-#             'color': (0.45, 0.35, 0.65),
-#             'linewidth': 1,
-#             'dashes': (6, 2.5),
-#             'label': 'SURVIVOR All-Caller Consensus',
-#         },
-#         'text': {
-#             'label': 'SU-A',
-#         }
-#     },
+    # },
+    'survivor_short': {
+        'line': {
+            'color': (0.55, 0.45, 0.95),
+            'linewidth': 1,
+            'dashes': (6, 2.5),
+            'label': 'SURVIVOR Short-Read Consensus',
+        },
+        'text': {
+            'label': 'SU-S',
+        }
+    },
+    'survivor_long': {
+        'line': {
+            'color': (0.88, 0.45, 0.72),
+            'linewidth': 1,
+            'dashes': (6, 2.5),
+            'label': 'SURVIVOR Long-Read Consensus',
+        },
+        'text': {
+            'label': 'SU-L',
+        }
+    },
+    'survivor_all': {
+        'line': {
+            'color': (0.45, 0.35, 0.65),
+            'linewidth': 1,
+            'dashes': (6, 2.5),
+            'label': 'SURVIVOR All-Caller Consensus',
+        },
+        'text': {
+            'label': 'SU-A',
+        }
+    },
 #     'svensemble2_delly+manta_diploid': {
 #         'line': {
 #             'color': xgfs_fancy6[4],
@@ -324,17 +325,17 @@ _style_mappings = {}
 #             'label': 'GR+MC+DE',
 #         }
 #     },
-#     'manta_candidate': {
-#         'line': {
-#             'color': xgfs_fancy6[3],
-#             'linewidth': 0.7,
-#             'dashes': (4, 2),
-#             'label': 'Manta (Candidate)',
-#         },
-#         'text': {
-#             'label': 'MC',
-#         }
-#     },
+    'manta_candidate': {
+        'line': {
+            'color': xgfs_fancy6[3],
+            'linewidth': 0.7,
+            'dashes': (4, 2),
+            'label': 'Manta (Candidate)',
+        },
+        'text': {
+            'label': 'MC',
+        }
+    },
 #     'svensemble2_manta_candidate': {
 #         'line': {
 #             'color': (0.16, 0.51, 0.65),
@@ -345,72 +346,72 @@ _style_mappings = {}
 #             'label': 'MC',
 #         }
 #     },
-#     'sniffles': {
-#         'line': {
-#             'color': xgfs_fancy_ext[0],
-#             'linewidth': 0.7,
-#             'dashes': (2, 2),
-#             'label': 'Sniffles',
-#         },
-#         'text': {
-#             'label': 'SN',
-#         }
-#     },
-#     'sniffles_H': {
-#         'line': {
-#             'color': xgfs_fancy_ext[0],
-#             'linewidth': 1,
-#             'dashes': (2, 2),
-#             'label': 'Sniffles (High Confidence Calls)',
-#         },
-#         'text': {
-#             'label': 'SN_H',
-#         }
-#     },
-#     'severus': {
-#         'line': {
-#             'color': xgfs_fancy_ext[3],
-#             'linewidth': 0.7,
-#             'dashes': (2, 2),
-#             'label': 'Severus',
-#         },
-#         'text': {
-#             'label': 'SV',
-#         }
-#     },
-#     'severus_H': {
-#         'line': {
-#             'color': xgfs_fancy_ext[3],
-#             'linewidth': 1,
-#             'dashes': (2, 2),
-#             'label': 'Severus (High Confidence Calls)',
-#         },
-#         'text': {
-#             'label': 'SV_H',
-#         }
-#     },
-#     'cutesv': {
-#         'line': {
-#             'color': xgfs_fancy_ext[4],
-#             'linewidth': 0.7,
-#             'dashes': (2, 2),
-#             'label': 'CuteSV',
-#         },
-#         'text': {
-#             'label': 'CS',
-#         }
-#     },
-#     'cutesv_H': {
-#         'line': {
-#             'color': xgfs_fancy_ext[4],
-#             'linewidth': 1,
-#             'dashes': (2, 2),
-#             'label': 'CuteSV (High Confidence Calls)',
-#         },
-#         'text': {
-#             'label': 'CS_H',
-#         }
-#     },
+    'sniffles': {
+        'line': {
+            'color': xgfs_fancy_ext[0],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'Sniffles',
+        },
+        'text': {
+            'label': 'SN',
+        }
+    },
+    'sniffles_H': {
+        'line': {
+            'color': xgfs_fancy_ext[0],
+            'linewidth': 1,
+            'dashes': (2, 2),
+            'label': 'Sniffles (High Confidence Calls)',
+        },
+        'text': {
+            'label': 'SN_H',
+        }
+    },
+    'severus': {
+        'line': {
+            'color': xgfs_fancy_ext[3],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'Severus',
+        },
+        'text': {
+            'label': 'SV',
+        }
+    },
+    'severus_H': {
+        'line': {
+            'color': xgfs_fancy_ext[3],
+            'linewidth': 1,
+            'dashes': (2, 2),
+            'label': 'Severus (High Confidence Calls)',
+        },
+        'text': {
+            'label': 'SV_H',
+        }
+    },
+    'cutesv': {
+        'line': {
+            'color': xgfs_fancy_ext[4],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'CuteSV',
+        },
+        'text': {
+            'label': 'CS',
+        }
+    },
+    'cutesv_H': {
+        'line': {
+            'color': xgfs_fancy_ext[4],
+            'linewidth': 1,
+            'dashes': (2, 2),
+            'label': 'CuteSV (High Confidence Calls)',
+        },
+        'text': {
+            'label': 'CS_H',
+        }
+    },
 #     'svensemble2_cutesv': {
 #         'line': {
 #             'color': xgfs_fancy_ext[4],
@@ -531,28 +532,28 @@ _style_mappings = {}
 #             'label': 'SN+GR+MC+DE',
 #         }
 #     },
-#     'svaba': {
-#         'line': {
-#             'color': xgfs_fancy6[1],
-#             'linewidth': 0.7,
-#             'dashes': (2, 2),
-#             'label': 'SvABA',
-#         },
-#         'text': {
-#             'label': 'SB',
-#         }
-#     },
-#     'svaba_H': {
-#         'line': {
-#             'color': xgfs_fancy6[1],
-#             'linewidth': 1,
-#             'dashes': (2, 2),
-#             'label': 'SvABA (High Confidence Calls)',
-#         },
-#         'text': {
-#             'label': 'SB_H',
-#         }
-#     },
+    'svaba': {
+        'line': {
+            'color': xgfs_fancy6[1],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'SvABA',
+        },
+        'text': {
+            'label': 'SB',
+        }
+    },
+    'svaba_H': {
+        'line': {
+            'color': xgfs_fancy6[1],
+            'linewidth': 1,
+            'dashes': (2, 2),
+            'label': 'SvABA (High Confidence Calls)',
+        },
+        'text': {
+            'label': 'SB_H',
+        }
+    },
 #     'svensemble2_severus': {
 #         'line': {
 #             'color': (0.10, 0.55, 0.45),
@@ -713,9 +714,15 @@ _style_mappings = {}
 #             'label': '7c',
 #         }
 #     },
-# }
+}
 
 _model_style_mappings = {
+    'consensus_majority': {
+        'line': {
+            'color': (125 / 255, 125 / 255, 125 / 255),
+            'linewidth': 1,
+        }
+    },
     'unbiased_xgb': {
         'line': {
             'color': (192 / 255, 57 / 255, 43 / 255),
@@ -743,10 +750,23 @@ _model_style_mappings = {
             'linestyle': '--',
         }
     },
+    'unbiased_rf': {
+        'line': {
+            'color': (41 / 255, 128 / 255, 185 / 255),
+            'linewidth': 1,
+        }
+    },
+    'consensus': {
+        'line': {
+            'color': (125 / 255, 125 / 255, 125 / 255),
+            'linewidth': 1,
+        }
+    },
 }
 
 default_style_mapping = {
     'line': {
+        'color': 'black',
         'linewidth': 1
     },
     'text': {
@@ -756,7 +776,9 @@ default_style_mapping = {
         'ha': 'center',
         'va': 'top',
         'bbox': {
-            'boxstyle': 'round,pad=0.2'
+            'boxstyle': 'round,pad=0.2',
+            'ec': 'black',
+            'fc': 'black',
         }
     }
 }
@@ -948,6 +970,510 @@ def style_text(text: mpl.text.Text, callset, model=None):
     text.set(**style_mapping)
 
 
+# ---------------------------------------------------------------------------
+# Curve records + layered plotting
+#
+# A ValRecord holds one curve's worth of data (metadata + a lazily loaded
+# validation table). compute_curve() fills `curve` with the canonical arrays
+# for a given curve kind; the plotting layer renders record collections. The
+# four public plot_* functions are thin wrappers over plot_curves(), which
+# delegates per-curve rendering to plot_single_curve() and curve maths to
+# _compute_curve_arrays(). Curves are stored in native rate space; the count /
+# rate display transform lives in _curve_display().
+# ---------------------------------------------------------------------------
+
+_CURVE_KINDS = {
+    'roc': {
+        'xlabel': lambda counts: 'False Positives' if counts else 'False Positive Rate',
+        'ylabel': lambda counts: 'True Positives' if counts else 'True Positive Rate',
+        'log': False, 'text': False, 'text_default': False, 'lim': 'roc',
+    },
+    'reverse_roc': {
+        'xlabel': lambda counts: '1/FP',
+        'ylabel': lambda counts: 'TP/FP',
+        'log': True, 'text': False, 'text_default': False, 'lim': 'none',
+    },
+    'prc': {
+        'xlabel': lambda counts: 'TP count' if counts else 'Recall',
+        'ylabel': lambda counts: 'Precision',
+        'log': False, 'text': True, 'text_default': True, 'lim': 'prc',
+    },
+    'prg': {
+        'xlabel': lambda counts: 'Recall Gain',
+        'ylabel': lambda counts: 'Precision Gain',
+        'log': False, 'text': True, 'text_default': False, 'lim': 'prg',
+    },
+}
+
+
+@dataclass
+class ValRecord:
+    """One curve's data + metadata, with a lazy-loaded validation table.
+
+    Constructed from a CSV *path* (the entry point); ``val_df`` is populated on
+    demand by :meth:`load` and may be dropped again by :meth:`unload` once the
+    curve is computed, so a whole grid of samples need not be resident at once.
+    ``val_df`` must carry the prediction score as its 2nd column (``iloc[:, 1]``)
+    and a boolean ``is_in_val`` truth column.
+    """
+    path: Path | None
+    callset_name: str
+    sample_name: str | None = None
+    model_name: str | None = None
+    svlenmin: float | None = None
+    svlenmax: float | None = None
+    svtypes: list[str] | None = None
+    val_df: pd.DataFrame | None = field(default=None, repr=False)
+    curve: dict | None = field(default=None, repr=False)
+
+    def load(self, force: bool = False) -> "ValRecord":
+        if self.val_df is None or force:
+            if self.path is None:
+                raise ValueError(f"{self.callset_name}: no path to load val_df from")
+            self.val_df = pd.read_csv(self.path, low_memory=False)
+        return self
+
+    def unload(self) -> "ValRecord":
+        self.val_df = None
+        return self
+
+    def compute_curve(self, kind, *, filter_pass=False, svtype=None,
+                      keep_df=True, verbose=False) -> "ValRecord":
+        self.load()
+        self.curve = _compute_curve_arrays(
+            self.val_df, self.callset_name, self.model_name, kind,
+            filter_pass=filter_pass, svtype=svtype, verbose=verbose,
+        )
+        if not keep_df:
+            self.unload()
+        return self
+
+    @classmethod
+    def from_dataframe(cls, val_df, *, callset_name, **meta) -> "ValRecord":
+        return cls(path=None, callset_name=callset_name, val_df=val_df, **meta)
+
+
+def records_from_val_dict(val_dict, *, sample_name=None, model_name=None):
+    """Adapter: legacy ``{callset_name: val_df}`` -> ``list[ValRecord]``."""
+    return [
+        ValRecord.from_dataframe(df, callset_name=cs,
+                                 sample_name=sample_name, model_name=model_name)
+        for cs, df in val_dict.items()
+    ]
+
+
+def val_dict_from_records(records):
+    """Adapter: ``list[ValRecord]`` -> ``{callset_name: val_df}`` (loads if needed)."""
+    return {r.callset_name: r.load().val_df for r in records}
+
+
+def _compute_curve_arrays(val_df, callset_name, model_name, kind, *,
+                          filter_pass=False, svtype=None, verbose=False):
+    """Canonical curve arrays for one callset, or None when the callset has no
+    true positives or no true negatives (curve undefined).
+
+    The optional filter_pass / svtype pre-mask (generalised out of the old
+    reverse-ROC plotter) applies to every kind; with the defaults it is a no-op.
+    Curves are stored in native rate space; count-axis display is derived at
+    draw time by _curve_display.
+    """
+    df = val_df.dropna().copy()
+
+    mask = np.ones(len(df), dtype=bool)
+    if filter_pass:
+        if 'FILTER_PASS' in df.columns:
+            mask = df['FILTER_PASS'].astype(bool).to_numpy()
+        elif verbose:
+            print(f'{callset_name} does not have a FILTER_PASS column, ignoring filter_pass argument')
+    if svtype is not None:
+        mask = mask & (df['INFO_INFERRED_SVTYPE'] == svtype).to_numpy()
+    df = df.loc[mask, :]
+
+    truth_series = df['is_in_val']
+    n_pos = int(truth_series.sum())
+    n_neg = int(len(truth_series) - n_pos)
+    if n_pos == 0:
+        if verbose:
+            print(f'{callset_name} has no true positives, skipping')
+        return None
+    if n_neg == 0:
+        if verbose:
+            print(f'{callset_name} has no true negatives, skipping')
+        return None
+    pred_series = df.iloc[:, 1]
+
+    if kind in ('roc', 'reverse_roc'):
+        fpr, tpr, thresholds = roc_curve(truth_series, pred_series, pos_label=True)
+        return {'kind': kind, 'fpr': fpr, 'tpr': tpr, 'thresholds': thresholds,
+                'n_pos': n_pos, 'n_neg': n_neg}
+
+    if kind == 'prc':
+        precision, recall, thresholds = precision_recall_curve(
+            truth_series, pred_series, pos_label=True)
+        return {'kind': kind, 'precision': precision, 'recall': recall,
+                'thresholds': thresholds, 'n_pos': n_pos, 'n_neg': n_neg}
+
+    if kind == 'prg':
+        order = np.argsort(-pred_series.values)
+        sorted_labels = truth_series.values[order]
+        sorted_scores = pred_series.values[order]
+        tp = np.cumsum(sorted_labels).astype(float)
+        fp = np.cumsum(~sorted_labels).astype(float)
+        fn = n_pos - tp
+        pos_neg_ratio = n_pos / n_neg
+        with np.errstate(divide='ignore', invalid='ignore'):
+            prec_gain = 1.0 - pos_neg_ratio * (fp / tp)
+            rec_gain = 1.0 - pos_neg_ratio * (fn / tp)
+        valid = (prec_gain > 0) & (rec_gain > 0) & np.isfinite(prec_gain) & np.isfinite(rec_gain)
+        if not valid.any():
+            if verbose:
+                print(f'{callset_name} has no points above baseline prevalence, skipping')
+            return None
+        return {'kind': kind, 'prec_gain': prec_gain[valid], 'rec_gain': rec_gain[valid],
+                'thresholds': sorted_scores[valid],
+                'tp': tp[valid], 'fp': fp[valid], 'fn': fn[valid],
+                'n_pos': n_pos, 'n_neg': n_neg}
+
+    raise ValueError(f'unknown curve kind: {kind!r}')
+
+
+def _curve_display(curve, use_counts):
+    """Map a canonical curve dict to the (x, y, thresholds) actually plotted in
+    the requested count/rate mode. thresholds is aligned to x/y for the cutoff
+    marker. Reproduces the per-kind transforms of the original plotters."""
+    kind = curve['kind']
+    if kind == 'roc':
+        fpr, tpr = curve['fpr'], curve['tpr']
+        if use_counts:
+            return fpr * curve['n_neg'], tpr * curve['n_pos'], curve['thresholds']
+        return fpr, tpr, curve['thresholds']
+    if kind == 'reverse_roc':
+        fpr, tpr, thr = curve['fpr'], curve['tpr'], curve['thresholds']
+        if use_counts:
+            tp = tpr * curve['n_pos']
+            fp = fpr * curve['n_neg']
+            zeros = (fp == 0) | (tp == 0)
+            return 1.0 / fp[~zeros], tp[~zeros] / fp[~zeros], thr[~zeros]
+        return fpr, tpr, thr
+    if kind == 'prc':
+        precision, recall, thr = curve['precision'], curve['recall'], curve['thresholds']
+        if use_counts:
+            tp = recall * curve['n_pos']
+            zeros = (tp == 0)
+            return tp[~zeros], precision[~zeros], thr
+        return recall, precision, thr
+    if kind == 'prg':
+        return curve['rec_gain'], curve['prec_gain'], curve['thresholds']
+    raise ValueError(f'unknown curve kind: {curve.get("kind")!r}')
+
+
+# Native (x, y) array keys per kind -- the space curves are averaged in.
+_CURVE_XY = {
+    'roc': ('fpr', 'tpr'),
+    'reverse_roc': ('fpr', 'tpr'),
+    'prc': ('recall', 'precision'),
+    'prg': ('rec_gain', 'prec_gain'),
+}
+
+
+def _interp_on_grid(x, y, grid):
+    """Interpolate y(x) onto *grid*, returning NaN outside x's observed range
+    (no extrapolation). Duplicate x values collapse to their max y (upper
+    envelope), so ties in a step-like curve resolve to the achieved point."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    finite = np.isfinite(x) & np.isfinite(y)
+    x, y = x[finite], y[finite]
+    if x.size == 0:
+        return np.full(grid.shape, np.nan)
+    ux, inv = np.unique(x, return_inverse=True)
+    uy = np.full(ux.shape, -np.inf)
+    np.maximum.at(uy, inv, y)
+    out = np.interp(grid, ux, uy)
+    out[(grid < ux[0]) | (grid > ux[-1])] = np.nan
+    return out
+
+
+def _mean_std_count(mat):
+    """Column-wise mean/std/count over a (n_samples, n_grid) matrix, ignoring
+    NaN, without the empty-slice warnings of nanmean/nanstd."""
+    mask = ~np.isnan(mat)
+    count = mask.sum(axis=0)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        total = np.where(mask, mat, 0.0).sum(axis=0)
+        mean = np.where(count > 0, total / count, np.nan)
+        var = np.where(count > 0,
+                       np.where(mask, (mat - mean) ** 2, 0.0).sum(axis=0) / count,
+                       np.nan)
+    return mean, np.sqrt(var), count
+
+
+def average_curves(records, kind, *, prevalence='mean', grid_n=200):
+    """Average per-sample curves of one *kind* across samples.
+
+    Records are grouped by exact identity ``(callset_name, model_name)`` so the
+    sample dimension collapses while distinct callsets (and a caller vs its
+    ``svensemble2_`` twin) stay separate. Averaging is vertical: each curve is
+    interpolated onto a shared x grid in its native space (FPR for ROC, recall
+    for PRC, recall-gain for PRG) and averaged **only over the overlapping
+    range** every sample covers (no extrapolation). PRC is averaged directly on
+    the recall grid -- exactly as ROC is on FPR -- so the full recall range
+    [0, 1], including recall < pi, is preserved.
+
+    Returns one synthetic mean ``ValRecord`` per group (``path=None``,
+    ``sample_name=None``) whose ``curve`` carries a ``band`` (+/-1 std envelope)
+    and a scalar ``divergence`` (mean band half-width over the overlap) for the
+    fluctuation flags. ``prevalence`` is accepted for API compatibility but is
+    no longer used (the PRG round-trip it fed has been removed).
+    """
+    groups = {}
+    for r in records:
+        if r.curve is None or r.curve.get('kind') != kind:
+            continue
+        groups.setdefault((r.callset_name, r.model_name), []).append(r)
+
+    grid = np.linspace(0.0, 1.0, grid_n)
+    xkey, ykey = _CURVE_XY[kind]
+    out = []
+    for (callset_name, model_name), recs in groups.items():
+        # Vertical averaging in native rate space: interpolate y over the shared
+        # x grid, average only where every sample is defined (the intersection).
+        # PRC uses the recall grid directly -- like ROC on FPR -- so recall in
+        # [0, 1] (including recall < pi) is preserved.
+        per_sample = [_interp_on_grid(r.curve[xkey], r.curve[ykey], grid) for r in recs]
+
+        mat = np.vstack(per_sample)
+        mean, std, count = _mean_std_count(mat)
+        full = count == len(recs)          # intersection (contiguous)
+        mean = np.where(full, mean, np.nan)
+        std = np.where(full, std, np.nan)
+
+        n_pos = float(np.mean([r.curve['n_pos'] for r in recs]))
+        n_neg = float(np.mean([r.curve['n_neg'] for r in recs]))
+        divergence = float(np.nanmean(std)) if np.any(full) else float('nan')
+
+        curve = {
+            'kind': kind, xkey: grid, ykey: mean,
+            'thresholds': np.array([]), 'n_pos': n_pos, 'n_neg': n_neg,
+            'band': {'y_lo': mean - std, 'y_hi': mean + std},
+            'divergence': divergence, 'n_samples': len(recs),
+        }
+        if kind == 'prc':
+            # sklearn's PR curve runs recall high->low, but the grid builds it
+            # low->high; reverse so the on-curve text anchors at the high-recall
+            # end, matching the per-sample (non-averaged) curves.
+            curve['recall'] = curve['recall'][::-1]
+            curve['precision'] = curve['precision'][::-1]
+            curve['band'] = {'y_lo': curve['band']['y_lo'][::-1],
+                             'y_hi': curve['band']['y_hi'][::-1]}
+        out.append(ValRecord(path=None, callset_name=callset_name,
+                             sample_name=None, model_name=model_name, curve=curve))
+    return out
+
+
+def _display_band(curve, use_counts):
+    """Transform a stored band (native y_lo/y_hi) into display coords by reusing
+    _curve_display with the y array swapped, so counts/rate scaling matches the
+    mean line. Returns (x, y_lo, y_hi) or None."""
+    band = curve.get('band')
+    if band is None:
+        return None
+    _, ykey = _CURVE_XY[curve['kind']]
+    lo_curve = dict(curve); lo_curve[ykey] = band['y_lo']
+    hi_curve = dict(curve); hi_curve[ykey] = band['y_hi']
+    x, y_lo, _ = _curve_display(lo_curve, use_counts)
+    _, y_hi, _ = _curve_display(hi_curve, use_counts)
+    return x, y_lo, y_hi
+
+
+def plot_single_curve(ax, record, kind, *, use_counts=True, draw_text=False,
+                      svensemble2_cutoff=None):
+    """Render one record's curve onto *ax*. Returns
+    ``{'line', 'text', 'badge_handler'}``. Kind-agnostic: reads record.curve
+    via _curve_display."""
+    callset = record.callset_name
+    style_model = record.model_name if callset.startswith('svensemble2_') else None
+    line_style = get_style_mapping(callset, model=style_model)['line']
+
+    x, y, thresholds = _curve_display(record.curve, use_counts)
+    line, = ax.plot(x, y, **line_style)
+    # Identity tag for downstream legend grouping (e.g. facet legends that
+    # collapse svensemble2 curves by model). Cosmetic-only; ignored by drawing.
+    line._val_curve_id = (callset, record.model_name)
+
+    text = None
+    if draw_text:
+        text_label = callset if callset not in _style_mappings else _style_mappings[callset]['text']['label']
+        text_style = {k: v for k, v in get_style_mapping(callset, model=style_model)['text'].items() if k != 'label'}
+        text = ax.text(x[0], y[0], text_label, **text_style)
+
+    if (svensemble2_cutoff is not None) and ('svensemble2' in callset) and len(thresholds):
+        threshold_idx = int(np.argmin(np.abs(thresholds - svensemble2_cutoff)))
+        ax.plot(x[threshold_idx], y[threshold_idx], 'o', color=line_style['color'])
+
+    badge_handler = _build_badge_handler(callset, model=style_model)
+    return {'line': line, 'text': text, 'badge_handler': badge_handler}
+
+
+def plot_curves(records, kind, ax=None, *, use_counts=True, title=None,
+                svensemble2_cutoff=None, verbose=False, xlim=None, ylim=None,
+                filter_pass=False, svtype=None, n_truth=None, text_labels=None,
+                average=False, prevalence='mean', grid_n=200,
+                show_fluctuation_band=False, flag_divergent_curves=False,
+                divergence_threshold=0.1):
+    """Render a collection of ValRecords as an overlaid *kind* plot.
+
+    Orchestration layer: canonical ordering, paired-caller text suppression,
+    badge handler map, legend, adjust_text and per-kind axis setup all live
+    here; per-curve rendering is delegated to plot_single_curve and curve maths
+    to compute_curve.
+
+    With ``average=True`` the records are collapsed across samples by
+    :func:`average_curves` (grouped by callset+model) and the per-group mean
+    curves are plotted instead. ``show_fluctuation_band`` shades the +/-1 std
+    envelope; ``flag_divergent_curves`` annotates the legend label of any curve
+    whose mean band half-width exceeds ``divergence_threshold``. ``prevalence``
+    controls the PRC PRG->PR back-conversion (see :func:`average_curves`).
+    """
+    cfg = _CURVE_KINDS[kind]
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+    if cfg['log']:
+        ax.set_xscale('log')
+        ax.set_yscale('log')
+
+    # Collapse the sample dimension into per-callset mean curves.
+    if average:
+        prepared = []
+        for r in records:
+            if r.curve is None or r.curve.get('kind') != kind:
+                r.compute_curve(kind, filter_pass=filter_pass, svtype=svtype, verbose=verbose)
+            if r.curve is not None:
+                prepared.append(r)
+        records = average_curves(prepared, kind, prevalence=prevalence, grid_n=grid_n)
+
+    # Baseline reference line, drawn first and unlabeled.
+    if kind == 'prg':
+        ax.plot([0, 1], [1, 0], color='0.75', linewidth=0.8, linestyle='--', zorder=0)
+    elif kind == 'roc' and not use_counts:
+        ax.plot([0, 1], [0, 1], color='0.75', linewidth=0.8, linestyle='--', zorder=0)
+
+    # Order by canonical callset order, then model order. Dedup by
+    # (callset_name, model_name): a callset may appear once per model (model
+    # overlay) and each such record is drawn separately with its own model style.
+    by_key = {}
+    for r in records:
+        by_key.setdefault((r.callset_name, r.model_name), r)
+    callset_rank = {cs: i for i, cs in enumerate(
+        callset_order_generator(list(dict.fromkeys(r.callset_name for r in records))))}
+    model_rank = {m: i for i, m in enumerate(dict.fromkeys(r.model_name for r in records))}
+    ordered = sorted(by_key.values(),
+                     key=lambda r: (callset_rank[r.callset_name], model_rank[r.model_name]))
+
+    # svensemble2_X suppresses the on-curve text label of its raw twin X.
+    all_names = {r.callset_name for r in records}
+    paired_raw_callers = set()
+    for cs in all_names:
+        if cs.startswith('svensemble2_'):
+            raw_name = cs[len('svensemble2_'):]
+            if raw_name in all_names:
+                paired_raw_callers.add(raw_name)
+
+    text_on = cfg['text'] and (cfg['text_default'] if text_labels is None else text_labels)
+
+    text_objects = []
+    handler_map = {}
+    text_drawn = set()   # on-curve text is drawn once per callset, not per model
+    for r in ordered:
+        if r.curve is None or r.curve.get('kind') != kind:
+            r.compute_curve(kind, filter_pass=filter_pass, svtype=svtype, verbose=verbose)
+        if r.curve is None:
+            continue
+        draw_text = (text_on and r.callset_name not in paired_raw_callers
+                     and r.callset_name not in text_drawn)
+        if draw_text:
+            text_drawn.add(r.callset_name)
+        res = plot_single_curve(ax, r, kind, use_counts=use_counts,
+                                draw_text=draw_text, svensemble2_cutoff=svensemble2_cutoff)
+        line = res['line']
+        if res['badge_handler'] is not None:
+            handler_map[line] = res['badge_handler']
+        if res['text'] is not None:
+            text_objects.append(res['text'])
+
+        # Cross-sample fluctuation annotations (averaged curves only).
+        if show_fluctuation_band and kind != 'reverse_roc' and r.curve.get('band') is not None:
+            band = _display_band(r.curve, use_counts)
+            if band is not None:
+                bx, blo, bhi = band
+                ax.fill_between(bx, blo, bhi, color=line.get_color(), alpha=0.2,
+                                linewidth=0, zorder=line.get_zorder() - 1)
+        divergence = r.curve.get('divergence')
+        if (flag_divergent_curves and divergence is not None
+                and np.isfinite(divergence) and divergence > divergence_threshold):
+            line.set_label(f'{line.get_label()}  [std={divergence:.3f}]')
+
+    # Axis limits: per-kind rules, preserving the originals.
+    lim = cfg['lim']
+    if lim == 'roc':
+        if xlim is not None:
+            ax.set_xlim(*xlim)
+        elif not use_counts:
+            ax.set_xlim(0, 1)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+        elif not use_counts:
+            ax.set_ylim(0, 1)
+    elif lim == 'prc':
+        if xlim is not None:
+            ax.set_xlim(*xlim)
+        elif not use_counts:
+            ax.set_xlim(0, 1)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+        else:
+            ax.set_ylim(0, 1)
+    elif lim == 'prg':
+        ax.set_xlim(*(xlim or (0, 1)))
+        ax.set_ylim(*(ylim or (0, 1)))
+    else:  # 'none' (reverse_roc)
+        if xlim is not None:
+            ax.set_xlim(*xlim)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+
+    if text_objects:
+        adjust_text(
+            text_objects,
+            ax=ax,
+            arrowprops=dict(arrowstyle='-', color='gray', lw=0.5),
+            force_text=(0.5, 1.0),
+            expand=(1.2, 1.4),
+        )
+
+    ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5),
+              frameon=False, handler_map=handler_map)
+    ax._badge_handler_map = handler_map
+
+    ax.set_xlabel(cfg['xlabel'](use_counts), size='large', weight=700)
+    ax.set_ylabel(cfg['ylabel'](use_counts), size='large', weight=700)
+    if title:
+        ax.set_title(title, size='large', weight=700)
+
+    if kind == 'prc' and use_counts and n_truth is not None:
+        ax2 = ax.twiny()
+        x_min, x_max = ax.get_xlim()
+        ax2.set_xlim(x_min / n_truth, x_max / n_truth)
+        ax2.xaxis.set_major_formatter(
+            plt.FuncFormatter(lambda v, _: f'{v * 100:.0f}%')
+        )
+        ax2.set_xlabel('Recall', size='large', weight=700)
+        ax.figure.tight_layout()
+
+    return ax
+
+
 def plot_roc_curves(
     sample_val_dict, ax=None, use_counts=True, title=None,
     svensemble2_cutoff=None, verbose=False,
@@ -974,69 +1500,12 @@ def plot_roc_curves(
     Returns:
         Matplotlib axis with plotted ROC curves.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
-    if title is not None:
-        ax.set_title(title)
-
-    if not use_counts:
-        ax.plot([0, 1], [0, 1], color='0.75', linewidth=0.8, linestyle='--', zorder=0)
-
-    callsets = list(sample_val_dict.keys())
-    callsets.sort()
-
-    for idx, callset in _ordered_callset_enumerate(callsets, callset_order_generator(callsets)):
-        callset_val_df = sample_val_dict[callset].dropna().copy()
-
-        truth_series = callset_val_df['is_in_val']
-        if sum(truth_series) == 0:
-            if verbose:
-                print(f'{callset} has no true positives, skipping')
-            continue
-        elif sum(truth_series) == len(truth_series):
-            if verbose:
-                print(f'{callset} has no true negatives, skipping')
-            continue
-        pred_series = callset_val_df.iloc[:, 1]
-
-        fpr, tpr, thresholds = roc_curve(truth_series, pred_series, pos_label=True)
-
-        total_tp = sum(truth_series)
-        total_tn = len(truth_series) - total_tp
-
-        if use_counts:
-            tpr = tpr * total_tp
-            fpr = fpr * total_tn
-
-        style_model = model if callset.startswith('svensemble2_') else None
-        ax.plot(fpr, tpr, **get_style_mapping(callset, model=style_model)['line'])
-
-        if (svensemble2_cutoff is not None) and ('svensemble2' in callset):
-            threshold_idx = np.argmin(np.abs(thresholds - svensemble2_cutoff))
-            ax.plot(
-                fpr[threshold_idx], tpr[threshold_idx], 'o',
-                color=get_style_mapping(callset, model=style_model)['line']['color'],
-            )
-
-    if xlim is not None:
-        ax.set_xlim(*xlim)
-    elif not use_counts:
-        ax.set_xlim(0, 1)
-
-    if ylim is not None:
-        ax.set_ylim(*ylim)
-    elif not use_counts:
-        ax.set_ylim(0, 1)
-
-    ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5), frameon=False)
-
-    xlabel = 'False Positives' if use_counts else 'False Positive Rate'
-    ylabel = 'True Positives' if use_counts else 'True Positive Rate'
-
-    plt.xlabel(xlabel, size='large', weight=700)
-    plt.ylabel(ylabel, size='large', weight=700)
-
-    return ax
+    records = records_from_val_dict(sample_val_dict, model_name=model)
+    return plot_curves(
+        records, 'roc', ax=ax, use_counts=use_counts, title=title,
+        svensemble2_cutoff=svensemble2_cutoff, verbose=verbose,
+        xlim=xlim, ylim=ylim,
+    )
 
 
 def plot_reverse_roc_curves(
@@ -1073,89 +1542,12 @@ def plot_reverse_roc_curves(
     Returns:
         Matplotlib axis with plotted reverse ROC curves.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
-    if title is not None:
-        ax.set_title(title)
-
-    ax.set_xscale('log')
-    ax.set_yscale('log')
-
-    callsets = list(sample_val_dict.keys())
-    callsets.sort()
-
-    for idx, callset in _ordered_callset_enumerate(callsets, callset_order_generator(callsets)):
-        callset_val_df = sample_val_dict[callset].dropna().copy()
-
-        if filter_pass and 'FILTER_PASS' in sample_val_dict[callset].columns:
-            sample_mask = callset_val_df['FILTER_PASS'].astype(bool)
-        elif filter_pass:
-            if verbose:
-                print(f'{callset} does not have a FILTER_PASS column, ignoring filter_pass argument')
-            sample_mask = np.ones(len(callset_val_df), dtype=bool)
-        else:
-            sample_mask = np.ones(len(callset_val_df), dtype=bool)
-
-        if svtype is not None:
-            sample_mask = sample_mask & (callset_val_df['INFO_INFERRED_SVTYPE'] == svtype)
-
-        callset_val_df = callset_val_df.loc[sample_mask, :]
-        truth_series = callset_val_df['is_in_val']
-        if sum(truth_series) == 0:
-            if verbose:
-                print(f'{callset} has no true positives, skipping')
-            continue
-        elif sum(truth_series) == len(truth_series):
-            if verbose:
-                print(f'{callset} has no true negatives, skipping')
-            continue
-        pred_series = callset_val_df.iloc[:, 1]
-
-        fpr, tpr, thresholds = roc_curve(truth_series, pred_series, pos_label=True)
-
-        total_tp = sum(truth_series)
-        total_tn = len(truth_series) - total_tp
-
-        if use_counts:
-            tp = tpr * total_tp
-            fp = fpr * total_tn
-            zeros_mask = (fp == 0) | (tp == 0)
-
-            tp_no_zeros = tp[~zeros_mask]
-            fp_no_zeros = fp[~zeros_mask]
-            thresholds_no_zeros = thresholds[~zeros_mask]
-
-            fp_metric = 1 / fp_no_zeros
-            tp_fp_metric = tp_no_zeros / fp_no_zeros
-        else:
-            fp_metric = fpr
-            tp_fp_metric = tpr
-            thresholds_no_zeros = thresholds
-
-        style_model = model if callset.startswith('svensemble2_') else None
-        ax.plot(fp_metric, tp_fp_metric, **get_style_mapping(callset, model=style_model)['line'])
-
-        if (svensemble2_cutoff is not None) and ('svensemble2' in callset) and len(thresholds_no_zeros):
-            threshold_idx = np.argmin(np.abs(thresholds_no_zeros - svensemble2_cutoff))
-            ax.plot(
-                fp_metric[threshold_idx], tp_fp_metric[threshold_idx], 'o',
-                color=get_style_mapping(callset, model=style_model)['line']['color'],
-            )
-
-    if xlim is not None:
-        ax.set_xlim(*xlim)
-    if ylim is not None:
-        ax.set_ylim(*ylim)
-
-    ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5), frameon=False)
-
-    xlabel = '1/FP'
-    ylabel = 'TP/FP'
-
-    plt.xlabel(xlabel, size='large', weight=700)
-    plt.ylabel(ylabel, size='large', weight=700)
-
-    return ax
+    records = records_from_val_dict(sample_val_dict, model_name=model)
+    return plot_curves(
+        records, 'reverse_roc', ax=ax, use_counts=use_counts, title=title,
+        svensemble2_cutoff=svensemble2_cutoff, verbose=verbose,
+        xlim=xlim, ylim=ylim, filter_pass=filter_pass, svtype=svtype,
+    )
 
 
 def plot_precision_recall_curves(
@@ -1183,109 +1575,12 @@ def plot_precision_recall_curves(
     Returns:
         matplotlib axis with plotted precision-recall curves
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
-
-    callsets = list(sample_val_dict.keys())
-    callsets.sort()
-
-    text_objects = []
-    handler_map = {}
-
-    paired_raw_callers = set()
-    for callset in sample_val_dict:
-        if callset.startswith('svensemble2_'):
-            raw_name = callset[len('svensemble2_'):]
-            if raw_name in sample_val_dict:
-                paired_raw_callers.add(raw_name)
-
-    for idx, callset in _ordered_callset_enumerate(callsets, callset_order_generator(callsets)):
-        callset_val_df = sample_val_dict[callset].dropna().copy()
-        truth_series = callset_val_df['is_in_val']
-        if sum(truth_series) == 0:
-            if verbose:
-                print(f'{callset} has no true positives, skipping')
-            continue
-        elif sum(truth_series) == len(truth_series):
-            if verbose:
-                print(f'{callset} has no true negatives, skipping')
-            continue
-        pred_series = callset_val_df.iloc[:, 1]
-
-        precision, recall, thresholds = precision_recall_curve(truth_series, pred_series, pos_label=True)
-
-        total_tp = sum(truth_series)
-
-        if use_counts:
-            tp = recall * total_tp
-            zeros_mask = (tp == 0)
-            tp_no_zeros = tp[~zeros_mask]
-            precision_no_zeros = precision[~zeros_mask]
-            tp_metric = tp_no_zeros
-            precision_metric = precision_no_zeros
-        else:
-            tp_metric = recall
-            precision_metric = precision
-
-        style_model = model if callset.startswith('svensemble2_') else None
-        line, = ax.plot(tp_metric, precision_metric, **get_style_mapping(callset, model=style_model)['line'])
-
-        badge_handler = _build_badge_handler(callset, model=style_model)
-        if badge_handler is not None:
-            handler_map[line] = badge_handler
-
-        if callset not in paired_raw_callers:
-            text_label = callset if callset not in _style_mappings else _style_mappings[callset]['text']['label']
-            text_style = {k: v for k, v in get_style_mapping(callset, model=style_model)['text'].items() if k != 'label'}
-            t = ax.text(tp_metric[0], precision_metric[0], text_label, **text_style)
-            text_objects.append(t)
-
-        if (svensemble2_cutoff is not None) and ('svensemble2' in callset):
-            threshold_idx = np.argmin(np.abs(thresholds - svensemble2_cutoff))
-            ax.plot(tp_metric[threshold_idx], precision_metric[threshold_idx], 'o', color=get_style_mapping(callset, model=style_model)['line']['color'])
-
-    if xlim is not None:
-        ax.set_xlim(*xlim)
-    elif not use_counts:
-        ax.set_xlim(0, 1)
-
-    if ylim is not None:
-        ax.set_ylim(*ylim)
-    else:
-        ax.set_ylim(0, 1)
-
-    if text_objects:
-        adjust_text(
-            text_objects,
-            ax=ax,
-            arrowprops=dict(arrowstyle='-', color='gray', lw=0.5),
-            force_text=(0.5, 1.0),
-            expand=(1.2, 1.4),
-        )
-
-    ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5), frameon=False,
-              handler_map=handler_map)
-    ax._badge_handler_map = handler_map
-
-    xlabel = 'Recall' if not use_counts else 'TP count'
-    ylabel = 'Precision'
-
-    plt.xlabel(xlabel, size='large', weight=700)
-    plt.ylabel(ylabel, size='large', weight=700)
-    if title:
-        plt.title(title, size='large', weight=700)
-
-    if use_counts and n_truth is not None:
-        ax2 = ax.twiny()
-        x_min, x_max = ax.get_xlim()
-        ax2.set_xlim(x_min / n_truth, x_max / n_truth)
-        ax2.xaxis.set_major_formatter(
-            plt.FuncFormatter(lambda v, _: f'{v * 100:.0f}%')
-        )
-        ax2.set_xlabel('Recall', size='large', weight=700)
-        ax.figure.tight_layout()
-
-    return ax
+    records = records_from_val_dict(sample_val_dict, model_name=model)
+    return plot_curves(
+        records, 'prc', ax=ax, use_counts=use_counts, title=title,
+        svensemble2_cutoff=svensemble2_cutoff, verbose=verbose,
+        xlim=xlim, ylim=ylim, n_truth=n_truth,
+    )
 
 
 def plot_precision_recall_gain_curves(
@@ -1325,107 +1620,25 @@ def plot_precision_recall_gain_curves(
     Returns:
         Matplotlib axis with plotted PRG curves.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
+    records = records_from_val_dict(sample_val_dict, model_name=model)
+    return plot_curves(
+        records, 'prg', ax=ax, title=title,
+        svensemble2_cutoff=svensemble2_cutoff, verbose=verbose,
+        xlim=xlim, ylim=ylim, text_labels=text_labels,
+    )
 
-    ax.plot([0, 1], [1, 0], color='0.75', linewidth=0.8, linestyle='--', zorder=0)
 
-    callsets = list(sample_val_dict.keys())
-    callsets.sort()
-
-    text_objects = []
-    handler_map = {}
-
-    paired_raw_callers = set()
-    for callset in sample_val_dict:
-        if callset.startswith('svensemble2_'):
-            raw_name = callset[len('svensemble2_'):]
-            if raw_name in sample_val_dict:
-                paired_raw_callers.add(raw_name)
-
-    for _, callset in _ordered_callset_enumerate(callsets, callset_order_generator(callsets)):
-        callset_val_df = sample_val_dict[callset].dropna().copy()
-        truth_series = callset_val_df['is_in_val']
-        n_pos = sum(truth_series)
-        n_neg = len(truth_series) - n_pos
-        if n_pos == 0:
-            if verbose:
-                print(f'{callset} has no true positives, skipping')
-            continue
-        elif n_neg == 0:
-            if verbose:
-                print(f'{callset} has no true negatives, skipping')
-            continue
-        pred_series = callset_val_df.iloc[:, 1]
-
-        # Sort predictions descending to walk thresholds high-to-low
-        order = np.argsort(-pred_series.values)
-        sorted_labels = truth_series.values[order]
-        sorted_scores = pred_series.values[order]
-
-        tp = np.cumsum(sorted_labels).astype(float)
-        fp = np.cumsum(~sorted_labels).astype(float)
-        fn = n_pos - tp
-
-        pos_neg_ratio = n_pos / n_neg
-
-        with np.errstate(divide='ignore', invalid='ignore'):
-            prec_gain = 1.0 - pos_neg_ratio * (fp / tp)
-            rec_gain = 1.0 - pos_neg_ratio * (fn / tp)
-
-        # Keep only points inside the unit square (both gains > 0)
-        valid = (prec_gain > 0) & (rec_gain > 0) & np.isfinite(prec_gain) & np.isfinite(rec_gain)
-        prec_gain = prec_gain[valid]
-        rec_gain = rec_gain[valid]
-        thresholds_valid = sorted_scores[valid]
-
-        if len(prec_gain) == 0:
-            if verbose:
-                print(f'{callset} has no points above baseline prevalence, skipping')
-            continue
-
-        style_model = model if callset.startswith('svensemble2_') else None
-        line, = ax.plot(rec_gain, prec_gain, **get_style_mapping(callset, model=style_model)['line'])
-
-        badge_handler = _build_badge_handler(callset, model=style_model)
-        if badge_handler is not None:
-            handler_map[line] = badge_handler
-
-        if (callset not in paired_raw_callers) and text_labels:
-            text_label = callset if callset not in _style_mappings else _style_mappings[callset]['text']['label']
-            text_style = {k: v for k, v in get_style_mapping(callset, model=style_model)['text'].items() if k != 'label'}
-            t = ax.text(rec_gain[0], prec_gain[0], text_label, **text_style)
-            text_objects.append(t)
-
-        if (svensemble2_cutoff is not None) and ('svensemble2' in callset) and len(thresholds_valid):
-            threshold_idx = np.argmin(np.abs(thresholds_valid - svensemble2_cutoff))
-            ax.plot(
-                rec_gain[threshold_idx], prec_gain[threshold_idx], 'o',
-                color=get_style_mapping(callset, model=style_model)['line']['color'],
-            )
-
-    ax.set_xlim(*(xlim or (0, 1)))
-    ax.set_ylim(*(ylim or (0, 1)))
-
-    if text_objects:
-        adjust_text(
-            text_objects,
-            ax=ax,
-            arrowprops=dict(arrowstyle='-', color='gray', lw=0.5),
-            force_text=(0.5, 1.0),
-            expand=(1.2, 1.4),
-        )
-
-    ax.legend(loc='center left', bbox_transform=ax.transAxes, bbox_to_anchor=(1, 0.5), frameon=False,
-              handler_map=handler_map)
-    ax._badge_handler_map = handler_map
-
-    plt.xlabel('Recall Gain', size='large', weight=700)
-    plt.ylabel('Precision Gain', size='large', weight=700)
-    if title:
-        plt.title(title, size='large', weight=700)
-
-    return ax
+# Map the public wrapper plot_* functions to their curve kind, so callers that
+# are parameterised by a plot_func (e.g. the notebook facet grids) can route to
+# plot_curves / average_curves for the matching kind. Keyed by function name so
+# it survives importlib.reload(benchmark) (which rebinds the function objects):
+# look up with ``PLOT_FUNC_KINDS[plot_func.__name__]``.
+PLOT_FUNC_KINDS = {
+    'plot_roc_curves': 'roc',
+    'plot_reverse_roc_curves': 'reverse_roc',
+    'plot_precision_recall_curves': 'prc',
+    'plot_precision_recall_gain_curves': 'prg',
+}
 
 
 def get_truth_count(
@@ -2348,7 +2561,7 @@ def benchmark_model(
             verbose=verbose
         )
         # Store result under this callset name
-        bench_dir = callset_config_dict['workflow_dir'].parent / f'{sample_name}.{model_name}.caller_benchmark' / 'benchmark'
+        bench_dir = callset_config_dict['workflow_dir'].parent / f'{sample_name}.{callset_config_dict["model_id"]}.caller_benchmark' / 'benchmark'
         if not bench_dir.exists():
             bench_dir.mkdir(exist_ok=True, parents=True)
 
@@ -2375,7 +2588,9 @@ def benchmark_model(
             val_set=val_set,
             sample_config=svensemble2_preds_config_dict,
             training_set_name=svensemble2_preds_to_load.replace('svensemble2_', ''),
-            model_name=model_name,
+            # Auto-detect the single '*_pred' column rather than reconstructing it
+            # from a name -- decouples the reader from the pred-column token.
+            model_name=None,
             val_match_margin=val_match_margin,
             val_match_insert_delta_threshold=val_match_insert_delta_threshold,
             additional_cols=additional_cols,
