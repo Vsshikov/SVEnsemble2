@@ -412,6 +412,17 @@ _style_mappings = {
             'label': 'CS_H',
         }
     },
+    'smoove': {
+        'line': {
+            'color': xgfs_fancy_ext[6],
+            'linewidth': 0.7,
+            'dashes': (2, 2),
+            'label': 'Smoove',
+        },
+        'text': {
+            'label': 'SM',
+        }
+    },
 #     'svensemble2_cutesv': {
 #         'line': {
 #             'color': xgfs_fancy_ext[4],
@@ -886,6 +897,8 @@ _callset_order = [
     'cutesv',
     'cutesv_H',
     'svensemble2_cutesv',
+    'smoove',
+    'svensemble2_smoove',
     'survivor_short',
     'survivor_long',
     'survivor_all',

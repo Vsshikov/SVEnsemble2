@@ -12,6 +12,8 @@ Added callers:
 - sniffles
 - cutesv
 - svaba
+- severus
+- smoove
 
 The file also contains parameters for working with VCF files from reference SV sets.
 Currently, only gnomAD is supported.
@@ -662,6 +664,41 @@ svaba_H_params = svaba_params | {
     'bps_path': 'svaba_H.bps.csv',
 }
 
+# Parameters for SMOOVE/LUMPY
+smoove_filters = []
+
+smoove_info_mandatory_cols = [
+    'SVTYPE',
+    'SVLEN',
+    'MATEID',
+    'CIPOS',
+    'CIEND',
+    'EVENT'
+]
+
+smoove_info_pred_cols = [
+    'SVLEN',
+    'IMPRECISE',
+    'SU',
+    'PE',
+    'SR',
+]
+
+smoove_params = default_params | {
+    'source': 'smoove',
+    'base_cols': base_cols + ['INFO_END'],
+    'filter_cols': smoove_filters,
+    'info_cols_mandatory': smoove_info_mandatory_cols,
+    'info_cols_pred': smoove_info_pred_cols,
+    'parse_format': False,
+    'svlen_source': 'svlen',
+    'bps_path': 'smoove.bps.csv',
+    'bnd2_pos': 'end',
+    # QUAL is '.' on every smoove/LUMPY record; SU (total supporting evidence)
+    # is the usable per-call quality signal.
+    'qual_metric': 'INFO_SU',
+}
+
 class CallsetParamDict(dict):
     """dict of callset name -> params that transparently aliases any key bearing
     a configured suffix onto an existing entry.
@@ -745,6 +782,7 @@ callset_param_dict = CallsetParamDict({
     'cutesv_H': cutesv_H_params,
     'svaba': svaba_params,
     'svaba_H': svaba_H_params,
+    'smoove': smoove_params
 })
 
 # Maps each callset_name to (source, svensemble_dir_template, path_template).

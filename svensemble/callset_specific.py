@@ -996,6 +996,141 @@ def svaba_post_bps(bp_df: pd.DataFrame) -> pd.DataFrame:
     return bp_df
 
 
+# SMOOVE / LUMPY
+
+# smoove (LUMPY) declares these INFO fields as Number=. so pysam returns them as
+# 1-tuples (e.g. (20,)) rather than scalars. Verified against real output that
+# none ever carry more than one value, so unwrapping via [0] is lossless. Unwrap
+# before any numeric/string use (e.g. INFO_SVLEN.astype(float), qual_metric=INFO_SU).
+_SMOOVE_TUPLE_INFO_FIELDS = [
+    'INFO_SVLEN',
+    'INFO_MATEID',
+    'INFO_SU',
+    'INFO_PE',
+    'INFO_SR',
+]
+
+
+def _smoove_unwrap_tuple_info(df: pd.DataFrame) -> pd.DataFrame:
+    """Unwrap smoove's Number=. INFO fields from 1-tuples to scalars.
+
+    pysam returns Number=. fields as tuples; smoove emits a single value for
+    each, so the first element is taken. Missing values (None) pass through.
+    """
+    for col in _SMOOVE_TUPLE_INFO_FIELDS:
+        if col in df.columns:
+            df.loc[:, col] = df[col].map(
+                lambda x: x[0] if isinstance(x, (tuple, list)) else x
+            )
+    return df
+
+
+def smoove_preprocess_common(
+    smoove_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Common preprocessing for all smoove entries (BND and non-BND).
+
+    1. Unwraps Number=. INFO fields (SVLEN, MATEID, SU, PE, SR) from 1-tuples
+       to scalars.
+    2. Casts support counts (SU, PE, SR) to numeric.
+    3. Converts negative SVLEN for DEL records to positive; coerces missing
+       SVLEN (BND) to 0 so the column stays int.
+
+    Args:
+        smoove_df: DataFrame of smoove variant calls
+        caller_params: Caller-specific parameters (defaults to smoove_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.smoove_params
+
+    df = smoove_df.copy()
+
+    df = _smoove_unwrap_tuple_info(df)
+
+    for col in ['INFO_SU', 'INFO_PE', 'INFO_SR']:
+        if col in df.columns:
+            df.loc[:, col] = pd.to_numeric(df[col], errors='coerce')
+
+    # smoove reports negative SVLEN for deletions; convert to positive for
+    # consistency. SVLEN is absent for BND records; coerce NaN to 0 so the
+    # column stays int.
+    df.loc[:, 'INFO_SVLEN'] = df.loc[:, 'INFO_SVLEN'].astype(float).fillna(0)
+    del_mask = df['INFO_SVTYPE'] == 'DEL'
+    df.loc[del_mask, 'INFO_SVLEN'] = df.loc[del_mask, 'INFO_SVLEN'].abs()
+    df.loc[:, 'INFO_SVLEN'] = df.loc[:, 'INFO_SVLEN'].astype(int)
+
+    return df
+
+
+def smoove_preprocess_evts_only(
+    smoove_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Preprocessing for smoove non-BND event entries (DEL, DUP, INV).
+
+    1. Sets INFO_CHR2 to CHROM (smoove events are intrachromosomal and smoove
+       emits no CHR2 field).
+    2. Splits native INFO_CIPOS / INFO_CIEND tuples into _l / _r integers.
+    3. Sets INFO_EVENT to the variant ID (event_to_bnd pairs breakends by it).
+
+    Args:
+        smoove_df: DataFrame of smoove non-BND variant calls
+        caller_params: Caller-specific parameters (defaults to smoove_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.smoove_params
+
+    df = smoove_df.copy()
+
+    df.loc[:, 'INFO_CHR2'] = df['CHROM']
+
+    df.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(df['INFO_CIPOS'])
+    df.loc[:, ['INFO_CIEND_l', 'INFO_CIEND_r']] = sv_utils.split_ciend(df['INFO_CIEND'])
+    df = df.drop(columns=['INFO_CIPOS', 'INFO_CIEND'])
+
+    df.loc[:, 'INFO_EVENT'] = df['ID']
+
+    return smoove_preprocess_common(df, caller_params)
+
+
+def smoove_preprocess_bnds_only(
+    smoove_df: pd.DataFrame,
+    caller_params: dict | None = None
+) -> pd.DataFrame:
+    """Preprocessing for smoove BND entries.
+
+    BNDs go straight to bnd_to_bp (no event_to_bnd), which pairs breakends by
+    INFO_EVENT. smoove BND IDs are '<event>_1' / '<event>_2' sharing a common
+    numeric EVENT, so INFO_EVENT is derived from the ID by stripping the mate
+    suffix. Each breakend's own positional uncertainty is its INFO_CIPOS.
+
+    Args:
+        smoove_df: DataFrame of smoove BND variant calls
+        caller_params: Caller-specific parameters (defaults to smoove_params)
+
+    Returns:
+        Preprocessed copy of the input DataFrame
+    """
+    if caller_params is None:
+        caller_params = _caller_params.smoove_params
+
+    df = smoove_df.copy()
+
+    df.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(df['INFO_CIPOS'])
+    df = df.drop(columns=['INFO_CIPOS', 'INFO_CIEND'], errors='ignore')
+
+    df.loc[:, 'INFO_EVENT'] = df['ID'].str.rsplit('_', n=1).str[0]
+
+    return smoove_preprocess_common(df, caller_params)
+
+
 # ---------------------------------------------------------------------------
 # Recipe registry for the generic parse_preprocess_vcf dispatcher.
 #
@@ -1108,6 +1243,14 @@ parse_recipes: dict[str, dict] = {
         'preprocess_evts': None,
         'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
         'post_bps': svaba_post_bps,
+    },
+    'smoove': {
+        'bnd_svtypes': ['BND'],
+        'preprocess_all': None,
+        'preprocess_bnds': smoove_preprocess_bnds_only,
+        'preprocess_evts': smoove_preprocess_evts_only,
+        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
+        'post_bps': None,
     },
 }
 
