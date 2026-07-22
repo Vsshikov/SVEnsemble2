@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import os
 import sys
+import copy
 import pysam
 from adjustText import adjust_text
 from matplotlib.legend_handler import HandlerLine2D
@@ -738,6 +739,9 @@ _model_style_mappings = {
         'line': {
             'color': (192 / 255, 57 / 255, 43 / 255),
             'linewidth': 1,
+        },
+        'text': {
+            'label': 'SVE2',
         }
     },
     'unbiased_d31': {
@@ -745,6 +749,9 @@ _model_style_mappings = {
             'color': (39 / 255, 174 / 255, 96 / 255),
             'linewidth': 2,
             'linestyle': '-.',
+        },
+        'text': {
+            'label': 'SVE2',
         }
     },
     'unbiased_xgb_nosvlen': {
@@ -752,6 +759,9 @@ _model_style_mappings = {
             'color': (231 / 255, 138 / 255, 128 / 255),
             'linewidth': 1,
             'linestyle': '--',
+        },
+        'text': {
+            'label': 'SVE2',
         }
     },
     'unbiased_d31_nosvlen': {
@@ -759,18 +769,94 @@ _model_style_mappings = {
             'color': (125 / 255, 206 / 255, 160 / 255),
             'linewidth': 2,
             'linestyle': '--',
+        },
+        'text': {
+            'label': 'SVE2',
         }
     },
     'unbiased_rf': {
         'line': {
             'color': (41 / 255, 128 / 255, 185 / 255),
             'linewidth': 1,
+        },
+        'text': {
+            'label': 'SVE2',
         }
     },
     'consensus': {
         'line': {
             'color': (125 / 255, 125 / 255, 125 / 255),
             'linewidth': 1,
+        }
+    },
+        'consensus_1': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 0,
+            'label': 'consensus - min matches 1',
+        },
+        'text': {
+            'label': 'c1',
+        }
+    },
+    'consensus_2': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 0,
+            'label': 'consensus - min matches 2',
+        },
+        'text': {
+            'label': 'c2',
+        }
+    },
+    'consensus_3': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 0,
+            'label': 'consensus - min matches 3',
+        },
+        'text': {
+            'label': 'c3',
+        }
+    },
+    'consensus_4': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 0,
+            'label': 'consensus - min matches 4',
+        },
+        'text': {
+            'label': 'c4',
+        }
+    },
+    'consensus_5': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 0,
+            'label': 'consensus - min matches 5',
+        },
+        'text': {
+            'label': 'c5',
+        }
+    },
+    'consensus_6': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 0,
+            'label': 'consensus - min matches 6',
+        },
+        'text': {
+            'label': 'c6',
+        }
+    },
+    'consensus_7': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 0,
+            'label': 'consensus - min matches 7',
+        },
+        'text': {
+            'label': 'c7',
         }
     },
 }
@@ -1221,6 +1307,27 @@ def _mean_std_count(mat):
     return mean, np.sqrt(var), count
 
 
+def pool_val_dfs(records: List[ValRecord]) -> List[ValRecord]:
+    """Collapses sample dimension between val_records, concatenating together val_dfs, after grouping by callset and model identity."""
+
+    callset_model_lookup = {}
+    callset_model_sample_names = {}
+    for record in records:
+        callset_model_key = (record.callset_name, record.model_name)
+        record_copy = copy.deepcopy(record)
+        if callset_model_key not in callset_model_lookup:
+            callset_model_sample_names[callset_model_key] = [record_copy.sample_name]
+            callset_model_lookup[callset_model_key] = record_copy
+        else:
+            callset_model_sample_names[callset_model_key].append(record_copy.sample_name)
+            callset_model_lookup[callset_model_key].val_df = pd.concat([callset_model_lookup[callset_model_key].val_df, record_copy.val_df])
+
+    for callset_model_key, record in callset_model_lookup.items():
+        record.sample_name = "+".join(sorted(callset_model_sample_names[callset_model_key]))
+
+    return list(callset_model_lookup.values())
+
+
 def average_curves(records, kind, *, prevalence='mean', grid_n=200):
     """Average per-sample curves of one *kind* across samples.
 
@@ -1309,6 +1416,14 @@ def plot_single_curve(ax, record, kind, *, use_counts=True, draw_text=False,
     line_style = get_style_mapping(callset, model=style_model)['line']
 
     x, y, thresholds = _curve_display(record.curve, use_counts)
+
+    # Adjustment: consensus calls are not curves but points. So for them, throw out all but the second point. Will likely need to move this processing somewhere else later.
+    if style_model is not None:
+        if style_model.startswith('consensus'):
+            x = x[1:2]
+            y = y[1:2]
+            thresholds = thresholds[1:2]
+
     line, = ax.plot(x, y, **line_style)
     # Identity tag for downstream legend grouping (e.g. facet legends that
     # collapse svensemble2 curves by model). Cosmetic-only; ignored by drawing.
@@ -1316,8 +1431,9 @@ def plot_single_curve(ax, record, kind, *, use_counts=True, draw_text=False,
 
     text = None
     if draw_text:
-        text_label = callset if callset not in _style_mappings else _style_mappings[callset]['text']['label']
-        text_style = {k: v for k, v in get_style_mapping(callset, model=style_model)['text'].items() if k != 'label'}
+        text_style = get_style_mapping(callset, model=style_model)['text']
+        text_label = text_style.get('label') or callset
+        text_style = {k: v for k, v in text_style.items() if k != 'label'}
         text = ax.text(x[0], y[0], text_label, **text_style)
 
     if (svensemble2_cutoff is not None) and ('svensemble2' in callset) and len(thresholds):
@@ -1331,7 +1447,7 @@ def plot_single_curve(ax, record, kind, *, use_counts=True, draw_text=False,
 def plot_curves(records, kind, ax=None, *, use_counts=True, title=None,
                 svensemble2_cutoff=None, verbose=False, xlim=None, ylim=None,
                 filter_pass=False, svtype=None, n_truth=None, text_labels=None,
-                average=False, prevalence='mean', grid_n=200,
+                average=False, prevalence='mean', grid_n=200, pool=False,
                 show_fluctuation_band=False, flag_divergent_curves=False,
                 divergence_threshold=0.1):
     """Render a collection of ValRecords as an overlaid *kind* plot.
@@ -1355,6 +1471,9 @@ def plot_curves(records, kind, ax=None, *, use_counts=True, title=None,
     if cfg['log']:
         ax.set_xscale('log')
         ax.set_yscale('log')
+
+    if pool:
+        records = pool_val_dfs(records)
 
     # Collapse the sample dimension into per-callset mean curves.
     if average:
@@ -1403,9 +1522,11 @@ def plot_curves(records, kind, ax=None, *, use_counts=True, title=None,
             r.compute_curve(kind, filter_pass=filter_pass, svtype=svtype, verbose=verbose)
         if r.curve is None:
             continue
+
+        model_name_safe = r.model_name if r.model_name is not None else ""
         draw_text = (text_on and r.callset_name not in paired_raw_callers
-                     and r.callset_name not in text_drawn)
-        if draw_text:
+                     and ((r.callset_name not in text_drawn) or (model_name_safe.startswith('consensus'))))
+        if draw_text and not model_name_safe.startswith('consensus'):
             text_drawn.add(r.callset_name)
         res = plot_single_curve(ax, r, kind, use_counts=use_counts,
                                 draw_text=draw_text, svensemble2_cutoff=svensemble2_cutoff)
