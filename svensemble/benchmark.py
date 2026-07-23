@@ -142,7 +142,7 @@ _style_mappings = {
         'line': {
             'color': xgfs_fancy6[0],
             'linewidth': 0.7,
-            'dashes': (2, 2),
+            'dashes': (4, 4),
             'label': 'GRIDSS',
         },
         'text': {
@@ -153,7 +153,7 @@ _style_mappings = {
         'line': {
             'color': xgfs_fancy6[0],
             'linewidth': 1,
-            'dashes': (2, 2),
+            'dashes': (4, 4),
             'label': 'GRIDSS (High Confidence Calls)',
         },
         'text': {
@@ -185,7 +185,7 @@ _style_mappings = {
         'line': {
             'color': xgfs_fancy6[3],
             'linewidth': 0.7,
-            'dashes': (2, 2),
+            'dashes': (4, 4),
             'label': 'Manta',
         },
         'text': {
@@ -206,7 +206,7 @@ _style_mappings = {
         'line': {
             'color': xgfs_fancy6[2],
             'linewidth': 0.7,
-            'dashes': (2, 2),
+            'dashes': (4, 4),
             'label': 'Delly',
         },
         'text': {
@@ -227,7 +227,7 @@ _style_mappings = {
         'line': {
             'color': (0.55, 0.45, 0.95),
             'linewidth': 1,
-            'dashes': (6, 2.5),
+            'dashes': (12, 5),
             'label': 'SURVIVOR Short-Read Consensus',
         },
         'text': {
@@ -238,7 +238,7 @@ _style_mappings = {
         'line': {
             'color': (0.88, 0.45, 0.72),
             'linewidth': 1,
-            'dashes': (6, 2.5),
+            'dashes': (12, 5),
             'label': 'SURVIVOR Long-Read Consensus',
         },
         'text': {
@@ -249,7 +249,7 @@ _style_mappings = {
         'line': {
             'color': (0.45, 0.35, 0.65),
             'linewidth': 1,
-            'dashes': (6, 2.5),
+            'dashes': (12, 5),
             'label': 'SURVIVOR All-Caller Consensus',
         },
         'text': {
@@ -330,7 +330,7 @@ _style_mappings = {
         'line': {
             'color': xgfs_fancy6[3],
             'linewidth': 0.7,
-            'dashes': (4, 2),
+            'dashes': (8, 4),
             'label': 'Manta (Candidate)',
         },
         'text': {
@@ -351,7 +351,7 @@ _style_mappings = {
         'line': {
             'color': xgfs_fancy_ext[0],
             'linewidth': 0.7,
-            'dashes': (2, 2),
+            'dashes': (4, 4),
             'label': 'Sniffles',
         },
         'text': {
@@ -362,7 +362,7 @@ _style_mappings = {
         'line': {
             'color': xgfs_fancy_ext[0],
             'linewidth': 1,
-            'dashes': (2, 2),
+            'dashes': (4, 4),
             'label': 'Sniffles (High Confidence Calls)',
         },
         'text': {
@@ -373,7 +373,7 @@ _style_mappings = {
         'line': {
             'color': xgfs_fancy_ext[3],
             'linewidth': 0.7,
-            'dashes': (2, 2),
+            'dashes': (4, 4),
             'label': 'Severus',
         },
         'text': {
@@ -384,7 +384,7 @@ _style_mappings = {
         'line': {
             'color': xgfs_fancy_ext[3],
             'linewidth': 1,
-            'dashes': (2, 2),
+            'dashes': (4, 4),
             'label': 'Severus (High Confidence Calls)',
         },
         'text': {
@@ -395,7 +395,7 @@ _style_mappings = {
         'line': {
             'color': xgfs_fancy_ext[4],
             'linewidth': 0.7,
-            'dashes': (2, 2),
+            'dashes': (4, 4),
             'label': 'CuteSV',
         },
         'text': {
@@ -406,7 +406,7 @@ _style_mappings = {
         'line': {
             'color': xgfs_fancy_ext[4],
             'linewidth': 1,
-            'dashes': (2, 2),
+            'dashes': (4, 4),
             'label': 'CuteSV (High Confidence Calls)',
         },
         'text': {
@@ -417,7 +417,7 @@ _style_mappings = {
         'line': {
             'color': xgfs_fancy_ext[6],
             'linewidth': 0.7,
-            'dashes': (2, 2),
+            'dashes': (4, 4),
             'label': 'Smoove',
         },
         'text': {
@@ -850,6 +850,16 @@ _model_style_mappings = {
         }
     },
     'consensus_7': {
+        'line': {
+            'color': xgfs_fancy6[0],
+            'linewidth': 0,
+            'label': 'consensus - min matches 7',
+        },
+        'text': {
+            'label': 'c7',
+        }
+    },
+    'consensus_8': {
         'line': {
             'color': xgfs_fancy6[0],
             'linewidth': 0,
