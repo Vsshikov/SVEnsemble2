@@ -6,6 +6,7 @@ from matplotlib import pyplot as plt
 import pandas as pd
 from sklearn.metrics import roc_curve
 from sklearn.metrics import precision_recall_curve
+from sklearn.calibration import calibration_curve
 import numpy as np
 import pickle
 from typing import Dict, Any, List, Tuple
@@ -1112,6 +1113,11 @@ _CURVE_KINDS = {
         'ylabel': lambda counts: 'Precision Gain',
         'log': False, 'text': True, 'text_default': False, 'lim': 'prg',
     },
+    'calibration': {
+        'xlabel': lambda counts: 'Predicted Probability',
+        'ylabel': lambda counts: 'True Probability',
+        'log': False, 'text': True, 'text_default': False, 'lim': 'calibration',
+    },
 }
 
 
@@ -1177,7 +1183,7 @@ def val_dict_from_records(records):
 
 
 def _compute_curve_arrays(val_df, callset_name, model_name, kind, *,
-                          filter_pass=False, svtype=None, verbose=False):
+                          filter_pass:bool|str=False, svtype=None, verbose=False):
     """Canonical curve arrays for one callset, or None when the callset has no
     true positives or no true negatives (curve undefined).
 
@@ -1189,11 +1195,13 @@ def _compute_curve_arrays(val_df, callset_name, model_name, kind, *,
     df = val_df.dropna().copy()
 
     mask = np.ones(len(df), dtype=bool)
-    if filter_pass:
+    if (isinstance(filter_pass, bool) and filter_pass) or (filter_pass == 'mask'):
         if 'FILTER_PASS' in df.columns:
             mask = df['FILTER_PASS'].astype(bool).to_numpy()
         elif verbose:
             print(f'{callset_name} does not have a FILTER_PASS column, ignoring filter_pass argument')
+    elif (filter_pass == 'rank') and ('FILTER_PASS' not in df.columns):
+        print(f'{callset_name} does not have a FILTER_PASS column, ignoring filter_pass argument')
     if svtype is not None:
         mask = mask & (df['INFO_INFERRED_SVTYPE'] == svtype).to_numpy()
     df = df.loc[mask, :]
@@ -1209,7 +1217,10 @@ def _compute_curve_arrays(val_df, callset_name, model_name, kind, *,
         if verbose:
             print(f'{callset_name} has no true negatives, skipping')
         return None
+    # pred_series = df['qual_metric']
     pred_series = df.iloc[:, 1]
+    if (filter_pass == 'rank') and ('FILTER_PASS' in df.columns):
+        pred_series = pred_series + (df['FILTER_PASS'].astype(int) * (np.max(pred_series) + 1))
 
     if kind in ('roc', 'reverse_roc'):
         fpr, tpr, thresholds = roc_curve(truth_series, pred_series, pos_label=True)
@@ -1243,6 +1254,12 @@ def _compute_curve_arrays(val_df, callset_name, model_name, kind, *,
                 'tp': tp[valid], 'fp': fp[valid], 'fn': fn[valid],
                 'n_pos': n_pos, 'n_neg': n_neg}
 
+    if kind == 'calibration':
+        pred_normalized = pred_series / np.max(pred_series)
+        prob_true, prob_pred = calibration_curve(truth_series, pred_normalized, n_bins=10)
+        return {'kind': kind, 'prob_true': prob_true, 'prob_pred': prob_pred,
+                'n_pos': n_pos, 'n_neg': n_neg}
+
     raise ValueError(f'unknown curve kind: {kind!r}')
 
 
@@ -1273,6 +1290,10 @@ def _curve_display(curve, use_counts):
         return recall, precision, thr
     if kind == 'prg':
         return curve['rec_gain'], curve['prec_gain'], curve['thresholds']
+    if kind == 'calibration':
+        # Since thresholds are required by contract, return a dummy 0-array of appropriate length for them
+        return curve['prob_pred'], curve['prob_true'], np.zeros(len(curve['prob_pred']))
+
     raise ValueError(f'unknown curve kind: {curve.get("kind")!r}')
 
 
@@ -1282,6 +1303,7 @@ _CURVE_XY = {
     'reverse_roc': ('fpr', 'tpr'),
     'prc': ('recall', 'precision'),
     'prg': ('rec_gain', 'prec_gain'),
+    'calibration': ('prob_pred', 'prob_true'),
 }
 
 
@@ -1498,7 +1520,7 @@ def plot_curves(records, kind, ax=None, *, use_counts=True, title=None,
     # Baseline reference line, drawn first and unlabeled.
     if kind == 'prg':
         ax.plot([0, 1], [1, 0], color='0.75', linewidth=0.8, linestyle='--', zorder=0)
-    elif kind == 'roc' and not use_counts:
+    elif (kind == 'roc' and not use_counts) or (kind == 'calibration'):
         ax.plot([0, 1], [0, 1], color='0.75', linewidth=0.8, linestyle='--', zorder=0)
 
     # Order by canonical callset order, then model order. Dedup by
@@ -1772,6 +1794,22 @@ def plot_precision_recall_gain_curves(
     )
 
 
+def plot_calibration_curves(
+    sample_val_dict, ax=None, title=None,
+    svensemble2_cutoff=None, verbose=False,
+    text_labels=False,
+    xlim=None, ylim=None, model=None,
+):
+    """Plot calibration curves.
+    """
+    records = records_from_val_dict(sample_val_dict, model_name=model)
+    return plot_curves(
+        records, 'calibration', ax=ax, title=title,
+        svensemble2_cutoff=None, verbose=verbose,
+        xlim=xlim, ylim=ylim, text_labels=text_labels,
+    )
+
+
 # Map the public wrapper plot_* functions to their curve kind, so callers that
 # are parameterised by a plot_func (e.g. the notebook facet grids) can route to
 # plot_curves / average_curves for the matching kind. Keyed by function name so
@@ -1782,6 +1820,7 @@ PLOT_FUNC_KINDS = {
     'plot_reverse_roc_curves': 'reverse_roc',
     'plot_precision_recall_curves': 'prc',
     'plot_precision_recall_gain_curves': 'prg',
+    'plot_calibration_curves': 'calibration',
 }
 
 
@@ -2239,7 +2278,7 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
     if isinstance(additional_cols, list):
         cols_to_keep.extend([col for col in additional_cols if ((col not in cols_to_keep) and (col in callset_bps_.columns))])
 
-    return callset_bps_.loc[callset_bps_['INFO_EVENT'].notna(), cols_to_keep]
+    return callset_bps_.loc[callset_bps_['INFO_EVENT'].notna(), cols_to_keep].rename(columns={f"{sample_config['callsets'][callset_name]['params']['qual_metric']}": 'qual_metric'})
 
 
 
@@ -2298,7 +2337,7 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, tr
     if isinstance(additional_cols, list):
         cols_to_keep.extend([col for col in additional_cols if ((col not in cols_to_keep) and (col in svens_calls_.columns))])
     val_df = svens_calls_[cols_to_keep]
-    val_df = val_df[val_df[pred_col].notna()]
+    val_df = val_df[val_df[pred_col].notna()].rename(columns={pred_col: 'qual_metric'})
 
     return val_df
 
