@@ -157,53 +157,83 @@ class TestGetXyFromTrainingDf:
 class TestEstimateDuplessisWeights:
 
     def test_returns_weight_dict(self, splits):
-        result = models._estimate_duplessis_weights(splits, {"n_estimators": 50})
-        assert result is not None
-        assert 0 in result and 1 in result
-        assert result[0] > 0 and result[1] > 0
+        estimation_params, weight_dict = models._estimate_duplessis_weights(
+            splits, {"n_estimators": 50},
+        )
+        assert 0 in weight_dict and 1 in weight_dict
+        assert weight_dict[0] > 0 and weight_dict[1] > 0
+        assert "label_prob" in estimation_params
 
     def test_zero_weight_when_no_positives_in_train(self, splits):
         splits["y_train"] = pd.Series(np.zeros(len(splits["y_train"]), dtype=int))
-        result = models._estimate_duplessis_weights(splits, {"n_estimators": 50})
-        assert result is not None
-        assert result[1] == 0
+        estimation_params, weight_dict = models._estimate_duplessis_weights(
+            splits, {"n_estimators": 50},
+        )
+        assert weight_dict[1] == 0
 
     def test_zero_weight_when_no_positives_in_val(self, splits):
         splits["y_val"] = pd.Series(np.zeros(len(splits["y_val"]), dtype=int))
-        result = models._estimate_duplessis_weights(splits, {"n_estimators": 50})
-        assert result is not None
-        assert result[1] == 0
+        estimation_params, weight_dict = models._estimate_duplessis_weights(
+            splits, {"n_estimators": 50},
+        )
+        assert weight_dict[1] == 0
 
     def test_handles_nan_in_features(self, splits_with_nan):
-        """The non-traditional RF should fill NaN internally."""
-        result = models._estimate_duplessis_weights(
+        """The non-traditional classifier should fill NaN internally."""
+        estimation_params, weight_dict = models._estimate_duplessis_weights(
             splits_with_nan, {"n_estimators": 50},
         )
-        # Should succeed without error (NaN is filled internally)
-        assert 0 in result and 1 in result
+        assert 0 in weight_dict and 1 in weight_dict
 
     def test_caps_nontrad_estimators(self, splits):
-        result = models._estimate_duplessis_weights(
+        estimation_params, weight_dict = models._estimate_duplessis_weights(
             splits, {"n_estimators": 1000},
         )
-        # Should not raise — n_estimators capped to 70 for non-trad RF
-        assert isinstance(result, dict)
+        assert 0 in weight_dict and 1 in weight_dict
 
     def test_floors_label_freq_when_estimate_near_zero(self, splits):
-        """When the non-traditional RF assigns near-zero probability to the
-        true positives in the validation set, label_freq must be floored to
-        _LABEL_FREQ_FLOOR instead of being left free to blow up the weight
-        estimate (or, previously, triggering a None return)."""
+        """When the non-traditional classifier assigns near-zero probability
+        to the true positives in the validation set, label_freq must be
+        floored to _LABEL_FREQ_FLOOR."""
         n_val = len(splits["y_val"])
         with patch.object(
             RF, "predict_proba",
             return_value=np.column_stack([np.full(n_val, 1 - 1e-7), np.full(n_val, 1e-7)]),
         ):
-            result = models._estimate_duplessis_weights(splits, {"n_estimators": 50})
+            estimation_params, weight_dict = models._estimate_duplessis_weights(
+                splits, {"n_estimators": 50},
+            )
         label_prob = splits["y"].sum() / len(splits["y"])
         expected_clpr = label_prob / models._LABEL_FREQ_FLOOR
-        assert result[1] == pytest.approx(2 * expected_clpr / label_prob)
-        assert np.isfinite(result[1])
+        assert weight_dict[1] == pytest.approx(2 * expected_clpr / label_prob)
+        assert np.isfinite(weight_dict[1])
+
+    def test_estimator_xgb(self, splits):
+        """XGBoost non-traditional estimator produces finite, positive weights."""
+        estimation_params, weight_dict = models._estimate_duplessis_weights(
+            splits, {"n_estimators": 50}, estimator="xgb",
+        )
+        assert 0 in weight_dict and 1 in weight_dict
+        assert np.isfinite(weight_dict[0]) and np.isfinite(weight_dict[1])
+        assert weight_dict[0] > 0 and weight_dict[1] > 0
+
+    def test_unknown_estimator_raises(self, splits):
+        """Unknown estimator string raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown non-traditional estimator"):
+            models._estimate_duplessis_weights(
+                splits, {"n_estimators": 50}, estimator="unknown",
+            )
+
+    def test_clpr_shortcircuits_estimation(self, splits):
+        """Supplying clpr skips estimation and returns expected weights."""
+        clpr_input = 0.4
+        estimation_params, weight_dict = models._estimate_duplessis_weights(
+            splits, {"n_estimators": 50}, clpr=clpr_input,
+        )
+        assert estimation_params["clpr"] == clpr_input
+        label_prob = splits["y"].sum() / len(splits["y"])
+        assert weight_dict[0] == pytest.approx(1 / (1 - label_prob))
+        assert weight_dict[1] == pytest.approx(2 * clpr_input / label_prob)
 
 
 # ---------------------------------------------------------------------------
