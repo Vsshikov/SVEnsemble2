@@ -2,3 +2,6 @@
 .cursorindexingignore
 
 svensemble.egg-info/*
+cache/*
+.claude/*
+.vscode/*
