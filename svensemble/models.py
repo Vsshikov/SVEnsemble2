@@ -1,6 +1,7 @@
 """
 PU models for SV call probability estimation.
 """
+import inspect
 import os
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,43 @@ from . import matched_breakpoints as mbps
 # e1 estimator can land arbitrarily close to zero.
 _LABEL_FREQ_FLOOR = 1e-3
 _VALID_MIN_MATCHES_MODES = ['majority', 'all']
+
+
+def _build_nontrad_rf(model_kwargs: dict, **kwargs) -> RF:
+    """Instantiate a non-traditional RF for label-frequency estimation."""
+    sig_params = set(inspect.signature(RF).parameters)
+    nontrad_kwargs: dict[str, Any] = {
+        k: v for k, v in model_kwargs.items() if k in sig_params
+    }
+    if 'n_estimators' in nontrad_kwargs:
+        nontrad_kwargs['n_estimators'] = min(nontrad_kwargs['n_estimators'], 70)
+    if 'n_features' not in kwargs:
+        raise ValueError("n_features not supplied to nontrad rf model builder.")
+    n_features = kwargs.get('n_features')
+    max_features = int(np.sqrt(n_features)) if n_features is not None else 'sqrt'
+    return RF(
+        max_features=max_features,
+        random_state=0,
+        **nontrad_kwargs,
+    )
+
+
+def _build_nontrad_xgb(model_kwargs: dict, **kwargs) -> XGB:
+    """Instantiate a non-traditional XGBoost for label-frequency estimation."""
+    sig_params = set(inspect.signature(XGB).parameters)
+    nontrad_kwargs: dict[str, Any] = {
+        k: v for k, v in model_kwargs.items() if k in sig_params
+    }
+    return XGB(
+        random_state=0,
+        **nontrad_kwargs,
+    )
+
+
+_nontrad_dispatch = {
+    'rf': _build_nontrad_rf,
+    'xgb': _build_nontrad_xgb,
+}
 
 
 class SVEnsembleConsensusClassifier(ClassifierMixin, BaseEstimator):
@@ -115,11 +153,13 @@ class SVEnsembleConsensusClassifier(ClassifierMixin, BaseEstimator):
 def _estimate_duplessis_weights(
     training_set_train_test_split: dict,
     model_kwargs: dict,
-) -> dict[int, float]:
+    clpr: float | None = None,
+    estimator: str = 'rf',
+) -> tuple[dict[str, float], dict[int, float]]:
     """
     Estimate PU class weights using the Duplessis method.
 
-    Trains a small "non-traditional" Random Forest on the train split, then
+    Trains a small non-traditional classifier on the train split, then
     estimates the label frequency c = p(s=1|y=1) on the validation split
     using the e1 estimator of Elkan & Noto (2008, Sec. 2): the average
     predicted probability of the non-traditional classifier over the
@@ -128,15 +168,24 @@ def _estimate_duplessis_weights(
     variance. Class weights are then derived from the label frequency
     estimate (Duplessis method).
 
+    Optionally accepts a pre-computed clpr value. If provided, skips the estimation step
+    and returns weight estimates based on the provided class prior value only.
+
     Args:
         training_set_train_test_split: Dict with keys
             X, y, X_train, y_train, X_val, y_val.
-        model_kwargs: Keyword arguments forwarded to the non-traditional RF
-            (only n_estimators and max_depth are used).
+        model_kwargs: Keyword arguments forwarded to the non-traditional
+            classifier (filtered by signature of the chosen estimator).
+        clpr: Optional input class prior value.
+        estimator: Name of the non-traditional estimator to use for
+            label-frequency estimation. Must be a key in _nontrad_dispatch.
 
     Returns:
-        Weight dict {0: w_neg, 1: w_pos}.
+        Tuple (Dict with estimation parameters {param_name: param_value},
+        Weight dict {0: w_neg, 1: w_pos}).
     """
+    estimation_params: dict[str, float] = {}
+
     X = training_set_train_test_split['X']
     y = training_set_train_test_split['y']
     X_train = training_set_train_test_split['X_train']
@@ -144,52 +193,67 @@ def _estimate_duplessis_weights(
     X_val = training_set_train_test_split['X_val']
     y_val = training_set_train_test_split['y_val']
 
+    label_prob = y.sum() / len(y)
+    estimation_params['label_prob'] = label_prob
+
     if y_train.sum() == 0 or y_val.sum() == 0:
         print("No positive labels in the training or validation set, skipping")
-        return {
-            0: y.sum() / len(y),
-            1: 0,
+        estimation_params['clpr'] = 0
+        return estimation_params, {0: label_prob, 1: 0}
+
+    if clpr is not None:
+        estimation_params['clpr'] = clpr
+        return estimation_params, {
+            0: 1 / (1 - label_prob),
+            1: 2 * clpr / label_prob,
         }
 
-    # The non-traditional RF used for label-frequency estimation always
-    # receives 0-filled data (no NaN) regardless of the final classifier.
+    if estimator not in _nontrad_dispatch:
+        raise ValueError(
+            f"Unknown non-traditional estimator '{estimator}'. "
+            f"Supported: {sorted(_nontrad_dispatch)}"
+        )
+    builder = _nontrad_dispatch[estimator]
+    nontrad_clf = builder(model_kwargs, n_features=X.shape[1])
+
+    # The non-traditional classifier used for label-frequency estimation
+    # always receives 0-filled data (no NaN).
     X_train_filled = X_train.fillna(0) if X_train.isna().any().any() else X_train
     X_val_filled = X_val.fillna(0) if X_val.isna().any().any() else X_val
 
-    nontrad_kwargs: dict[str, Any] = {}
-    if 'n_estimators' in model_kwargs:
-        nontrad_kwargs['n_estimators'] = min(model_kwargs['n_estimators'], 70)
-    if 'max_depth' in model_kwargs:
-        nontrad_kwargs['max_depth'] = model_kwargs['max_depth']
-
-    rf_nontrad = RF(
-        max_features=int(np.sqrt(X.shape[1])),
-        random_state=0,
-        **nontrad_kwargs,
-    )
-    rf_nontrad.fit(X_train_filled, y_train)
+    nontrad_clf.fit(X_train_filled, y_train)
 
     # e1 = (1/n) * sum_{x in P} g(x), P = labeled (true-positive) validation
-    # examples, g(x) = predicted probability of the non-traditional RF.
-    y_proba_nontrad = rf_nontrad.predict_proba(X_val_filled)[:, 1]
+    # examples, g(x) = predicted probability of the non-traditional classifier.
+    y_proba_nontrad = nontrad_clf.predict_proba(X_val_filled)[:, 1]
     label_freq = y_proba_nontrad[y_val == 1].mean()
-    label_prob = y.sum() / len(y)
 
     if label_freq < _LABEL_FREQ_FLOOR:
         print(
             f"label_freq estimate ({label_freq:.2e}) is below the floor "
-            f"({_LABEL_FREQ_FLOOR:.2e}): the non-traditional RF assigned "
-            "near-zero probability to the true positives in the validation "
-            "set. Flooring label_freq to avoid an unstable weight estimate."
+            f"({_LABEL_FREQ_FLOOR:.2e}): the non-traditional classifier "
+            "assigned near-zero probability to the true positives in the "
+            "validation set. Flooring label_freq to avoid an unstable "
+            "weight estimate."
         )
         label_freq = _LABEL_FREQ_FLOOR
 
     clpr = label_prob / label_freq
+    estimation_params['clpr'] = clpr
+    estimation_params['label_freq'] = label_freq
 
-    return {
-        0: 1 / (1 - label_prob),
-        1: 2 * clpr / label_prob,
-    }
+    print(f"PU estimates: clpr {clpr:.2e}, label_prob {label_prob:.2e}, label_freq {label_freq:.2e}")
+
+    return estimation_params, {0: 1 / (1 - label_prob), 1: 2 * clpr / label_prob}
+
+
+def _assign_estimation_params(model: RF | XGB, estimation_params: dict[str, float]) -> None:
+    if 'clpr' in estimation_params:
+        model.clpr_ = estimation_params['clpr']
+    if 'label_prob' in estimation_params:
+        model.label_prob_ = estimation_params['label_prob']
+    if 'label_freq' in estimation_params:
+        model.label_freq_ = estimation_params['label_freq']
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +262,7 @@ def _estimate_duplessis_weights(
 
 def train_unbiased_rf_for_split(
     training_set_train_test_split: dict,
+    clpr: float | None = None,
     **model_kwargs,
 ) -> RF:
     """
@@ -209,8 +274,11 @@ def train_unbiased_rf_for_split(
     }
     _model_kwargs.update(model_kwargs)
 
-    weight_dict = _estimate_duplessis_weights(
-        training_set_train_test_split, _model_kwargs,
+    estimation_params, weight_dict = _estimate_duplessis_weights(
+        training_set_train_test_split,
+        _model_kwargs,
+        clpr=clpr,
+        estimator='rf',
     )
 
     X_train = training_set_train_test_split['X_train']
@@ -232,6 +300,9 @@ def train_unbiased_rf_for_split(
         **duplessis_kwargs,
     )
     rf.fit(X_train, y_train)
+
+    _assign_estimation_params(rf, estimation_params)
+
     return rf
 
 
@@ -241,6 +312,7 @@ def train_unbiased_rf_for_split(
 
 def train_unbiased_xgb_for_split(
     training_set_train_test_split: dict,
+    clpr: float | None = None,
     **model_kwargs,
 ) -> XGB:
     """
@@ -255,8 +327,11 @@ def train_unbiased_xgb_for_split(
     }
     _model_kwargs.update(model_kwargs)
 
-    weight_dict = _estimate_duplessis_weights(
-        training_set_train_test_split, _model_kwargs,
+    estimation_params, weight_dict = _estimate_duplessis_weights(
+        training_set_train_test_split,
+        _model_kwargs,
+        clpr=clpr,
+        estimator='xgb',
     )
 
     X_train = training_set_train_test_split['X_train']
@@ -278,6 +353,9 @@ def train_unbiased_xgb_for_split(
         y_train == 1, weight_dict[1], weight_dict[0],
     )
     xgb.fit(X_train, y_train, sample_weight=sample_weights)
+
+    _assign_estimation_params(xgb, estimation_params)
+
     return xgb
 
 
@@ -368,8 +446,12 @@ def train_unbiased_rf(
 
     if verbose:
         print(f"Training PU model for training set: {training_set_name}")
-    model_kwargs = workflow_config['model']['training_params']['model_kwargs']
-    rf_fit = train_unbiased_rf_for_split(training_set_splits, **model_kwargs)
+    training_params = workflow_config['model']['training_params']
+    model_kwargs = training_params['model_kwargs']
+    clpr = training_params.get('clpr')
+    rf_fit = train_unbiased_rf_for_split(
+        training_set_splits, clpr=clpr, **model_kwargs,
+    )
 
     return X, rf_fit
 
@@ -453,8 +535,12 @@ def train_unbiased_concat_rf(
 
     if verbose:
         print(f"Training PU model for training set: {training_set_name}")
-    model_kwargs = workflow_config['model']['training_params']['model_kwargs']
-    rf_fit = train_unbiased_rf_for_split(training_set_splits, **model_kwargs)
+    training_params = workflow_config['model']['training_params']
+    model_kwargs = training_params['model_kwargs']
+    clpr = training_params.get('clpr')
+    rf_fit = train_unbiased_rf_for_split(
+        training_set_splits, clpr=clpr, **model_kwargs,
+    )
 
     return X, rf_fit
 
@@ -498,8 +584,12 @@ def train_unbiased_xgb(
 
     if verbose:
         print(f"Training XGBoost PU model for training set: {training_set_name}")
-    model_kwargs = workflow_config['model']['training_params']['model_kwargs']
-    xgb_fit = train_unbiased_xgb_for_split(training_set_splits, **model_kwargs)
+    training_params = workflow_config['model']['training_params']
+    model_kwargs = training_params['model_kwargs']
+    clpr = training_params.get('clpr')
+    xgb_fit = train_unbiased_xgb_for_split(
+        training_set_splits, clpr=clpr, **model_kwargs,
+    )
 
     return X, xgb_fit
 
@@ -560,8 +650,12 @@ def train_unbiased_xgb_concat(
 
     if verbose:
         print(f"Training XGBoost PU model for training set: {training_set_name}")
-    model_kwargs = workflow_config['model']['training_params']['model_kwargs']
-    xgb_fit = train_unbiased_xgb_for_split(training_set_splits, **model_kwargs)
+    training_params = workflow_config['model']['training_params']
+    model_kwargs = training_params['model_kwargs']
+    clpr = training_params.get('clpr')
+    xgb_fit = train_unbiased_xgb_for_split(
+        training_set_splits, clpr=clpr, **model_kwargs,
+    )
 
     return X, xgb_fit
 
