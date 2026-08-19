@@ -790,85 +790,27 @@ _model_style_mappings = {
             'linewidth': 1,
         }
     },
-        'consensus_1': {
-        'line': {
-            'color': xgfs_fancy6[0],
-            'linewidth': 0,
-            'label': 'consensus - min matches 1',
-        },
-        'text': {
-            'label': 'c1',
+    **{
+        f'consensus_{i}': {
+            'line': {
+                'color': xgfs_fancy6[0],
+                'linewidth': 0,
+                'label': f'consensus - min matches {i}',
+            },
+            'text': {
+                'label': f'c{i}',
+            }
         }
+        for i in range(1, 9)
     },
-    'consensus_2': {
-        'line': {
-            'color': xgfs_fancy6[0],
-            'linewidth': 0,
-            'label': 'consensus - min matches 2',
-        },
-        'text': {
-            'label': 'c2',
+    **{
+        f'unbiased_xgb_clpr{i:02d}': {
+            'line': {
+                'color': (v, v, v),
+                'linewidth': 1,
+            }
         }
-    },
-    'consensus_3': {
-        'line': {
-            'color': xgfs_fancy6[0],
-            'linewidth': 0,
-            'label': 'consensus - min matches 3',
-        },
-        'text': {
-            'label': 'c3',
-        }
-    },
-    'consensus_4': {
-        'line': {
-            'color': xgfs_fancy6[0],
-            'linewidth': 0,
-            'label': 'consensus - min matches 4',
-        },
-        'text': {
-            'label': 'c4',
-        }
-    },
-    'consensus_5': {
-        'line': {
-            'color': xgfs_fancy6[0],
-            'linewidth': 0,
-            'label': 'consensus - min matches 5',
-        },
-        'text': {
-            'label': 'c5',
-        }
-    },
-    'consensus_6': {
-        'line': {
-            'color': xgfs_fancy6[0],
-            'linewidth': 0,
-            'label': 'consensus - min matches 6',
-        },
-        'text': {
-            'label': 'c6',
-        }
-    },
-    'consensus_7': {
-        'line': {
-            'color': xgfs_fancy6[0],
-            'linewidth': 0,
-            'label': 'consensus - min matches 7',
-        },
-        'text': {
-            'label': 'c7',
-        }
-    },
-    'consensus_8': {
-        'line': {
-            'color': xgfs_fancy6[0],
-            'linewidth': 0,
-            'label': 'consensus - min matches 7',
-        },
-        'text': {
-            'label': 'c7',
-        }
+        for i, v in ((i, 0.9 - i * 0.08) for i in range(11))
     },
 }
 
