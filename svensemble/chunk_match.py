@@ -8,6 +8,7 @@ from functools import lru_cache
 
 import numpy as np
 import pandas as pd
+import igraph as ig
 
 from . import breakpoints as bps
 from . import events as evts
@@ -269,8 +270,9 @@ def get_pairwise_matches(
     insert_delta_threshold: float = 0.7,
     max_dist: int = 10,
     ignore_size: bool = False,
-    ins_dup_match: bool = False
-) -> list[tuple[tuple[str, str], tuple[str, str]]]:
+    ins_dup_match: bool = False,
+    return_graph: bool = True
+) -> ig.Graph | list[tuple[tuple[str, str], tuple[str, str]]]:
     """
     Match breakpoints from multiple sources based on position and insert delta similarity.
 
@@ -282,10 +284,18 @@ def get_pairwise_matches(
         zipped_bp_df (pd.DataFrame): DataFrame containing breakpoint data from multiple sources
         insert_delta_threshold (float): Minimum similarity threshold for insert delta (0-1)
         max_dist (int): Maximum allowed distance between breakpoints
+        ignore_size (bool): If True, skip insert delta filtering
+        ins_dup_match (bool): If True, allow INS/DUP cross-type matching
+        return_graph (bool): If True, return an undirected ig.Graph where
+            each vertex name is a (source, event_id) tuple. Default False
+            returns the raw matched pairs list.
 
     Returns:
-        list[tuple[tuple[str, str], tuple[str, str]]]: List of matched breakpoint pairs,
-        where each pair contains tuples of (source, event_id) for both breakpoints
+        ig.Graph: Undirected graph of matched breakpoints. Each vertex has a
+            'name' attribute holding a (source, event_id) tuple. Returned
+            when return_graph is True.
+        list[tuple[tuple[str, str], tuple[str, str]]]: Raw matched pairs,
+            returned when return_graph is False (default).
     """
     # First, minimize the number of columns in the input dataframe
     # by removing columns that are not needed for matching
@@ -371,7 +381,7 @@ def get_pairwise_matches(
                 ]
             )
 
-    return matched_pairs
+    return ig.Graph.TupleList(matched_pairs, directed=False) if return_graph else matched_pairs
 
 def merge_bp_pairs_dfs(pairs):
     """
@@ -418,11 +428,79 @@ def merge_bp_pairs_dfs(pairs):
 
     return components
 
+_TOPOLOGY_PREFIX = 'svensembletopology'
+
+def calc_component_stats(graph_in: ig.Graph) -> pd.DataFrame:
+    """Compute topological features for each connected component of a match graph.
+
+    Args:
+        graph_in (ig.Graph): Undirected graph where each vertex name is a
+            (source, event_id) tuple, as returned by get_pairwise_matches.
+
+    Returns:
+        pd.DataFrame: One row per connected component (in iteration order of
+            graph_in.connected_components()), with columns for degree, density,
+            diameter, and clustering coefficient statistics.
+    """
+    out = {
+        f'{_TOPOLOGY_PREFIX}_n_nodes': [],
+        f'{_TOPOLOGY_PREFIX}_degree_mean': [],
+        f'{_TOPOLOGY_PREFIX}_degree_max': [],
+        f'{_TOPOLOGY_PREFIX}_density': [],
+        f'{_TOPOLOGY_PREFIX}_diameter': [],
+        f'{_TOPOLOGY_PREFIX}_clustering_coeff_mean': [],
+    }
+    for component in graph_in.connected_components():
+        subgraph = graph_in.subgraph(component)
+        out[f'{_TOPOLOGY_PREFIX}_n_nodes'].append(subgraph.vcount())
+        degrees = subgraph.degree()
+        out[f'{_TOPOLOGY_PREFIX}_degree_mean'].append(np.nanmean(degrees))
+        out[f'{_TOPOLOGY_PREFIX}_degree_max'].append(np.max(degrees))
+        out[f'{_TOPOLOGY_PREFIX}_density'].append(subgraph.density())
+        out[f'{_TOPOLOGY_PREFIX}_diameter'].append(subgraph.diameter())
+        out[f'{_TOPOLOGY_PREFIX}_clustering_coeff_mean'].append(
+            np.nanmean(subgraph.transitivity_local_undirected())
+        )
+    return pd.DataFrame(out)
+
+
+def graph_to_unique_component_lists(
+    graph_in: ig.Graph,
+) -> list[list[tuple[str, str]]]:
+    """Convert a match graph into per-component node lists with one node per source.
+
+    Within each component, nodes are sorted by descending degree so that the
+    best-connected representative for each source is kept.
+
+    Args:
+        graph_in (ig.Graph): Undirected graph where each vertex name is a
+            (source, event_id) tuple.
+
+    Returns:
+        list[list[tuple[str, str]]]: One inner list per connected component,
+            each containing at most one (source, event_id) tuple per source.
+    """
+    out = []
+    for component in graph_in.connected_components():
+        subgraph = graph_in.subgraph(component)
+        degrees = subgraph.degree()
+        sources_seen = []
+        component_list = []
+        for node in sorted(subgraph.vs, key=lambda v: degrees[v.index], reverse=True):
+            if node['name'][0] in sources_seen:
+                continue
+            sources_seen.append(node['name'][0])
+            component_list.append(node['name'])
+        out.append(component_list)
+    return out
+
+
 def build_matched_bp_df(
     bp_df_dict: dict[str, pd.DataFrame],
     matched_lists: list[list[tuple[str, str]]],
     ref_callset: str | None = None,
-    ids_only: bool = False
+    ids_only: bool = False,
+    topology_df: pd.DataFrame = None,
 ) -> pd.DataFrame:
     """Build a DataFrame containing matched breakpoints from different sources.
 
@@ -435,6 +513,9 @@ def build_matched_bp_df(
         matched_lists (list[list[tuple[str, str]]]): List of lists, where each inner list
             contains tuples of (source, event_id) representing connected breakpoints
         ids_only (bool, optional): Whether to return only the event IDs. Defaults to False.
+        topology_df (pd.DataFrame, optional): Per-component topological features,
+            one row per component aligned with matched_lists. Concatenated into the
+            result when provided.
     Returns:
         pd.DataFrame: DataFrame where each row contains the matched breakpoint data from
             different sources side by side, with source-specific column prefixes. Only
@@ -467,6 +548,9 @@ def build_matched_bp_df(
             sources_seen.add(bp_source)
             id_dict[f'{bp_source}_INFO_EVENT'][i] = bp_event
     id_table = pd.DataFrame(id_dict, dtype='string')
+
+    if topology_df is not None:
+        id_table = pd.concat([id_table, topology_df.reset_index(drop=True)], axis=1)
 
     # Remove rows where the only event is from the reference callset
     if ref_callset is not None:
@@ -502,7 +586,9 @@ def inner_join_bps(
     insert_delta_threshold: float = 0.7,
     max_dist: int = 10,
     ids_only: bool = False,
-    ignore_size: bool = False
+    add_topology: bool = False,
+    ignore_size: bool = False,
+    workflow_config: dict | None = None
 ) -> pd.DataFrame:
     """Find all pairwise matches in the breakpoint dataframe dictionary
     and return a dataframe with the matches.
@@ -514,25 +600,42 @@ def inner_join_bps(
         for insert delta. Defaults to 0.7.
         max_dist (int, optional): Maximum allowed distance between breakpoints. Defaults to 10.
         ids_only (bool, optional): Whether to return only the event IDs. Defaults to False.
+        add_topology (bool, optional): Whether to add columns with topological characteristics of breakpoint clusters. Defaults to False.
     Returns:
         pd.DataFrame: DataFrame containing matched breakpoints from different sources side by side
     """
     # Combine all breakpoint dataframes into one with source labels
     zipped_bp_df = concat_bp_dfs(bp_df_dict)
 
-    # Find all pairwise matches between breakpoints
-    matched_pairs = get_pairwise_matches(
-        zipped_bp_df,
-        insert_delta_threshold=insert_delta_threshold,
-        max_dist=max_dist,
-        ignore_size=ignore_size
-    )
+    if workflow_config is not None:
+        add_topology = workflow_config['model']['training_params'].get('add_topology', False)
 
-    # Merge connected pairs into lists of related breakpoints
-    matched_lists = merge_bp_pairs_dfs(matched_pairs)
-
-    # Build final dataframe with matched breakpoints side by side
-    matched_bp_df = build_matched_bp_df(bp_df_dict, matched_lists, ref_callset, ids_only)
+    if add_topology:
+        match_graph = get_pairwise_matches(
+            zipped_bp_df,
+            insert_delta_threshold=insert_delta_threshold,
+            max_dist=max_dist,
+            ignore_size=ignore_size,
+            return_graph=True
+        )
+        matched_lists = graph_to_unique_component_lists(match_graph)
+        topology_df = calc_component_stats(match_graph)
+        matched_bp_df = build_matched_bp_df(
+            bp_df_dict, matched_lists, ref_callset, ids_only,
+            topology_df=topology_df
+        )
+    else:
+        match_graph = get_pairwise_matches(
+            zipped_bp_df,
+            insert_delta_threshold=insert_delta_threshold,
+            max_dist=max_dist,
+            ignore_size=ignore_size,
+            return_graph=True
+        )
+        matched_lists = graph_to_unique_component_lists(match_graph)
+        matched_bp_df = build_matched_bp_df(
+            bp_df_dict, matched_lists, ref_callset, ids_only
+        )
 
     return matched_bp_df
 
@@ -542,7 +645,9 @@ def outer_join_bps(
     insert_delta_threshold: float = 0.7,
     max_dist: int = 200,
     ids_only: bool = False,
-    ignore_size: bool = False
+    ignore_size: bool = False,
+    add_topology: bool = False,
+    workflow_config: dict | None = None
 ) -> pd.DataFrame:
     """
     Merge breakpoint dataframes from multiple callers, aligning on matching events.
@@ -553,6 +658,8 @@ def outer_join_bps(
         insert_delta_threshold (float, optional): Threshold for insert delta similarity. Defaults to 0.7.
         max_dist (int, optional): Maximum allowed distance between breakpoints to consider a match. Defaults to 200.
         ids_only (bool, optional): Whether to return only the event IDs. Defaults to False.
+        add_topology (bool, optional): Whether to add columns with topological
+            characteristics of breakpoint clusters. Defaults to False.
 
     Returns:
         pd.DataFrame: Outer-joined DataFrame containing breakpoints from all callers,
@@ -565,7 +672,9 @@ def outer_join_bps(
         insert_delta_threshold=insert_delta_threshold,
         max_dist=max_dist,
         ids_only=True,
-        ignore_size=ignore_size
+        ignore_size=ignore_size,
+        add_topology=add_topology,
+        workflow_config=workflow_config
     )
 
     # Ensure DataFrame type for subsequent merges

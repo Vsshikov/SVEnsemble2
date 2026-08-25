@@ -41,6 +41,29 @@ model_configs = {
         },
         'description': 'Unbiased XGBoost model for SV call probability estimation with native NaN handling.'
     },
+    'unbiased_rf_topol': {
+        'name': 'unbiased_rf_topol',
+        'base': 'unbiased_rf_topol',
+        'training_params': {
+            'function': 'unbiased',
+            'custom_cols': [],
+            'model_kwargs': {},
+            'add_topology': True,
+        },
+        'description': 'Unbiased random forest model for SV call probability estimation.'
+    },
+    'unbiased_xgb_topol': {
+        'name': 'unbiased_xgb_topol',
+        'base': 'unbiased_xgb_topol',
+        'training_params': {
+            'function': 'unbiased_xgb',
+            'custom_cols': [],
+            'model_kwargs': {},
+            'fillna': None,
+            'add_topology': True,
+        },
+        'description': 'Unbiased XGBoost model for SV call probability estimation with native NaN handling.'
+    },
     'consensus': {
         'name': 'consensus',
         'base': 'consensus',
@@ -93,6 +116,17 @@ model_configs = {
             'function': 'unbiased',
             'custom_cols': [],
             'model_kwargs': {'max_depth': 31}
+        },
+        'description': 'Unbiased random forest model for SV call probability estimation. Model with max depth 31 so GPUTreeExplainer can be used.'
+    },
+    'unbiased_d31_topol': {
+        'name': 'unbiased_d31_topol',
+        'base': 'unbiased_rf',
+        'training_params': {
+            'function': 'unbiased',
+            'custom_cols': [],
+            'model_kwargs': {'max_depth': 31},
+            'add_topology': True,
         },
         'description': 'Unbiased random forest model for SV call probability estimation. Model with max depth 31 so GPUTreeExplainer can be used.'
     },

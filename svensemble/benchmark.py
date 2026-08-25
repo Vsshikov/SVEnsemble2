@@ -755,6 +755,26 @@ _model_style_mappings = {
             'label': 'SVE2',
         }
     },
+    'unbiased_xgb_topol': {
+        'line': {
+            'color': (155 / 255, 30 / 255, 30 / 255),
+            'linewidth': 1.5,
+            'linestyle': ':',
+        },
+        'text': {
+            'label': 'SVE2',
+        }
+    },
+    'unbiased_d31_topol': {
+        'line': {
+            'color': (22 / 255, 130 / 255, 70 / 255),
+            'linewidth': 2,
+            'linestyle': ':',
+        },
+        'text': {
+            'label': 'SVE2',
+        }
+    },
     'unbiased_xgb_nosvlen': {
         'line': {
             'color': (231 / 255, 138 / 255, 128 / 255),

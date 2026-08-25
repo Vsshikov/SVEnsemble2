@@ -221,11 +221,14 @@ def _register_match(subparsers):
     p.add_argument("--bps", type=Path, nargs="+", required=True, help="Processed bps.csv files (one per caller).")
     p.add_argument("--ground_truth_bps", type=Path, required=True, help="Ground truth breakpoints CSV.")
     p.add_argument("--callers", type=str, nargs="+", required=True, help="Caller names (same order as --bps).")
+    p.add_argument("--sample", type=str, required=True, help="Sample name.")
+    p.add_argument("--model", type=str, default=None, help="Model name (for custom_cols).")
     p.add_argument("--ground_truth_name", type=str, default="gnomad", help="Ground truth set name.")
     p.add_argument("--max_dist", type=int, default=100, help="Maximum distance for matching.")
     p.add_argument("--insert_delta_threshold", type=float, default=0.7, help="Insert delta threshold.")
     p.add_argument("--output", type=Path, required=True, help="Output matched_bps.csv path.")
     _add_config_io_args(p)
+    _add_model_config_arg(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_match)
 
@@ -233,8 +236,16 @@ def _register_match(subparsers):
 def _cmd_match(args):
     import pandas as pd
     from . import chunk_match
+    from . import utils as sv_utils
 
     config = _load_or_build_config(args)
+
+    workflow_config = sv_utils.build_cli_workflow_config(
+        sample_name=args.sample,
+        callers=args.callers,
+        model_name=args.model,
+        model_config=_load_model_config(args),
+    )
 
     if len(args.bps) != len(args.callers):
         raise ValueError(f"Number of --bps files ({len(args.bps)}) must match --callers ({len(args.callers)})")
@@ -254,6 +265,7 @@ def _cmd_match(args):
         ref_callset=args.ground_truth_name,
         insert_delta_threshold=args.insert_delta_threshold,
         max_dist=args.max_dist,
+        workflow_config=workflow_config
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

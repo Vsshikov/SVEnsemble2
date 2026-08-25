@@ -239,6 +239,10 @@ def preprocess_matchedbps_for_pu(
         if (callset_params['qual_metric'] not in training_cols) and (callset_params['qual_metric'] is not None):
             training_cols.append(f'{callset_name}_{callset_params["qual_metric"]}')
 
+    if sample_config['model'].get('training_params', {}).get('add_topology', False):
+        training_cols.extend(col for col in joint_bp_df.columns if col.startswith('svensembletopology_'))
+
+
     # Find all columns in joint_bp_df that start with any of the training_col names
     for col in training_cols:
         cols_to_retain.extend(
