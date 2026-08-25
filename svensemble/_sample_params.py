@@ -96,6 +96,38 @@ sample_val_sets = {
             'svtypes': ['DEL', 'INS']
         }
     },
+    'HG008-N-D': {
+        'name': '',
+        'path': Path(''),
+        'raw_path': Path(''),
+        'meta': {
+            'svtypes': []
+        }
+    },
+    'HG008-T': {
+        'name': '',
+        'path': Path(''),
+        'raw_path': Path(''),
+        'meta': {
+            'svtypes': []
+        }
+    },
+    'COLO829-N': {
+        'name': '',
+        'path': Path(''),
+        'raw_path': Path(''),
+        'meta': {
+            'svtypes': []
+        }
+    },
+    'COLO829-T': {
+        'name': '',
+        'path': Path(''),
+        'raw_path': Path(''),
+        'meta': {
+            'svtypes': []
+        }
+    },
 }
 
 # Ensure same structure in all val_set dicts by filling in missing keys from the template
