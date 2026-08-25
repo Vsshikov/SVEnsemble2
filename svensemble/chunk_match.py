@@ -430,12 +430,13 @@ def merge_bp_pairs_dfs(pairs):
 
 _TOPOLOGY_PREFIX = 'svensembletopology'
 
-def calc_component_stats(graph_in: ig.Graph) -> pd.DataFrame:
+def calc_component_stats(graph_in: ig.Graph, ignore_callsets: list[str] | None = None) -> pd.DataFrame:
     """Compute topological features for each connected component of a match graph.
 
     Args:
         graph_in (ig.Graph): Undirected graph where each vertex name is a
             (source, event_id) tuple, as returned by get_pairwise_matches.
+        ignore_callsets (list[str], optional): List of callset names to ignore when calculating component stats. Defaults to None.
 
     Returns:
         pd.DataFrame: One row per connected component (in iteration order of
@@ -452,6 +453,9 @@ def calc_component_stats(graph_in: ig.Graph) -> pd.DataFrame:
     }
     for component in graph_in.connected_components():
         subgraph = graph_in.subgraph(component)
+        if ignore_callsets is not None:
+            keep = [v.index for v in subgraph.vs if v['name'][0] not in ignore_callsets]
+            subgraph = subgraph.induced_subgraph(keep)
         out[f'{_TOPOLOGY_PREFIX}_n_nodes'].append(subgraph.vcount())
         degrees = subgraph.degree()
         out[f'{_TOPOLOGY_PREFIX}_degree_mean'].append(np.nanmean(degrees))
@@ -619,7 +623,11 @@ def inner_join_bps(
             return_graph=True
         )
         matched_lists = graph_to_unique_component_lists(match_graph)
-        topology_df = calc_component_stats(match_graph)
+        if ref_callset is not None:
+            ignore_callsets = [ref_callset]
+        else:
+            ignore_callsets = None
+        topology_df = calc_component_stats(match_graph, ignore_callsets=ignore_callsets)
         matched_bp_df = build_matched_bp_df(
             bp_df_dict, matched_lists, ref_callset, ids_only,
             topology_df=topology_df
