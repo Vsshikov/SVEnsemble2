@@ -324,7 +324,7 @@ def preprocess_matchedbps_for_pu(
 def get_X_y_from_training_df(
     training_df: pd.DataFrame,
     match_col: str = 'ref_match',
-    fillna: int | float | None = 0,
+    fillna: float | None = 0,
     verbose: bool = False
 ) -> tuple[pd.DataFrame, pd.Series]:
     """
@@ -356,7 +356,10 @@ def get_X_y_from_training_df(
     for column in X.columns:
         if fillna is not None:
             try:
-                X[column] = X[column].astype(int)
+                if np.allclose(X[column], X[column].round()):
+                    X[column] = X[column].astype(int)
+                else:
+                    X[column] = X[column].astype(float)
             except (ValueError, pd.errors.IntCastingNaNError):
                 X[column] = X[column].astype(float)
         else:

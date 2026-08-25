@@ -102,6 +102,7 @@ def chunker(bp_df: pd.DataFrame, chunk_size: int = 10000, chunk_max_n: int|None 
                         n_chunks += 1
                         yield current_chunk
                         current_chunk = [breakpoint_row]
+                        continue
 
             # Check if current breakpoint is within proximity of the last one in chunk
             if breakpoint_row['POS_bnd1'] <= current_chunk[-1]['POS_bnd1'] + chunk_size:
@@ -271,8 +272,10 @@ def get_pairwise_matches(
     max_dist: int = 10,
     ignore_size: bool = False,
     ins_dup_match: bool = False,
-    return_graph: bool = True
-) -> ig.Graph | list[tuple[tuple[str, str], tuple[str, str]]]:
+    return_graph: bool = True,
+    return_unmatched: bool = False,
+    skip_single_source_for: str | list[str] | None = 'all'
+) -> ig.Graph | list[tuple[tuple[str, str], tuple[str, str]] | tuple[str, str]]:
     """
     Match breakpoints from multiple sources based on position and insert delta similarity.
 
@@ -289,6 +292,7 @@ def get_pairwise_matches(
         return_graph (bool): If True, return an undirected ig.Graph where
             each vertex name is a (source, event_id) tuple. Default False
             returns the raw matched pairs list.
+        return_unmatched (bool): If True, also add unmatched breakpoint pairs to the result as single items.
 
     Returns:
         ig.Graph: Undirected graph of matched breakpoints. Each vertex has a
@@ -297,6 +301,9 @@ def get_pairwise_matches(
         list[tuple[tuple[str, str], tuple[str, str]]]: Raw matched pairs,
             returned when return_graph is False (default).
     """
+    if return_unmatched and skip_single_source_for == 'all':
+        raise ValueError("return_unmatched=True requires skip_single_source_for != 'all'")
+
     # First, minimize the number of columns in the input dataframe
     # by removing columns that are not needed for matching
     col_retain_list = ['source', 'INFO_EVENT', 'CHROM_bnd1', 'CHROM_bnd2', 'POS_bnd1', 'POS_bnd2', 'ALT_bnd1', 'ALT_bnd2', 'INFO_CIPOS_l_bnd1', 'INFO_CIPOS_r_bnd1', 'INFO_CIPOS_l_bnd2', 'INFO_CIPOS_r_bnd2', 'INFO_SVTYPE']
@@ -320,17 +327,25 @@ def get_pairwise_matches(
     zipped_bp_df_.loc[:, 'insert_delta'] = insert_delta
 
     matched_pairs = []
+    unmatched = []
 
     chunk_max_n = 100
     chunk_max_n_dist = max_dist
     for chunk in chunker(zipped_bp_df_, chunk_max_n=chunk_max_n, chunk_max_n_dist=chunk_max_n_dist):
         # Skip chunks with insufficient breakpoints or single source
         if len(chunk) <= 1:
+            if (skip_single_source_for == "all") or (isinstance(skip_single_source_for, list) and (chunk[0]['source'] in skip_single_source_for)):
+                continue
+            if return_unmatched:
+                unmatched.append( (chunk[0]['source'], chunk[0]['INFO_EVENT']) )
             continue
+
 
         chunk_df = pd.DataFrame(chunk)
         if chunk_df['source'].nunique() == 1:
-            continue
+            single_source = chunk_df['source'].values[0]
+            if (skip_single_source_for == "all") or (isinstance(skip_single_source_for, list) and (single_source in skip_single_source_for)):
+                continue
 
         n = len(chunk_df)
 
@@ -368,11 +383,16 @@ def get_pairwise_matches(
         # Create final match matrix (cross-source filter applied inside the matrix)
         match_matrix = _get_match_matrix(pos_match_matrix, delta_matrix, alt_mask, triu_mask, cross_source_mask)
 
+        sources = chunk_df['source'].values
+        events = chunk_df['INFO_EVENT'].values
+
         # Check if any matches exist in the matrix
+        matched_indices = np.zeros(n, dtype=int)
         if np.any(match_matrix):
             i_indices, j_indices = np.where(match_matrix)
-            sources = chunk_df['source'].values
-            events = chunk_df['INFO_EVENT'].values
+
+            matched_indices[i_indices] = 1
+            matched_indices[j_indices] = 1
 
             matched_pairs.extend(
                 [
@@ -381,7 +401,21 @@ def get_pairwise_matches(
                 ]
             )
 
-    return ig.Graph.TupleList(matched_pairs, directed=False) if return_graph else matched_pairs
+        if return_unmatched:
+            unmatched.extend( [ (sources[i], events[i]) for i in np.where(matched_indices == 0)[0] ] )
+
+    if isinstance(skip_single_source_for, list):
+        unmatched = [ (source, event) for source, event in unmatched if source not in skip_single_source_for ]
+    elif skip_single_source_for == "all":
+        unmatched = []
+
+    if return_graph:
+        out = ig.Graph.TupleList(matched_pairs, directed=False)
+        out.add_vertices(unmatched)
+    else:
+        out = matched_pairs + unmatched
+
+    return out
 
 def merge_bp_pairs_dfs(pairs):
     """
@@ -456,6 +490,8 @@ def calc_component_stats(graph_in: ig.Graph, ignore_callsets: list[str] | None =
         if ignore_callsets is not None:
             keep = [v.index for v in subgraph.vs if v['name'][0] not in ignore_callsets]
             subgraph = subgraph.induced_subgraph(keep)
+        if subgraph.vcount() == 0:
+            continue
         out[f'{_TOPOLOGY_PREFIX}_n_nodes'].append(subgraph.vcount())
         degrees = subgraph.degree()
         out[f'{_TOPOLOGY_PREFIX}_degree_mean'].append(np.nanmean(degrees))
@@ -592,7 +628,8 @@ def inner_join_bps(
     ids_only: bool = False,
     add_topology: bool = False,
     ignore_size: bool = False,
-    workflow_config: dict | None = None
+    workflow_config: dict | None = None,
+    return_unmatched: bool = False,
 ) -> pd.DataFrame:
     """Find all pairwise matches in the breakpoint dataframe dictionary
     and return a dataframe with the matches.
@@ -605,6 +642,7 @@ def inner_join_bps(
         max_dist (int, optional): Maximum allowed distance between breakpoints. Defaults to 10.
         ids_only (bool, optional): Whether to return only the event IDs. Defaults to False.
         add_topology (bool, optional): Whether to add columns with topological characteristics of breakpoint clusters. Defaults to False.
+        return_unmatched (bool, optional): Whether to return the unmatched breakpoints alongside the matched ones. Useful for obtaining topology features. Defaults to False.
     Returns:
         pd.DataFrame: DataFrame containing matched breakpoints from different sources side by side
     """
@@ -620,7 +658,9 @@ def inner_join_bps(
             insert_delta_threshold=insert_delta_threshold,
             max_dist=max_dist,
             ignore_size=ignore_size,
-            return_graph=True
+            return_graph=True,
+            return_unmatched=return_unmatched,
+            skip_single_source_for=([ref_callset] if ref_callset is not None else None)
         )
         matched_lists = graph_to_unique_component_lists(match_graph)
         if ref_callset is not None:
@@ -638,7 +678,9 @@ def inner_join_bps(
             insert_delta_threshold=insert_delta_threshold,
             max_dist=max_dist,
             ignore_size=ignore_size,
-            return_graph=True
+            return_graph=True,
+            return_unmatched=return_unmatched,
+            skip_single_source_for=([ref_callset] if ref_callset is not None else None)
         )
         matched_lists = graph_to_unique_component_lists(match_graph)
         matched_bp_df = build_matched_bp_df(
@@ -682,12 +724,13 @@ def outer_join_bps(
         ids_only=True,
         ignore_size=ignore_size,
         add_topology=add_topology,
-        workflow_config=workflow_config
+        workflow_config=workflow_config,
+        return_unmatched=True
     )
 
     # Ensure DataFrame type for subsequent merges
     if not isinstance(matched_bp_df, pd.DataFrame):
-        raise ValueError('matched_bp_df is not a DataFrame')
+        raise TypeError('matched_bp_df is not a DataFrame')
 
     # Start with a copy of the matched breakpoints DataFrame
     joint_bp_df = matched_bp_df.copy()

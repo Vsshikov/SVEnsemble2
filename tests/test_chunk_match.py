@@ -169,7 +169,7 @@ class TestGetPairwiseMatches:
             _row('delly',    'ev1', 100, 500),
             _row('sniffles', 'ev2', 105, 505),  # Δbnd1=5, Δbnd2=5 — within max_dist=10
         )
-        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True)
+        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=False)
         assert len(pairs) == 1
         assert _pair_sources(pairs[0]) == {'delly', 'sniffles'}
         assert _pair_events(pairs[0]) == {'ev1', 'ev2'}
@@ -180,7 +180,7 @@ class TestGetPairwiseMatches:
             _row('delly',    'ev1', 100, 500),
             _row('sniffles', 'ev2', 200, 600),  # Δbnd1=100 >> max_dist=10
         )
-        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True)
+        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=False)
         assert len(pairs) == 0
 
     def test_same_source_not_matched(self):
@@ -189,7 +189,7 @@ class TestGetPairwiseMatches:
             _row('delly', 'ev1', 100, 500),
             _row('delly', 'ev2', 102, 502),  # same source, close positions
         )
-        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True)
+        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=False)
         assert len(pairs) == 0
 
     def test_three_breakpoints_two_from_one_source(self):
@@ -199,8 +199,7 @@ class TestGetPairwiseMatches:
             _row('delly',    'ev2', 103, 503),
             _row('sniffles', 'ev3', 104, 504),
         )
-        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True)
-        # Each delly event can pair with the sniffles event
+        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=False)
         sniffles_events = {ev for s, ev in [p[0] for p in pairs] + [p[1] for p in pairs] if s == 'sniffles'}
         assert 'ev3' in sniffles_events
         for pair in pairs:
@@ -213,7 +212,7 @@ class TestGetPairwiseMatches:
             _row('sniffles',        'ev2', 101, 501),
             _row('manta_diploid',   'ev3', 102, 502),
         )
-        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True)
+        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=False)
         pair_source_sets = [_pair_sources(p) for p in pairs]
         assert {'delly', 'sniffles'}       in pair_source_sets
         assert {'delly', 'manta_diploid'}  in pair_source_sets
@@ -227,7 +226,7 @@ class TestGetPairwiseMatches:
             'INFO_CIPOS_l_bnd2', 'INFO_CIPOS_r_bnd2',
             'INFO_SVTYPE', 'INFO_SVLEN',
         ])
-        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True)
+        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=False)
         assert pairs == []
 
     def test_insert_delta_filter_blocks_dissimilar_ins(self):
@@ -241,11 +240,11 @@ class TestGetPairwiseMatches:
             _row('delly',    'ev1', 100, 100, svtype='INS', svlen=100),
             _row('sniffles', 'ev2', 102, 102, svtype='INS', svlen=200),
         )
-        pairs_ignored = get_pairwise_matches(df, max_dist=10, ignore_size=True)
+        pairs_ignored = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=False)
         assert len(pairs_ignored) == 1, "Should match when size is ignored"
 
         pairs_filtered = get_pairwise_matches(
-            df, max_dist=10, ignore_size=False, insert_delta_threshold=0.7
+            df, max_dist=10, ignore_size=False, insert_delta_threshold=0.7, return_graph=False
         )
         assert len(pairs_filtered) == 0, "Should not match when sizes differ by >30%"
 
@@ -259,7 +258,7 @@ class TestGetPairwiseMatches:
             _row('sniffles', 'ev2', 102, 102, svtype='INS', svlen=130),
         )
         pairs = get_pairwise_matches(
-            df, max_dist=10, ignore_size=False, insert_delta_threshold=0.7
+            df, max_dist=10, ignore_size=False, insert_delta_threshold=0.7, return_graph=False
         )
         assert len(pairs) == 1
 
@@ -269,7 +268,7 @@ class TestGetPairwiseMatches:
             _row('delly',    'ev1', 100, 500),
             _row('sniffles', 'ev2', 150, 503),  # Δbnd1=50 > 10, Δbnd2=3 < 10
         )
-        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True)
+        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=False)
         assert len(pairs) == 0
 
     def test_bnd2_distance_alone_prevents_match(self):
@@ -278,5 +277,39 @@ class TestGetPairwiseMatches:
             _row('delly',    'ev1', 100, 500),
             _row('sniffles', 'ev2', 103, 600),  # Δbnd1=3 < 10, Δbnd2=100 > 10
         )
-        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True)
+        pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=False)
         assert len(pairs) == 0
+
+    def test_return_graph_produces_graph(self):
+        """return_graph=True should return an igraph.Graph with correct structure."""
+        import igraph as ig
+        df = _df(
+            _row('delly',    'ev1', 100, 500),
+            _row('sniffles', 'ev2', 105, 505),
+        )
+        g = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=True)
+        assert isinstance(g, ig.Graph)
+        assert g.vcount() == 2
+        assert g.ecount() == 1
+        names = {v['name'] for v in g.vs}
+        assert ('delly', 'ev1') in names
+        assert ('sniffles', 'ev2') in names
+
+    def test_return_unmatched_adds_isolated_vertices(self):
+        """Unmatched breakpoints should appear as isolated vertices in the graph."""
+        import igraph as ig
+        df = _df(
+            _row('delly',    'ev1', 100, 500),
+            _row('sniffles', 'ev2', 105, 505),
+            _row('delly',    'ev3', 9000, 9500),
+        )
+        g = get_pairwise_matches(
+            df, max_dist=10, ignore_size=True,
+            return_graph=True, return_unmatched=True,
+            skip_single_source_for=None,
+        )
+        assert isinstance(g, ig.Graph)
+        assert g.vcount() == 3
+        assert g.ecount() == 1
+        names = {v['name'] for v in g.vs}
+        assert ('delly', 'ev3') in names
