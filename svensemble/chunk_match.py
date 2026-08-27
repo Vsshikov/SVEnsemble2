@@ -3,16 +3,15 @@ Contains functions used for matching breakpoints from different sets
 Following a similar algorith with chunking and creating similarity
 matrices to the one used by Truvari
 """
+import itertools
 from collections import defaultdict
 from functools import lru_cache
 
+import igraph as ig
 import numpy as np
 import pandas as pd
-import igraph as ig
 
 from . import breakpoints as bps
-from . import events as evts
-from . import _caller_params as caller_params
 
 # Maps each BND relative-position string to a unique integer code.
 # Combined code = enc(bnd1) * 4 + enc(bnd2) gives a unique scalar per orientation pair,
@@ -463,6 +462,23 @@ def merge_bp_pairs_dfs(pairs):
     return components
 
 _TOPOLOGY_PREFIX = 'svensembletopology'
+
+def smoothe_by_source(graph_in: ig.Graph, source_to_drop: str):
+    """
+    Drop vertices from the input graph with source source_to_drop while retaining connectivity
+    """
+    drop_indices = [v.index for v in graph_in.vs if v['name'][0] == source_to_drop]
+    neighbors = [v.neighbors() for v in graph_in.vs[drop_indices]]
+    new_edges = set()
+    for neighbor_set in neighbors:
+        new_edges.update(itertools.combinations(neighbor_set, 2))
+
+    if new_edges:
+        eids = graph_in.get_eids(new_edges, error=False)
+        new_edges = {pair for pair, eid in zip(new_edges, eids) if eid == -1}
+
+    graph_in.add_edges(new_edges)
+    graph_in.delete_vertices(drop_indices)
 
 def calc_component_stats(graph_in: ig.Graph, ignore_callsets: list[str] | None = None) -> pd.DataFrame:
     """Compute topological features for each connected component of a match graph.
