@@ -94,12 +94,8 @@ def concat_workflow_config():
                 "model_kwargs": {"n_estimators": 10},
             },
         },
+        "ground_truth": {"name": "gnomad"},
     }
-
-
-@pytest.fixture
-def concat_ground_truth_config():
-    return {"callsets": {"gnomad": {"source": "gnomad"}}}
 
 
 # ---------------------------------------------------------------------------
@@ -310,18 +306,18 @@ class TestTrainUnbiasedXgbForSplit:
 @pytest.mark.slow
 class TestTrainUnbiasedConcatRf:
 
-    def test_single_source_dataframe(self, concat_workflow_config, concat_ground_truth_config):
+    def test_single_source_dataframe(self, concat_workflow_config):
         df = _make_pu_ready_df(n=40)
         with patch.object(mbps, "preprocess_matchedbps_for_pu", side_effect=lambda d, *a, **k: d):
             X, rf_fit = models.train_unbiased_concat_rf(
                 {"target_sample": df}, concat_workflow_config,
-                concat_ground_truth_config, "gridss+manta_diploid",
+                "gridss+manta_diploid",
             )
         assert len(X) == len(df)
         assert isinstance(rf_fit, RF)
 
     def test_multi_source_mixes_dataframe_and_path(
-        self, concat_workflow_config, concat_ground_truth_config, tmp_path,
+        self, concat_workflow_config, tmp_path,
     ):
         df_a = _make_pu_ready_df(n=30, seed=1)
         df_b = _make_pu_ready_df(n=20, seed=2)
@@ -331,12 +327,12 @@ class TestTrainUnbiasedConcatRf:
         with patch.object(mbps, "preprocess_matchedbps_for_pu", side_effect=lambda d, *a, **k: d):
             X, rf_fit = models.train_unbiased_concat_rf(
                 {"sampleA": df_a, "sampleB": csv_b}, concat_workflow_config,
-                concat_ground_truth_config, "gridss+manta_diploid",
+                "gridss+manta_diploid",
             )
         assert len(X) == len(df_a) + len(df_b)
 
     def test_every_source_preprocessed_uniformly(
-        self, concat_workflow_config, concat_ground_truth_config,
+        self, concat_workflow_config,
     ):
         """No 'primary sample' branch: every entry in matched_bps_sources,
         regardless of key, is passed through preprocessing exactly once."""
@@ -351,7 +347,7 @@ class TestTrainUnbiasedConcatRf:
         with patch.object(mbps, "preprocess_matchedbps_for_pu", side_effect=_track):
             models.train_unbiased_concat_rf(
                 {"other_1": df_1, "other_2": df_2}, concat_workflow_config,
-                concat_ground_truth_config, "gridss+manta_diploid",
+                "gridss+manta_diploid",
             )
         assert sorted(seen_lengths) == sorted([len(df_1), len(df_2)])
 
@@ -359,18 +355,18 @@ class TestTrainUnbiasedConcatRf:
 @pytest.mark.slow
 class TestTrainUnbiasedXgbConcat:
 
-    def test_single_source_dataframe(self, concat_workflow_config, concat_ground_truth_config):
+    def test_single_source_dataframe(self, concat_workflow_config):
         df = _make_pu_ready_df(n=40)
         with patch.object(mbps, "preprocess_matchedbps_for_pu", side_effect=lambda d, *a, **k: d):
             X, xgb_fit = models.train_unbiased_xgb_concat(
                 {"target_sample": df}, concat_workflow_config,
-                concat_ground_truth_config, "gridss+manta_diploid",
+                "gridss+manta_diploid",
             )
         assert len(X) == len(df)
         assert isinstance(xgb_fit, XGB)
 
     def test_multi_source_pools_and_concatenates(
-        self, concat_workflow_config, concat_ground_truth_config, tmp_path,
+        self, concat_workflow_config, tmp_path,
     ):
         df_a = _make_pu_ready_df(n=18, seed=5)
         df_b = _make_pu_ready_df(n=22, seed=6)
@@ -380,7 +376,7 @@ class TestTrainUnbiasedXgbConcat:
         with patch.object(mbps, "preprocess_matchedbps_for_pu", side_effect=lambda d, *a, **k: d):
             X, xgb_fit = models.train_unbiased_xgb_concat(
                 {"sampleA": df_a, "sampleB": csv_b}, concat_workflow_config,
-                concat_ground_truth_config, "gridss+manta_diploid",
+                "gridss+manta_diploid",
             )
         assert len(X) == len(df_a) + len(df_b)
 
@@ -402,24 +398,24 @@ class TestTrainModelDispatcher:
     def test_concat_model_without_sources_raises(self, monkeypatch):
         monkeypatch.setitem(models.model_dispatch, "fake_function", lambda *a, **k: (None, None))
         with pytest.raises(ValueError, match="matched_bps_sources"):
-            models.train_model(None, self._config(concat=True), {}, "ts")
+            models.train_model(None, self._config(concat=True), "ts")
 
     def test_non_concat_model_without_joint_bp_df_raises(self, monkeypatch):
         monkeypatch.setitem(models.model_dispatch, "fake_function", lambda *a, **k: (None, None))
         with pytest.raises(ValueError, match="joint_bp_df"):
-            models.train_model(None, self._config(concat=False), {}, "ts")
+            models.train_model(None, self._config(concat=False), "ts")
 
     def test_concat_model_dispatches_with_matched_bps_sources(self, monkeypatch):
         captured = {}
 
-        def fake_fn(matched_bps_sources, workflow_config, ground_truth_config, training_set_name, verbose):
+        def fake_fn(matched_bps_sources, workflow_config, training_set_name, verbose):
             captured["matched_bps_sources"] = matched_bps_sources
             return ("X", "model")
 
         monkeypatch.setitem(models.model_dispatch, "fake_function", fake_fn)
         sources = {"s1": pd.DataFrame({"a": [1]})}
         result = models.train_model(
-            None, self._config(concat=True), {}, "ts", matched_bps_sources=sources,
+            None, self._config(concat=True), "ts", matched_bps_sources=sources,
         )
         assert result == ("X", "model")
         assert captured["matched_bps_sources"] is sources
@@ -427,13 +423,13 @@ class TestTrainModelDispatcher:
     def test_non_concat_model_dispatches_with_joint_bp_df(self, monkeypatch):
         captured = {}
 
-        def fake_fn(joint_bp_df, workflow_config, ground_truth_config, training_set_name, verbose):
+        def fake_fn(joint_bp_df, workflow_config, training_set_name, verbose):
             captured["joint_bp_df"] = joint_bp_df
             return ("X", "model")
 
         monkeypatch.setitem(models.model_dispatch, "fake_function", fake_fn)
         df = pd.DataFrame({"a": [1]})
-        result = models.train_model(df, self._config(concat=False), {}, "ts")
+        result = models.train_model(df, self._config(concat=False), "ts")
         assert result == ("X", "model")
         assert captured["joint_bp_df"] is df
 

@@ -368,20 +368,25 @@ def _get_fillna(workflow_config: dict) -> int | float | None:
     return workflow_config['model']['training_params'].get('fillna', 0)
 
 
+def _get_ground_truth_name(workflow_config: dict) -> str:
+    """Extract the ground truth name from workflow_config['ground_truth']."""
+    return workflow_config['ground_truth']['name']
+
+
 def train_consensus_classifier(
     joint_bp_df: pd.DataFrame,
     workflow_config: dict,
-    ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
 ) -> tuple[pd.DataFrame, SVEnsembleConsensusClassifier]:
     """
     Adapter for consensus classifier so it can be included into the pipeline despite not requiring actual `training`
     """
+    ground_truth_name = _get_ground_truth_name(workflow_config)
     training_set_df = mbps.preprocess_matchedbps_for_pu(
         joint_bp_df,
         workflow_config,
-        ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source'],
+        ground_truth_name,
         training_set_name,
         verbose=verbose,
     )
@@ -410,17 +415,17 @@ def train_consensus_classifier(
 def train_unbiased_rf(
     joint_bp_df: pd.DataFrame,
     workflow_config: dict,
-    ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
 ) -> tuple[pd.DataFrame, RF]:
     """
     Train an unbiased Random Forest for a single training set using the Duplessis method.
     """
+    ground_truth_name = _get_ground_truth_name(workflow_config)
     training_set_df = mbps.preprocess_matchedbps_for_pu(
         joint_bp_df,
         workflow_config,
-        ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source'],
+        ground_truth_name,
         training_set_name,
         verbose=verbose,
     )
@@ -459,7 +464,6 @@ def train_unbiased_rf(
 def train_unbiased_nosvlen(
     joint_bp_df: pd.DataFrame,
     workflow_config: dict,
-    ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
 ) -> tuple[pd.DataFrame, RF]:
@@ -473,7 +477,6 @@ def train_unbiased_nosvlen(
     return train_unbiased_rf(
         joint_bp_df_nosvlen,
         workflow_config,
-        ground_truth_config,
         training_set_name,
         verbose=verbose,
     )
@@ -482,7 +485,6 @@ def train_unbiased_nosvlen(
 def train_unbiased_concat_rf(
     matched_bps_sources: dict[str, pd.DataFrame | Path],
     workflow_config: dict,
-    ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
 ) -> tuple[pd.DataFrame, RF]:
@@ -497,7 +499,7 @@ def train_unbiased_concat_rf(
             samples (concat/cross-training). All sources must share the same
             training_set/callers as workflow_config.
     """
-    _gt_name = ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source']
+    _gt_name = _get_ground_truth_name(workflow_config)
     training_set_dfs = []
 
     for sample_name, source in matched_bps_sources.items():
@@ -548,17 +550,17 @@ def train_unbiased_concat_rf(
 def train_unbiased_xgb(
     joint_bp_df: pd.DataFrame,
     workflow_config: dict,
-    ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
 ) -> tuple[pd.DataFrame, XGB]:
     """
     Train an unbiased XGBoost model for a single training set using the Duplessis method.
     """
+    ground_truth_name = _get_ground_truth_name(workflow_config)
     training_set_df = mbps.preprocess_matchedbps_for_pu(
         joint_bp_df,
         workflow_config,
-        ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source'],
+        ground_truth_name,
         training_set_name,
         verbose=verbose,
     )
@@ -597,7 +599,6 @@ def train_unbiased_xgb(
 def train_unbiased_xgb_concat(
     matched_bps_sources: dict[str, pd.DataFrame | Path],
     workflow_config: dict,
-    ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
 ) -> tuple[pd.DataFrame, XGB]:
@@ -612,7 +613,7 @@ def train_unbiased_xgb_concat(
             samples (concat/cross-training). All sources must share the same
             training_set/callers as workflow_config.
     """
-    _gt_name = ground_truth_config['callsets'][list(ground_truth_config['callsets'].keys())[0]]['source']
+    _gt_name = _get_ground_truth_name(workflow_config)
     training_set_dfs = []
 
     for sample_name, source in matched_bps_sources.items():
@@ -663,7 +664,6 @@ def train_unbiased_xgb_concat(
 def train_unbiased_xgb_nosvlen(
     joint_bp_df: pd.DataFrame,
     workflow_config: dict,
-    ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
 ) -> tuple[pd.DataFrame, XGB]:
@@ -677,7 +677,6 @@ def train_unbiased_xgb_nosvlen(
     return train_unbiased_xgb(
         joint_bp_df_nosvlen,
         workflow_config,
-        ground_truth_config,
         training_set_name,
         verbose=verbose,
     )
@@ -700,7 +699,6 @@ model_dispatch = {
 def train_model(
     joint_bp_df: pd.DataFrame | None,
     workflow_config: dict,
-    ground_truth_config: dict,
     training_set_name: str,
     verbose: bool = False,
     matched_bps_sources: dict[str, pd.DataFrame | Path] | None = None,
@@ -713,7 +711,7 @@ def train_model(
             set. Required for ordinary (non-pooled) models; ignored for
             pooled (concat/cross) models.
         workflow_config: Dictionary containing the workflow configuration.
-        ground_truth_config: Dictionary containing the ground truth configuration.
+            Must include 'ground_truth' with at least a 'name' key.
         training_set_name: Name of the training set.
         verbose: If True, print verbose output.
         matched_bps_sources: Mapping of sample_name -> matched_bps DataFrame or
@@ -733,13 +731,13 @@ def train_model(
                 f"matched_bps_sources were provided (pass --train_samples/--train_matched_bps)."
             )
         return model_function(
-            matched_bps_sources, workflow_config, ground_truth_config,
+            matched_bps_sources, workflow_config,
             training_set_name, verbose,
         )
 
     if joint_bp_df is None:
         raise ValueError(f"Model '{workflow_config['model']['name']}' requires joint_bp_df.")
     return model_function(
-        joint_bp_df, workflow_config, ground_truth_config,
+        joint_bp_df, workflow_config,
         training_set_name, verbose,
     )

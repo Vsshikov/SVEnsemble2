@@ -144,23 +144,3 @@ def validate_config(config: dict) -> None:
     missing = REQUIRED_KEYS - set(config.keys())
     if missing:
         raise ValueError(f"Config missing required keys: {sorted(missing)}")
-
-
-def merge_configs(base: dict, override: dict) -> dict:
-    """Shallow-merge two config dicts, with override winning on conflict.
-
-    Dict-valued keys present in both (e.g. match_params) are merged one
-    level deep instead of being fully replaced; everything else in
-    override just overwrites the value in base.
-    """
-    merged = base.copy()
-    for key, value in override.items():
-        if (
-            key in merged
-            and isinstance(merged[key], dict)
-            and isinstance(value, dict)
-        ):
-            merged[key] = {**merged[key], **value}
-        else:
-            merged[key] = value
-    return merged

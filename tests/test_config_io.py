@@ -8,7 +8,6 @@ import pytest
 from svensemble.config_io import (
     dump_config,
     load_config,
-    merge_configs,
     rehydrate_config,
     validate_config,
 )
@@ -128,25 +127,3 @@ class TestValidation:
     def test_empty_config_fails(self):
         with pytest.raises(ValueError):
             validate_config({})
-
-
-class TestMerge:
-    def test_override_wins(self):
-        base = {"sample_name": "old", "model_name": "unbiased"}
-        override = {"sample_name": "new"}
-        merged = merge_configs(base, override)
-        assert merged["sample_name"] == "new"
-        assert merged["model_name"] == "unbiased"
-
-    def test_nested_dict_merge(self):
-        base = {"sample_name": "test", "match_params": {"max_dist": 100}}
-        override = {"match_params": {"insert_delta_threshold": 0.7}}
-        merged = merge_configs(base, override)
-        assert merged["match_params"]["max_dist"] == 100
-        assert merged["match_params"]["insert_delta_threshold"] == 0.7
-
-    def test_new_keys_added(self):
-        base = {"sample_name": "test"}
-        override = {"callers": ["gridss"]}
-        merged = merge_configs(base, override)
-        assert merged["callers"] == ["gridss"]

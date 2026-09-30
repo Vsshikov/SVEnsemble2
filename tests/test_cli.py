@@ -164,7 +164,7 @@ class TestTrainSubcommandPooledValidation:
         captured = {}
 
         def fake_train_model(
-            joint_bp_df, workflow_config, ground_truth_config, training_set_name,
+            joint_bp_df, workflow_config, training_set_name,
             verbose=False, matched_bps_sources=None,
         ):
             captured["joint_bp_df"] = joint_bp_df
@@ -189,7 +189,7 @@ class TestTrainSubcommandPooledValidation:
         captured = {}
 
         def fake_train_model(
-            joint_bp_df, workflow_config, ground_truth_config, training_set_name,
+            joint_bp_df, workflow_config, training_set_name,
             verbose=False, matched_bps_sources=None,
         ):
             captured["joint_bp_df"] = joint_bp_df

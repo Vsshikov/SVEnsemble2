@@ -14,7 +14,7 @@ import copy
 
 # The canonical base presets that new models are built on (base preset +
 # freeform overrides). See utils.resolve_model_config.
-BASE_MODELS = ('unbiased_rf', 'unbiased_xgb', 'consensus')
+BASE_MODELS = ('unbiased_rf', 'unbiased_xgb', 'consensus', 'unbiased_rf_topol', 'unbiased_xgb_topol')
 
 model_configs = {
     # ---------------------------------------------------------------------

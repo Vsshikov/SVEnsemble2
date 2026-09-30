@@ -245,6 +245,8 @@ def _cmd_match(args):
         callers=args.callers,
         model_name=args.model,
         model_config=_load_model_config(args),
+        ground_truth_name=args.ground_truth_name,
+        ground_truth_bps_path=args.ground_truth_bps,
     )
 
     if len(args.bps) != len(args.callers):
@@ -332,6 +334,7 @@ def _cmd_train(args):
         model_name=args.model,
         training_set=args.training_set,
         model_config=_load_model_config(args),
+        ground_truth_name=args.ground_truth_name,
     )
 
     pooled = args.train_samples is not None or args.train_matched_bps is not None
@@ -350,12 +353,9 @@ def _cmd_train(args):
     else:
         raise ValueError("Either --matched_bps or --train_samples/--train_matched_bps must be provided")
 
-    ground_truth_config = _build_ground_truth_config(args.ground_truth_name)
-
     X, model_fit = models.train_model(
         joint_bp_df,
         workflow_config,
-        ground_truth_config,
         args.training_set,
         verbose=args.verbose,
         matched_bps_sources=matched_bps_sources,
@@ -910,21 +910,6 @@ def _write_config_out(args, config: dict) -> None:
     if hasattr(args, "config_out") and args.config_out is not None:
         from .config_io import dump_config
         dump_config(config, args.config_out)
-
-
-def _build_ground_truth_config(ground_truth_name: str) -> dict:
-    """Build a minimal ground truth config for use with train_model."""
-    from ._caller_params import callset_param_dict
-
-    gt_params = callset_param_dict.get(ground_truth_name, callset_param_dict.get("gnomad"))
-    return {
-        "callsets": {
-            ground_truth_name: {
-                "source": ground_truth_name,
-                "params": gt_params,
-            }
-        }
-    }
 
 
 # ---------------------------------------------------------------------------

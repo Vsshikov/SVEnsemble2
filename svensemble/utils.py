@@ -402,7 +402,7 @@ def create_config_dict(
         if not val_set['path'].is_absolute():
             val_set['path'] = base_dir / val_set['path']
     elif isinstance(val_set, dict):
-        if all(key in val_set.keys() for key in sample_val_set_template.keys()):
+        if all(key in val_set for key in sample_val_set_template):
             pass
         else:
             raise ValueError(f'Invalid validation set: {val_set}')
@@ -521,6 +521,45 @@ def create_config_dict(
     return config_dict
 
 
+def build_ground_truth_config(
+    name: str,
+    vcf_path: Path | None = None,
+    bps_path: Path | None = None,
+) -> dict:
+    """Build a standalone ground truth config dict.
+
+    Used on its own for the ground truth preprocessing stage, and embedded
+    into workflow configs under the 'ground_truth' key for match/train stages.
+
+    Args:
+        name: Ground truth dataset name (must exist in callset_param_dict,
+            e.g. 'gnomad', 'gnomad_pass').
+        vcf_path: Optional path to the original ground truth VCF.
+        bps_path: Optional path to the pre-processed ground truth bps CSV.
+
+    Returns:
+        Dict with 'name', 'params', and optionally 'vcf_path'/'bps_path'.
+
+    Raises:
+        ValueError: If name is not found in callset_param_dict.
+    """
+    params = callset_param_dict.get(name)
+    if params is None:
+        raise ValueError(
+            f"Unknown ground truth name: {name!r}. "
+            f"Available: {list(callset_param_dict.keys())}"
+        )
+    cfg = {
+        'name': name,
+        'params': copy.deepcopy(params),
+    }
+    if vcf_path is not None:
+        cfg['vcf_path'] = Path(vcf_path)
+    if bps_path is not None:
+        cfg['bps_path'] = Path(bps_path)
+    return cfg
+
+
 def build_cli_workflow_config(
     sample_name: str,
     callers: list[str] | None = None,
@@ -528,6 +567,9 @@ def build_cli_workflow_config(
     training_set: str | None = None,
     ref_path: Path | None = None,
     model_config: dict | None = None,
+    ground_truth_name: str | None = None,
+    ground_truth_vcf_path: Path | None = None,
+    ground_truth_bps_path: Path | None = None,
 ) -> dict:
     """
     Build a workflow_config dict for CLI/Nextflow subcommands.
@@ -543,8 +585,6 @@ def build_cli_workflow_config(
       - training_set is treated as a free-form name: if it matches a preset in
         training_set_presets, the preset's caller list is used; otherwise the
         provided `callers` list is stored under that name.
-      - No ground-truth suffix or validation-set logic; ground truth is passed
-        to downstream stages as its own bps CSV.
 
     Args:
         sample_name: Sample identifier (str). Stored under 'sample_name'.
@@ -553,6 +593,14 @@ def build_cli_workflow_config(
         training_set: Name to key the training_sets dict; matched against
             training_set_presets before falling back to `callers`.
         ref_path: Optional reference FASTA, stored verbatim under 'ref_path'.
+        model_config: Optional freeform model config dict override.
+        ground_truth_name: Ground truth dataset name. When provided, a
+            'ground_truth' sub-dict (from build_ground_truth_config) is
+            included in the returned config.
+        ground_truth_vcf_path: Optional path to the ground truth VCF,
+            stored in ground_truth config if ground_truth_name is set.
+        ground_truth_bps_path: Optional path to the processed ground truth
+            bps CSV, stored in ground_truth config if ground_truth_name is set.
 
     Returns:
         Dict with the shape consumed by pipeline.parse_preprocess_delly,
@@ -612,6 +660,13 @@ def build_cli_workflow_config(
 
     if ref_path is not None:
         config['ref_path'] = ref_path
+
+    if ground_truth_name is not None:
+        config['ground_truth'] = build_ground_truth_config(
+            ground_truth_name,
+            vcf_path=ground_truth_vcf_path,
+            bps_path=ground_truth_bps_path,
+        )
 
     return config
 
@@ -676,38 +731,6 @@ def split_ciend(ciend_col: pd.Series, default_ciend: tuple[int, int] = (0, 0)) -
     ciend_df.loc[:, ciend_col.name.replace('INFO_CIEND', 'INFO_CIEND_l')] = ciend_col.str[0].fillna(default_ciend[0]).astype(int)
     ciend_df.loc[:, ciend_col.name.replace('INFO_CIEND', 'INFO_CIEND_r')] = ciend_col.str[1].fillna(default_ciend[1]).astype(int)
     return ciend_df.drop(columns=[ciend_col.name])
-
-
-def create_samples_config_table(samples: Dict[str, Dict[str, Any]]) -> pd.DataFrame:
-    """
-    Create a configuration table (CSV) listing all sample, training set, and model name combinations.
-
-    Args:
-        samples (Dict[str, Dict[str, Any]]):
-            Dictionary mapping sample names to their configuration dictionaries.
-            Each configuration dictionary is expected to contain a 'training_sets' key,
-            which is iterable of training set names.
-
-    Returns:
-        pandas.DataFrame:
-            DataFrame with columns ['sample_name', 'training_set_name', 'model_name'].
-            Each row is a combination of sample, training set, and model name ("unbiased").
-    """
-    sample_names: list = []
-    training_set_names: list = []
-    model_names: list = []
-
-    for sample_name, sample_config in samples.items():
-        for training_set_name in sample_config['training_sets']:
-            sample_names.append(sample_name)
-            training_set_names.append(training_set_name)
-            model_names.append('unbiased_rf')
-
-    return pd.DataFrame({
-        'sample_name': sample_names,
-        'training_set_name': training_set_names,
-        'model_name': model_names
-    })
 
 
 def generate_callset_combinations(callset_names: list[str]) -> list[str]:
