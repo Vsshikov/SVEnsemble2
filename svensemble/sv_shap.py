@@ -33,7 +33,7 @@ import pandas as pd
 import shap
 
 
-from . import utils as sv_utils
+from . import _config as sv_config
 from . import _caller_params as caller_params
 
 
@@ -48,11 +48,11 @@ def resolve_shap_paths(
 ) -> dict[str, Path]:
     """Resolve SVEnsemble2 paths for SHAP analysis via the unified config system.
 
-    Delegates to sv_utils.create_config_dict so that the gt_ suffix
+    Delegates to sv_config.create_config_dict so that the gt_ suffix
     (e.g. .gt_gnomad_pass) is applied consistently with the training
     pipeline.
     """
-    config = sv_utils.create_config_dict(
+    config = sv_config.create_config_dict(
         sample_name=sample_name,
         model_name=model_name,
         training_set=training_set_name,
@@ -357,10 +357,10 @@ def run_shap(
         fm = fm.set_index(id_cols)
 
     resolved = (
-        sv_utils.resolve_model_config(config=model_config) if model_config
-        else sv_utils.resolve_model_config(name=model_name)
+        sv_config.resolve_model_config(config=model_config) if model_config
+        else sv_config.resolve_model_config(name=model_name)
     )
-    mid = sv_utils.model_id(resolved)
+    mid = sv_config.model_id(resolved)
     fillna = resolved['training_params'].get('fillna', 0)
     X = pd.get_dummies(fm)
     if fillna is not None:

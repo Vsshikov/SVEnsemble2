@@ -4,19 +4,38 @@
 # (see BASE_MODELS) plus retained legacy names kept for backwards compatibility.
 # Every entry carries a `base` naming the canonical base preset it derives from;
 # `base` is the human-readable prefix of the reconstructible model_id
-# ({base}-{hash8}, see utils.model_id). Model identity is the content hash of the
-# behavioural training_params, NOT this dict key or `name` (both are labels).
+# ({base}-{hash8}, see _config.model_id). Model identity is the content hash of
+# the behavioural training_params, NOT this dict key or `name` (both are labels).
 #
-# This module does ONLY preset generation and never imports from `utils`; the
-# resolver (resolve_model_config), the hasher, and model_id all live in utils.py.
+# This module does ONLY preset generation and never imports from `_config`; the
+# resolver (resolve_model_config), the hasher, and model_id all live in _config.py.
 
 import copy
+from typing import TypedDict, NotRequired
 
 # The canonical base presets that new models are built on (base preset +
-# freeform overrides). See utils.resolve_model_config.
+# freeform overrides). See _config.resolve_model_config.
 BASE_MODELS = ('unbiased_rf', 'unbiased_xgb', 'consensus', 'unbiased_rf_topol', 'unbiased_xgb_topol')
 
-model_configs = {
+class TrainingParams(TypedDict, total=False):
+    """Behavioural model parameters that determine model_id hash."""
+    function: str
+    concat: bool
+    custom_cols: list[str]
+    model_kwargs: dict
+    fillna: int | float | None
+    clpr: float | None
+    add_topology: bool
+
+
+class ResolvedModelConfig(TypedDict):
+    """An model config with known base preset."""
+    name: str
+    base: str
+    training_params: TrainingParams
+    description: NotRequired[str]
+
+model_configs: dict[str, ResolvedModelConfig] = {
     # ---------------------------------------------------------------------
     # Canonical base presets
     # ---------------------------------------------------------------------
@@ -199,7 +218,7 @@ model_configs = {
 }
 
 
-def _enrich_model_config(model_config: dict) -> dict:
+def _enrich_model_config(model_config: ResolvedModelConfig) -> ResolvedModelConfig:
     """
     Enrich a model config with default values if some were not set above.
 

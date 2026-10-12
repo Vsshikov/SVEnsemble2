@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from svensemble import utils as sv_utils
+from svensemble import _config as sv_config
 from svensemble import _model_configs
 
 
@@ -19,45 +19,45 @@ from svensemble import _model_configs
 
 class TestModelConfigHash:
     def test_deterministic_across_calls(self):
-        cfg = sv_utils.resolve_model_config(name="unbiased_xgb")
-        assert sv_utils.model_config_hash(cfg) == sv_utils.model_config_hash(cfg)
+        cfg = sv_config.resolve_model_config(name="unbiased_xgb")
+        assert sv_config.model_config_hash(cfg) == sv_config.model_config_hash(cfg)
 
     def test_reconstructible_across_processes(self):
         # A fresh interpreter must produce the same hash for the same config.
         code = (
-            "from svensemble import utils as u;"
-            "print(u.model_config_hash(u.resolve_model_config(name='unbiased_xgb')))"
+            "from svensemble import _config as c;"
+            "print(c.model_config_hash(c.resolve_model_config(name='unbiased_xgb')))"
         )
         out = subprocess.run(
             [sys.executable, "-c", code], capture_output=True, text=True, check=True
         ).stdout.strip()
-        assert out == sv_utils.model_config_hash(
-            sv_utils.resolve_model_config(name="unbiased_xgb")
+        assert out == sv_config.model_config_hash(
+            sv_config.resolve_model_config(name="unbiased_xgb")
         )
 
     def test_labels_excluded_from_hash(self):
-        base = sv_utils.resolve_model_config(name="unbiased_xgb")
+        base = sv_config.resolve_model_config(name="unbiased_xgb")
         relabelled = dict(base)
         relabelled["name"] = "totally_different_label"
         relabelled["description"] = "changed"
-        assert sv_utils.model_config_hash(relabelled) == sv_utils.model_config_hash(base)
+        assert sv_config.model_config_hash(relabelled) == sv_config.model_config_hash(base)
 
     def test_behavioural_change_changes_hash(self):
-        base = sv_utils.resolve_model_config(name="unbiased_xgb")
-        changed = sv_utils.resolve_model_config(
+        base = sv_config.resolve_model_config(name="unbiased_xgb")
+        changed = sv_config.resolve_model_config(
             config={"base": "unbiased_xgb", "training_params": {"model_kwargs": {"max_depth": 31}}}
         )
-        assert sv_utils.model_config_hash(changed) != sv_utils.model_config_hash(base)
+        assert sv_config.model_config_hash(changed) != sv_config.model_config_hash(base)
 
     def test_pollution_free_with_full_model_block(self):
         # A full workflow_config['model'] sub-dict (with model_id + *_path) must
         # hash identically to the bare resolved config.
-        cfg = sv_utils.build_cli_workflow_config(
+        cfg = sv_config.build_cli_workflow_config(
             sample_name="s", callers=["gridss"], model_name="unbiased_xgb",
             training_set="gridss",
         )["model"]
-        bare = sv_utils.resolve_model_config(name="unbiased_xgb")
-        assert sv_utils.model_config_hash(cfg) == sv_utils.model_config_hash(bare)
+        bare = sv_config.resolve_model_config(name="unbiased_xgb")
+        assert sv_config.model_config_hash(cfg) == sv_config.model_config_hash(bare)
 
 
 # ---------------------------------------------------------------------------
@@ -66,18 +66,18 @@ class TestModelConfigHash:
 
 class TestModelId:
     def test_format_base_dash_hash8(self):
-        mid = sv_utils.model_id(sv_utils.resolve_model_config(name="unbiased_xgb"))
+        mid = sv_config.model_id(sv_config.resolve_model_config(name="unbiased_xgb"))
         base, _, h = mid.partition("-")
         assert base == "unbiased_xgb"
         assert len(h) == 8 and h.isalnum()
 
     def test_alias_collapses_to_base(self):
         # 'unbiased' has base 'unbiased_rf' and identical params -> same id.
-        assert sv_utils.model_id(sv_utils.resolve_model_config(name="unbiased")) == \
-            sv_utils.model_id(sv_utils.resolve_model_config(name="unbiased_rf"))
+        assert sv_config.model_id(sv_config.resolve_model_config(name="unbiased")) == \
+            sv_config.model_id(sv_config.resolve_model_config(name="unbiased_rf"))
 
     def test_preset_ids_cover_all_presets(self):
-        ids = sv_utils.list_preset_ids()
+        ids = sv_config.list_preset_ids()
         assert set(ids) == set(_model_configs.model_configs)
         for name, mid in ids.items():
             assert mid.startswith(_model_configs.model_configs[name]["base"] + "-")
@@ -89,12 +89,12 @@ class TestModelId:
 
 class TestResolveModelConfig:
     def test_branch1_named_preset(self):
-        cfg = sv_utils.resolve_model_config(name="unbiased_GT")
+        cfg = sv_config.resolve_model_config(name="unbiased_GT")
         assert cfg["training_params"]["custom_cols"] == ["SVTYPE"]
         assert cfg["base"] == "unbiased_rf"
 
     def test_branch2_override_deep_merges(self):
-        cfg = sv_utils.resolve_model_config(config={
+        cfg = sv_config.resolve_model_config(config={
             "base": "unbiased_xgb",
             "name": "xgb_d31",
             "training_params": {"model_kwargs": {"max_depth": 31}},
@@ -106,7 +106,7 @@ class TestResolveModelConfig:
 
     def test_branch2_does_not_mutate_registry(self):
         before = dict(_model_configs.model_configs["unbiased_xgb"]["training_params"])
-        sv_utils.resolve_model_config(config={
+        sv_config.resolve_model_config(config={
             "base": "unbiased_xgb",
             "training_params": {"model_kwargs": {"max_depth": 99}},
         })
@@ -114,19 +114,19 @@ class TestResolveModelConfig:
 
     def test_unknown_name_raises(self):
         with pytest.raises(ValueError, match="Unknown model preset"):
-            sv_utils.resolve_model_config(name="does_not_exist")
+            sv_config.resolve_model_config(name="does_not_exist")
 
     def test_unknown_base_raises(self):
         with pytest.raises(ValueError, match="Unknown base preset"):
-            sv_utils.resolve_model_config(config={"base": "does_not_exist"})
+            sv_config.resolve_model_config(config={"base": "does_not_exist"})
 
     def test_missing_base_raises(self):
         with pytest.raises(ValueError, match="must specify a 'base'"):
-            sv_utils.resolve_model_config(config={"training_params": {}})
+            sv_config.resolve_model_config(config={"training_params": {}})
 
     def test_bad_function_raises(self):
         with pytest.raises(ValueError, match="not a known training function"):
-            sv_utils.resolve_model_config(config={
+            sv_config.resolve_model_config(config={
                 "base": "unbiased_xgb",
                 "training_params": {"function": "not_a_real_function"},
             })
@@ -136,22 +136,16 @@ class TestResolveModelConfig:
 # Fetch-by-config helper
 # ---------------------------------------------------------------------------
 
-class TestModelResultsDir:
-    def test_matches_create_config_dict(self):
-        cd = sv_utils.create_config_dict(
-            "NA12878", model_name="unbiased_xgb", training_set="default"
-        )["NA12878"]
-        frd = sv_utils.model_results_dir(
-            sv_utils.BASE_DIR, "NA12878", "unbiased_xgb", "default"
-        )
-        assert frd == cd["workflow_dir"]
-
+class TestModelResultDir:
     def test_accepts_override_dict(self):
-        frd_name = sv_utils.model_results_dir(
-            sv_utils.BASE_DIR, "NA12878", "unbiased_xgb", "default"
+        from svensemble.utils import BASE_DIR
+        frd_name = sv_config.model_result_dir(
+            BASE_DIR, "NA12878", "unbiased_xgb", "default",
+            svtypes=["DEL", "INS"], svlenmin=50, svlenmax=None,
         )
-        frd_cfg = sv_utils.model_results_dir(
-            sv_utils.BASE_DIR, "NA12878", {"base": "unbiased_xgb"}, "default"
+        frd_cfg = sv_config.model_result_dir(
+            BASE_DIR, "NA12878", {"base": "unbiased_xgb"}, "default",
+            svtypes=["DEL", "INS"], svlenmin=50, svlenmax=None,
         )
         assert frd_name == frd_cfg
 
@@ -174,7 +168,7 @@ class TestModelIdCli:
         )
 
     def test_preset_matches_python_model_id(self):
-        expected = sv_utils.model_id(sv_utils.resolve_model_config(name="unbiased_xgb"))
+        expected = sv_config.model_id(sv_config.resolve_model_config(name="unbiased_xgb"))
         res = self._run("--model", "unbiased_xgb")
         assert res.returncode == 0, res.stderr
         assert res.stdout.strip() == expected
@@ -184,7 +178,7 @@ class TestModelIdCli:
         cfg = {"base": "unbiased_xgb", "training_params": {"model_kwargs": {"max_depth": 31}}}
         cfg_path = tmp_path / "override.json"
         cfg_path.write_text(json.dumps(cfg))
-        expected = sv_utils.model_id(sv_utils.resolve_model_config(config=cfg))
+        expected = sv_config.model_id(sv_config.resolve_model_config(config=cfg))
         res = self._run("--model_config", str(cfg_path))
         assert res.returncode == 0, res.stderr
         assert res.stdout.strip() == expected

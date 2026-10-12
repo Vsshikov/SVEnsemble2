@@ -205,7 +205,7 @@ base_field_dispatch = {
     'POS': lambda x: x.pos,
     'ID': lambda x: x.id,
     'REF': lambda x: x.ref,
-    'ALT': lambda x: x.alts[0],
+    'ALT': lambda x: x.alts[0] if x.alts else None,
     'QUAL': lambda x: x.qual,
     # record.stop is used for INFO_END because pysam exposes END via stop
     # rather than through the standard INFO dict interface for some callers.

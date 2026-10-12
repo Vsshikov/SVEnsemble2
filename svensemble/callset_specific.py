@@ -291,7 +291,7 @@ def manta_preprocess_common(manta_df: pd.DataFrame, caller_params: dict|None = N
     # When SVLEN is not applicable, it is set to None.
     # We get rid of NaNs
     manta_df_.loc[:, 'INFO_SVLEN'] = manta_df_.loc[:, 'INFO_SVLEN'].astype(float)
-    manta_df_.loc[:, 'INFO_SVLEN'] = manta_df_.loc[:, 'INFO_SVLEN'].fillna('0')
+    manta_df_.loc[:, 'INFO_SVLEN'] = manta_df_.loc[:, 'INFO_SVLEN'].fillna(0)
     manta_df_.loc[:, 'INFO_SVLEN'] = manta_df_.loc[:, 'INFO_SVLEN'].astype(int)
 
     # INFO_HOMLEN is a tuple initially. Manta is not supposed to have multiple HOMLEN values

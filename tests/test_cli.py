@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from svensemble.cli import main
-from svensemble.utils import build_cli_workflow_config
+from svensemble._config import build_cli_workflow_config
 
 
 class TestVersion:

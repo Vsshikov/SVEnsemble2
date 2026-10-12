@@ -52,17 +52,6 @@ def main():
 # Shared argument helpers
 # ---------------------------------------------------------------------------
 
-def _add_config_io_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--config_in", type=Path, default=None,
-        help="Path to input config JSON (optional). Seeds workflow_config with sample/model/etc.",
-    )
-    parser.add_argument(
-        "--config_out", type=Path, default=None,
-        help="Path to write output config JSON (optional). Enriched with run results.",
-    )
-
-
 def _add_verbose_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--verbose", action="store_true", help="Enable verbose output.")
 
@@ -71,7 +60,7 @@ def _add_model_config_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--model_config", type=Path, default=None,
         help="Path to a model config override file (JSON/YAML, self-contained "
-             "with 'base'). Branch-2 model input; distinct from --config_in.",
+             "with 'base'). Branch-2 model input.",
     )
 
 
@@ -103,21 +92,18 @@ def _register_preprocess_raw(subparsers):
     p.add_argument("--caller", type=str, required=True, help="Caller name (e.g. gridss, manta_diploid, delly).")
     p.add_argument("--ref", type=Path, required=True, help="Reference FASTA path.")
     p.add_argument("--output", type=Path, required=True, help="Output raw_bps.csv path.")
-    _add_config_io_args(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_preprocess_raw)
 
 
 def _cmd_preprocess_raw(args):
     from . import pipeline
-    from . import utils as sv_utils
+    from . import _config as sv_config
 
-    config = _load_or_build_config(args)
-
-    workflow_config = sv_utils.build_cli_workflow_config(
-        sample_name=config.get("sample_name", "sample"),
+    workflow_config = sv_config.build_cli_workflow_config(
+        sample_name="sample",
         callers=[args.caller],
-        model_name=config.get("model_name"),
+        model_name=None,
         ref_path=args.ref,
     )
 
@@ -127,7 +113,7 @@ def _cmd_preprocess_raw(args):
 
     if callset_name == "delly":
         bp_df = pipeline.parse_preprocess_delly(
-            sample_name=config.get("sample_name", "sample"),
+            sample_name="sample",
             workflow_config=workflow_config,
             verbose=args.verbose,
         )
@@ -144,13 +130,6 @@ def _cmd_preprocess_raw(args):
     if args.verbose:
         print(f"Wrote {len(bp_df)} raw breakpoints to {args.output}")
 
-    config["preprocess_raw"] = {
-        "caller": args.caller,
-        "n_raw_bps": len(bp_df),
-        "output": args.output.name,
-    }
-    _write_config_out(args, config)
-
 
 # ---------------------------------------------------------------------------
 # Subcommand: preprocess
@@ -166,7 +145,6 @@ def _register_preprocess(subparsers):
     p.add_argument("--model", type=str, default=None, help="Model name (for custom_cols).")
     p.add_argument("--sample", type=str, required=True, help="Sample name.")
     p.add_argument("--output", type=Path, required=True, help="Output directory for bps.csv and .vcf.")
-    _add_config_io_args(p)
     _add_model_config_arg(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_preprocess)
@@ -175,15 +153,13 @@ def _register_preprocess(subparsers):
 def _cmd_preprocess(args):
     import pandas as pd
     from . import breakpoints as bps_mod
-    from . import utils as sv_utils
+    from . import _config as sv_config
     from . import vcfwrite as vcfw
 
-    config = _load_or_build_config(args)
-
-    workflow_config = sv_utils.build_cli_workflow_config(
+    workflow_config = sv_config.build_cli_workflow_config(
         sample_name=args.sample,
         callers=[args.caller],
-        model_name=args.model or config.get("model_name"),
+        model_name=args.model,
         model_config=_load_model_config(args),
     )
 
@@ -200,13 +176,6 @@ def _cmd_preprocess(args):
 
     if args.verbose:
         print(f"Wrote {len(bp_df)} processed breakpoints to {bps_path}")
-
-    config["preprocess"] = {
-        "caller": args.caller,
-        "model": args.model,
-        "n_bps": len(bp_df),
-    }
-    _write_config_out(args, config)
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +196,6 @@ def _register_match(subparsers):
     p.add_argument("--max_dist", type=int, default=100, help="Maximum distance for matching.")
     p.add_argument("--insert_delta_threshold", type=float, default=0.7, help="Insert delta threshold.")
     p.add_argument("--output", type=Path, required=True, help="Output matched_bps.csv path.")
-    _add_config_io_args(p)
     _add_model_config_arg(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_match)
@@ -236,11 +204,9 @@ def _register_match(subparsers):
 def _cmd_match(args):
     import pandas as pd
     from . import chunk_match
-    from . import utils as sv_utils
+    from . import _config as sv_config
 
-    config = _load_or_build_config(args)
-
-    workflow_config = sv_utils.build_cli_workflow_config(
+    workflow_config = sv_config.build_cli_workflow_config(
         sample_name=args.sample,
         callers=args.callers,
         model_name=args.model,
@@ -276,15 +242,6 @@ def _cmd_match(args):
     if args.verbose:
         print(f"Wrote {len(matched_bp_df)} matched breakpoints to {args.output}")
 
-    config["match"] = {
-        "callers": args.callers,
-        "ground_truth_name": args.ground_truth_name,
-        "max_dist": args.max_dist,
-        "insert_delta_threshold": args.insert_delta_threshold,
-        "n_matched_bps": len(matched_bp_df),
-    }
-    _write_config_out(args, config)
-
 
 # ---------------------------------------------------------------------------
 # Subcommand: train
@@ -314,7 +271,6 @@ def _register_train(subparsers):
         "--train_matched_bps", type=Path, nargs="+", default=None,
         help="Matched-breakpoints CSV per --train_samples entry (same order/length).",
     )
-    _add_config_io_args(p)
     _add_model_config_arg(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_train)
@@ -324,11 +280,9 @@ def _cmd_train(args):
     import pickle
     import pandas as pd
     from . import models
-    from . import utils as sv_utils
+    from . import _config as sv_config
 
-    config = _load_or_build_config(args)
-
-    workflow_config = sv_utils.build_cli_workflow_config(
+    workflow_config = sv_config.build_cli_workflow_config(
         sample_name=args.sample,
         callers=args.callers,
         model_name=args.model,
@@ -374,16 +328,6 @@ def _cmd_train(args):
         print(f"Saved model to {model_path}")
         print(f"Saved feature matrix ({X.shape}) to {fm_path}")
 
-    config["train"] = {
-        "model": args.model,
-        "model_id": workflow_config["model_id"],
-        "training_set": args.training_set,
-        "train_samples": args.train_samples,
-        "n_features": X.shape[1] if hasattr(X, "shape") else 0,
-        "n_samples": X.shape[0] if hasattr(X, "shape") else 0,
-    }
-    _write_config_out(args, config)
-
 
 # ---------------------------------------------------------------------------
 # Subcommand: predict
@@ -402,7 +346,6 @@ def _register_predict(subparsers):
     p.add_argument("--training_set", type=str, required=True, help="Training set name.")
     p.add_argument("--model", type=str, required=True, help="Model name.")
     p.add_argument("--output_dir", type=Path, required=True, help="Output directory.")
-    _add_config_io_args(p)
     _add_model_config_arg(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_predict)
@@ -414,11 +357,9 @@ def _cmd_predict(args):
     import pandas as pd
     from . import matched_breakpoints as mbps
     from . import vcfwrite as vcfw
-    from . import utils as sv_utils
+    from . import _config as sv_config
 
-    config = _load_or_build_config(args)
-
-    workflow_config = sv_utils.build_cli_workflow_config(
+    workflow_config = sv_config.build_cli_workflow_config(
         sample_name=args.sample,
         callers=args.callers,
         model_name=args.model,
@@ -462,14 +403,6 @@ def _cmd_predict(args):
     if args.verbose:
         print(f"Wrote {len(svensemble2_calls_df)} calls to {calls_csv}")
 
-    config["predict"] = {
-        "model": args.model,
-        "model_id": workflow_config["model_id"],
-        "training_set": args.training_set,
-        "n_calls": len(svensemble2_calls_df),
-    }
-    _write_config_out(args, config)
-
 
 # ---------------------------------------------------------------------------
 # Subcommand: benchmark-callset
@@ -488,15 +421,12 @@ def _register_benchmark_callset(subparsers):
     p.add_argument("--svtypes", type=str, default=None, help="Optional '+'-separated SV types to keep (e.g. DEL+INS). Default: all types.")
     p.add_argument("--svlen_min", type=int, default=None, help="Optional inclusive minimum SV length. Default: no lower bound.")
     p.add_argument("--svlen_max", type=int, default=None, help="Optional inclusive maximum SV length. Default: no upper bound.")
-    _add_config_io_args(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_benchmark_callset)
 
 
 def _cmd_benchmark_callset(args):
     from . import benchmark as bench_mod
-
-    config = _load_or_build_config(args)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -514,15 +444,6 @@ def _cmd_benchmark_callset(args):
         verbose=args.verbose,
     )
 
-    config["benchmark_callset"] = {
-        "caller": args.caller,
-        "val_name": args.val_name,
-        "svtypes": svtypes,
-        "svlen_min": args.svlen_min,
-        "svlen_max": args.svlen_max,
-    }
-    _write_config_out(args, config)
-
 
 # ---------------------------------------------------------------------------
 # Subcommand: shap
@@ -539,7 +460,6 @@ def _register_shap(subparsers):
     p.add_argument("--model", type=str, required=True, help="Model name.")
     p.add_argument("--training_set", type=str, required=True, help="Training set name.")
     p.add_argument("--output_dir", type=Path, required=True, help="Output directory for SHAP results.")
-    _add_config_io_args(p)
     _add_model_config_arg(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_shap)
@@ -547,9 +467,7 @@ def _register_shap(subparsers):
 
 def _cmd_shap(args):
     from . import sv_shap
-    from . import utils as sv_utils
 
-    config = _load_or_build_config(args)
     model_config = _load_model_config(args)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -564,17 +482,6 @@ def _cmd_shap(args):
         model_config=model_config,
         verbose=args.verbose,
     )
-
-    resolved = (
-        sv_utils.resolve_model_config(config=model_config) if model_config
-        else sv_utils.resolve_model_config(name=args.model)
-    )
-    config["shap"] = {
-        "model": args.model,
-        "model_id": sv_utils.model_id(resolved),
-        "training_set": args.training_set,
-    }
-    _write_config_out(args, config)
 
 
 # ---------------------------------------------------------------------------
@@ -611,7 +518,6 @@ def _register_ground_truth(subparsers):
     p.add_argument("--no_canonical_chroms", action="store_true", default=False, help="Disable restriction to canonical chromosomes (chr1-22, X, Y, M).")
     p.add_argument("--force_rerun", action="store_true", default=False, help="Overwrite existing output.")
     p.add_argument("--no_manifest", action="store_true", default=False, help="Skip writing manifest.txt alongside output.")
-    _add_config_io_args(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_ground_truth)
 
@@ -619,8 +525,6 @@ def _register_ground_truth(subparsers):
 def _cmd_ground_truth(args):
     import numpy as np
     from . import ground_truth as gt_mod
-
-    config = _load_or_build_config(args)
 
     filters = args.filters.split(",") if args.filters else None
     evidence = args.evidence.split(",") if args.evidence else None
@@ -647,21 +551,6 @@ def _cmd_ground_truth(args):
         write_manifest=not args.no_manifest,
         verbose=args.verbose,
     )
-
-    config["ground_truth"] = {
-        "name": args.ground_truth_name,
-        "output": args.output_path.name,
-        "filters": filters,
-        "evidence": evidence,
-        "svtypes": svtypes,
-        "algorithms": algorithms,
-        "min_af": args.min_af,
-        "max_af": args.max_af,
-        "svlens": list(svlens),  # dump_config sanitizes inf -> null on write
-        "bothsides_support_only": args.bothsides_support_only,
-        "canonical_chroms_only": not args.no_canonical_chroms,
-    }
-    _write_config_out(args, config)
 
 
 # ---------------------------------------------------------------------------
@@ -701,7 +590,6 @@ def _register_run(subparsers):
     p.add_argument("--ground_truth_svtypes", type=str, default=None, help="Ground-truth: comma-separated SV types.")
     p.add_argument("--ground_truth_svlen_lower", type=int, default=50, help="Ground-truth: minimum SV length.")
     p.add_argument("--ground_truth_svlen_upper", type=float, default=None, help="Ground-truth: maximum SV length.")
-    _add_config_io_args(p)
     _add_model_config_arg(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_run)
@@ -738,7 +626,6 @@ def _cmd_run(args):
             caller=callset,
             ref=Path(args.ref).resolve(),
             output=raw_out,
-            config_in=None, config_out=None,
             verbose=args.verbose,
         ))
         raw_bps_paths.append(raw_out)
@@ -754,7 +641,6 @@ def _cmd_run(args):
             model_config=args.model_config,
             sample=args.sample,
             output=callset_pre_dir,
-            config_in=None, config_out=None,
             verbose=args.verbose,
         ))
         bps_paths.append(callset_pre_dir / f"{callset}.bps.csv")
@@ -778,7 +664,6 @@ def _cmd_run(args):
             no_canonical_chroms=False,
             force_rerun=False,
             no_manifest=False,
-            config_in=None, config_out=None,
             verbose=args.verbose,
         ))
     else:
@@ -792,6 +677,9 @@ def _cmd_run(args):
     # Stage 4: match.
     matched_bps = match_dir / "matched_bps.csv"
     _cmd_match(Namespace(
+        sample=args.sample,
+        model=args.model,
+        model_config=args.model_config,
         bps=bps_paths,
         ground_truth_bps=ground_truth_bps,
         callers=args.callers,
@@ -799,7 +687,6 @@ def _cmd_run(args):
         max_dist=args.max_dist,
         insert_delta_threshold=args.insert_delta_threshold,
         output=matched_bps,
-        config_in=None, config_out=None,
         verbose=args.verbose,
     ))
 
@@ -814,7 +701,6 @@ def _cmd_run(args):
         sample=args.sample,
         output_dir=train_dir,
         train_samples=None, train_matched_bps=None,
-        config_in=None, config_out=None,
         verbose=args.verbose,
     ))
 
@@ -829,87 +715,11 @@ def _cmd_run(args):
         model=args.model,
         model_config=args.model_config,
         output_dir=output_dir,
-        config_in=None, config_out=None,
         verbose=args.verbose,
     ))
 
-    from . import utils as sv_utils
-    _run_model_config = _load_model_config(args)
-    _run_resolved = (
-        sv_utils.resolve_model_config(config=_run_model_config) if _run_model_config
-        else sv_utils.resolve_model_config(name=args.model)
-    )
-    config = _load_or_build_config(args)
-    config["run"] = {
-        "sample": args.sample,
-        "workdir": str(workdir),
-        "output_dir": str(output_dir),
-        "callers": args.callers,
-        "ground_truth_name": args.ground_truth_name,
-        "model": args.model,
-        "model_id": sv_utils.model_id(_run_resolved),
-        "training_set": args.training_set,
-        "stages": ["preprocess_raw", "preprocess", "ground_truth", "match", "train", "predict"],
-    }
-    _write_config_out(args, config)
-
     if args.verbose:
         print(f"[run] done. calls -> {output_dir / 'svensemble2_calls.csv'}")
-
-
-# ---------------------------------------------------------------------------
-# Config helpers
-# ---------------------------------------------------------------------------
-
-def _load_or_build_config(args) -> dict:
-    """Load config from --config_in if provided, then overlay CLI args on top."""
-    if hasattr(args, "config_in") and args.config_in is not None:
-        from .config_io import load_config
-        config = load_config(args.config_in)
-    else:
-        config = {}
-    _apply_cli_args_to_config(args, config)
-    return config
-
-
-def _apply_cli_args_to_config(args, config: dict) -> None:
-    """Overlay CLI args onto a config dict in place; CLI values win on conflict.
-
-    Handles both flag spellings for the same concept (e.g. --sample vs
-    --sample_name) so a config loaded from --config_in can be enriched by
-    whichever spelling the current subcommand uses.
-    """
-    str_arg_map = [
-        ("sample", "sample_name"),
-        ("sample_name", "sample_name"),
-        ("model", "model_name"),
-        ("model_name", "model_name"),
-        ("training_set", "training_set"),
-        ("ground_truth_name", "ground_truth_name"),
-    ]
-    for arg_attr, config_key in str_arg_map:
-        val = getattr(args, arg_attr, None)
-        if val:
-            config[config_key] = val
-
-    callers = getattr(args, "callers", None)
-    caller = getattr(args, "caller", None)
-    if callers:
-        config["callers"] = callers
-    elif caller:
-        config["callers"] = [caller]
-
-    for attr in ("max_dist", "insert_delta_threshold"):
-        val = getattr(args, attr, None)
-        if val is not None:
-            config.setdefault("match_params", {})[attr] = val
-
-
-def _write_config_out(args, config: dict) -> None:
-    """Write config to --config_out if specified."""
-    if hasattr(args, "config_out") and args.config_out is not None:
-        from .config_io import dump_config
-        dump_config(config, args.config_out)
 
 
 # ---------------------------------------------------------------------------
@@ -927,13 +737,13 @@ def _register_model_id(subparsers):
 
 
 def _cmd_model_id(args):
-    from . import utils as sv_utils
+    from . import _config as sv_config
 
     model_config = _load_model_config(args)
     if model_config is not None:
-        resolved = sv_utils.resolve_model_config(config=model_config)
+        resolved = sv_config.resolve_model_config(config=model_config)
     elif args.model:
-        resolved = sv_utils.resolve_model_config(name=args.model)
+        resolved = sv_config.resolve_model_config(name=args.model)
     else:
         raise SystemExit("Provide --model <preset> or --model_config <file>.")
-    print(sv_utils.model_id(resolved))
+    print(sv_config.model_id(resolved))

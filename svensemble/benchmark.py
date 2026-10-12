@@ -25,6 +25,7 @@ from matplotlib.text import Text
 from . import breakends as bnds
 from . import events as evts
 from . import utils as sv_utils
+from . import _config as sv_config
 from . import _caller_params as caller_params
 from . import _sample_params as sample_params
 from . import vcfparse as vcfp
@@ -1805,7 +1806,7 @@ def get_truth_count(
     Returns:
         Integer count of truth variants passing the filter.
     """
-    from .utils import sample_val_sets
+    from ._sample_params import sample_val_sets
     from . import breakpoints as bps_mod
 
     if val_set_path is None or val_set_name is None:
@@ -2612,7 +2613,7 @@ def benchmark_model(
     # Build config dict for the sample, with all paths
     config_dicts = []
     for training_set_name in training_sets:
-        config_dicts.append(sv_utils.create_config_dict(
+        config_dicts.append(sv_config.create_config_dict(
             sample_name,
             training_set=training_set_name,
             val_set=val_set_arg,
