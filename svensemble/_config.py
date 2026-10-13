@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import TypedDict, NotRequired
 
 from . import config_io
-from ._model_configs import model_configs, TrainingParams, ResolvedModelConfig
+from ._model_configs import model_configs, TrainingParams, ModelConfig
 from .utils import update
 from ._caller_params import training_set_presets as TRAINING_SET_PRESETS
 from ._caller_params import default_training_set as DEFAULT_TRAINING_SET
@@ -29,6 +29,11 @@ _MODEL_ID_HASH_VERSION = "v2"
 # changing any runtime behaviour (every instance is still a plain dict).
 # ---------------------------------------------------------------------------
 
+class ResolvedModelConfig(ModelConfig):
+    """A resolved model config with derived keys."""
+    model_id: str
+    matched_bps_path: Path
+    feature_matrix_path: Path
 
 class CallsetParams(TypedDict, total=False):
     """Per-callset VCF parsing and feature parameters (from _caller_params)."""
@@ -94,7 +99,7 @@ tag_dict_preset_benchmark = {
 }
 
 
-def resolve_model_config(name: str | None = None, config: dict | None = None) -> dict:
+def resolve_model_config(name: str | None = None, config: dict | None = None) -> ModelConfig:
     """Resolve a full model config (two-branch).
 
     Branch 1 -- ``resolve_model_config(name="unbiased_xgb")``: return the named
@@ -243,7 +248,7 @@ def build_ground_truth_config(
     name: str,
     vcf_path: Path | None = None,
     bps_path: Path | None = None,
-) -> dict:
+) -> GroundTruthConfig:
     """Build a standalone ground truth config dict.
 
     Used on its own for the ground truth preprocessing stage, and embedded
@@ -275,7 +280,7 @@ def build_ground_truth_config(
     )
     return cfg
 
-def build_cli_workflow_config(
+def build_workflow_config(
     sample_name: str,
     callers: list[str] | None = None,
     model_name: str | None = None,
@@ -285,21 +290,17 @@ def build_cli_workflow_config(
     ground_truth_name: str | None = None,
     ground_truth_vcf_path: Path | None = None,
     ground_truth_bps_path: Path | None = None,
-) -> dict:
+) -> WorkflowConfig:
     """
-    Build a workflow_config dict for CLI/Nextflow subcommands.
+    Build a workflow_config dict for pipeline subcommands.
 
-    This is a flat-path sibling of create_config_dict for the case where the
-    files being consumed are already staged into the current working directory
-    (Nextflow work dir, or the user's cwd for standalone CLI invocations) and
-    the standard data/{sample}/... directory templating does not apply.
+    Paths are all Path('.') (or bare filenames) -- the caller is expected
+    to have staged files into the working directory (Nextflow work dir,
+    or the user's cwd for standalone CLI invocations).
 
-    Compared to create_config_dict:
-      - Paths are all Path('.') (or bare filenames); no data/{sample}/ prefix
-        derivation, no filesystem existence checks.
-      - training_set is treated as a free-form name: if it matches a preset in
-        training_set_presets, the preset's caller list is used; otherwise the
-        provided `callers` list is stored under that name.
+    training_set is treated as a free-form name: if it matches a preset in
+    training_set_presets, the preset's caller list is used; otherwise the
+    provided `callers` list is stored under that name.
 
     Args:
         sample_name: Sample identifier (str). Stored under 'sample_name'.
@@ -357,21 +358,21 @@ def build_cli_workflow_config(
 
     workflow_dir = Path('.')
 
-    config = {
-        'sample_name': sample_name,
-        'callsets': callsets,
-        'callset_bps_dir': workflow_dir,
-        'workflow_dir': workflow_dir,
-        'is_reference': False,
-        'training_sets': training_sets,
-        'model': {
+    config = WorkflowConfig(
+        sample_name=sample_name,
+        callsets=callsets,
+        callset_bps_dir=workflow_dir,
+        workflow_dir=workflow_dir,
+        is_reference=False,
+        training_sets=training_sets,
+        model=ResolvedModelConfig(
             **model_cfg,
-            'model_id': mid,
-            'matched_bps_path': workflow_dir / 'matched_bps.csv',
-            'feature_matrix_path': workflow_dir / 'feature_matrix.csv',
-        },
-        'model_id': mid,
-    }
+            model_id=mid,
+            matched_bps_path=workflow_dir / 'matched_bps.csv',
+            feature_matrix_path=workflow_dir / 'feature_matrix.csv',
+        ),
+        model_id=mid,
+    )
 
     if ref_path is not None:
         config['ref_path'] = ref_path

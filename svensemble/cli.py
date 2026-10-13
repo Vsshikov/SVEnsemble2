@@ -100,7 +100,7 @@ def _cmd_preprocess_raw(args):
     from . import pipeline
     from . import _config as sv_config
 
-    workflow_config = sv_config.build_cli_workflow_config(
+    workflow_config = sv_config.build_workflow_config(
         sample_name="sample",
         callers=[args.caller],
         model_name=None,
@@ -156,7 +156,7 @@ def _cmd_preprocess(args):
     from . import _config as sv_config
     from . import vcfwrite as vcfw
 
-    workflow_config = sv_config.build_cli_workflow_config(
+    workflow_config = sv_config.build_workflow_config(
         sample_name=args.sample,
         callers=[args.caller],
         model_name=args.model,
@@ -206,7 +206,7 @@ def _cmd_match(args):
     from . import chunk_match
     from . import _config as sv_config
 
-    workflow_config = sv_config.build_cli_workflow_config(
+    workflow_config = sv_config.build_workflow_config(
         sample_name=args.sample,
         callers=args.callers,
         model_name=args.model,
@@ -282,7 +282,7 @@ def _cmd_train(args):
     from . import models
     from . import _config as sv_config
 
-    workflow_config = sv_config.build_cli_workflow_config(
+    workflow_config = sv_config.build_workflow_config(
         sample_name=args.sample,
         callers=args.callers,
         model_name=args.model,
@@ -359,7 +359,7 @@ def _cmd_predict(args):
     from . import vcfwrite as vcfw
     from . import _config as sv_config
 
-    workflow_config = sv_config.build_cli_workflow_config(
+    workflow_config = sv_config.build_workflow_config(
         sample_name=args.sample,
         callers=args.callers,
         model_name=args.model,

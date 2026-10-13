@@ -1,4 +1,4 @@
-"""Tests for svensemble.cli: argument parsing, build_cli_workflow_config, --version."""
+"""Tests for svensemble.cli: argument parsing, build_workflow_config, --version."""
 
 import subprocess
 import sys
@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from svensemble.cli import main
-from svensemble._config import build_cli_workflow_config
+from svensemble._config import build_workflow_config
 
 
 class TestVersion:
@@ -32,7 +32,7 @@ class TestVersion:
 
 class TestBuildCliWorkflowConfig:
     def test_basic_structure(self):
-        config = build_cli_workflow_config(
+        config = build_workflow_config(
             sample_name="NA12878",
             callers=["gridss", "manta_diploid"],
             model_name="unbiased",
@@ -46,7 +46,7 @@ class TestBuildCliWorkflowConfig:
         assert config["is_reference"] is False
 
     def test_resolves_callers_from_training_set_preset(self):
-        config = build_cli_workflow_config(
+        config = build_workflow_config(
             sample_name="test",
             callers=[],
             model_name="unbiased",
@@ -56,7 +56,7 @@ class TestBuildCliWorkflowConfig:
         assert "manta_diploid" in config["callsets"]
 
     def test_caller_params_resolved(self):
-        config = build_cli_workflow_config(
+        config = build_workflow_config(
             sample_name="test",
             callers=["gridss"],
             model_name="unbiased",
@@ -65,7 +65,7 @@ class TestBuildCliWorkflowConfig:
         assert "filter_cols" in params or "info_cols_pred" in params
 
     def test_custom_cols_added_for_model(self):
-        config = build_cli_workflow_config(
+        config = build_workflow_config(
             sample_name="test",
             callers=["gridss"],
             model_name="unbiased_GT",
@@ -75,7 +75,7 @@ class TestBuildCliWorkflowConfig:
         assert params.get("custom_cols_pred") == ["SVTYPE"]
 
     def test_paths_relative(self):
-        config = build_cli_workflow_config(
+        config = build_workflow_config(
             sample_name="test",
             callers=["gridss"],
             ref_path=Path("/some/ref.fa"),
@@ -84,8 +84,49 @@ class TestBuildCliWorkflowConfig:
         assert config["callset_bps_dir"] == Path(".")
 
     def test_no_callers_empty(self):
-        config = build_cli_workflow_config(sample_name="test")
+        config = build_workflow_config(sample_name="test")
         assert config["callsets"] == {}
+
+
+class TestBuildCliWorkflowConfigGroundTruth:
+    """build_workflow_config with ground_truth_name -- the path exercised
+    by the Nextflow match and train steps."""
+
+    def test_ground_truth_embedded_in_config(self):
+        config = build_workflow_config(
+            sample_name="NA12878",
+            callers=["gridss", "manta_diploid"],
+            model_name="unbiased_xgb",
+            training_set="gridss+manta_diploid",
+            ground_truth_name="gnomad",
+        )
+        gt = config["ground_truth"]
+        assert gt["name"] == "gnomad"
+        assert "params" in gt
+
+    def test_ground_truth_with_bps_path(self):
+        config = build_workflow_config(
+            sample_name="NA12878",
+            callers=["gridss"],
+            ground_truth_name="gnomad",
+            ground_truth_bps_path=Path("ground_truth.bps.csv"),
+        )
+        assert config["ground_truth"]["bps_path"] == Path("ground_truth.bps.csv")
+
+    def test_no_ground_truth_when_omitted(self):
+        config = build_workflow_config(
+            sample_name="NA12878",
+            callers=["gridss"],
+        )
+        assert "ground_truth" not in config
+
+    def test_unknown_ground_truth_raises(self):
+        with pytest.raises(ValueError, match="Unknown ground truth name"):
+            build_workflow_config(
+                sample_name="NA12878",
+                callers=["gridss"],
+                ground_truth_name="definitely_not_a_real_dataset",
+            )
 
 
 class TestSubcommandParsing:
@@ -203,3 +244,31 @@ class TestTrainSubcommandPooledValidation:
 
         assert captured["matched_bps_sources"] is None
         assert list(captured["joint_bp_df"]["a"]) == [1, 2]
+
+    def test_ground_truth_propagated_to_workflow_config(self, tmp_path, monkeypatch):
+        """The Nextflow train step always passes --ground_truth_name; verify
+        it ends up in workflow_config['ground_truth'] so _get_ground_truth_name
+        can extract it at training time."""
+        csv1 = tmp_path / "matched_bps.csv"
+        pd.DataFrame({"a": [1]}).to_csv(csv1, index=False)
+
+        captured = {}
+
+        def fake_train_model(
+            joint_bp_df, workflow_config, training_set_name,
+            verbose=False, matched_bps_sources=None,
+        ):
+            captured["workflow_config"] = workflow_config
+            return pd.DataFrame({"f": [1]}), None
+
+        monkeypatch.setattr("svensemble.models.train_model", fake_train_model)
+
+        sys.argv = self._base_argv(tmp_path / "out") + [
+            "--matched_bps", str(csv1),
+            "--ground_truth_name", "gnomad",
+        ]
+        main()
+
+        gt = captured["workflow_config"]["ground_truth"]
+        assert gt["name"] == "gnomad"
+        assert "params" in gt

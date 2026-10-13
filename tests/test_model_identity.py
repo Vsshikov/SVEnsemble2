@@ -52,7 +52,7 @@ class TestModelConfigHash:
     def test_pollution_free_with_full_model_block(self):
         # A full workflow_config['model'] sub-dict (with model_id + *_path) must
         # hash identically to the bare resolved config.
-        cfg = sv_config.build_cli_workflow_config(
+        cfg = sv_config.build_workflow_config(
             sample_name="s", callers=["gridss"], model_name="unbiased_xgb",
             training_set="gridss",
         )["model"]
@@ -135,6 +135,46 @@ class TestResolveModelConfig:
 # ---------------------------------------------------------------------------
 # Fetch-by-config helper
 # ---------------------------------------------------------------------------
+
+class TestGroundTruthConfig:
+    def test_build_ground_truth_config_structure(self):
+        gt = sv_config.build_ground_truth_config("gnomad")
+        assert gt["name"] == "gnomad"
+        assert "params" in gt
+        assert gt["vcf_path"] is None
+        assert gt["bps_path"] is None
+
+    def test_build_ground_truth_config_with_paths(self):
+        gt = sv_config.build_ground_truth_config(
+            "gnomad", bps_path=Path("gt.bps.csv"),
+        )
+        assert gt["bps_path"] == Path("gt.bps.csv")
+
+    def test_round_trip_through_workflow_config(self):
+        """The pipeline chain: build_workflow_config embeds ground_truth,
+        then models._get_ground_truth_name extracts it."""
+        from svensemble.models import _get_ground_truth_name
+        config = sv_config.build_workflow_config(
+            sample_name="s",
+            callers=["gridss"],
+            model_name="unbiased_xgb",
+            training_set="gridss",
+            ground_truth_name="gnomad_pass",
+        )
+        assert _get_ground_truth_name(config) == "gnomad_pass"
+
+    def test_get_ground_truth_name_missing_raises(self):
+        from svensemble.models import _get_ground_truth_name
+        config = sv_config.build_workflow_config(
+            sample_name="s", callers=["gridss"],
+        )
+        with pytest.raises(KeyError):
+            _get_ground_truth_name(config)
+
+    def test_unknown_ground_truth_name_raises(self):
+        with pytest.raises(ValueError, match="Unknown ground truth name"):
+            sv_config.build_ground_truth_config("not_a_real_dataset")
+
 
 class TestModelResultDir:
     def test_accepts_override_dict(self):

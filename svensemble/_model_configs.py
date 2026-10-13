@@ -28,14 +28,14 @@ class TrainingParams(TypedDict, total=False):
     add_topology: bool
 
 
-class ResolvedModelConfig(TypedDict):
+class ModelConfig(TypedDict):
     """An model config with known base preset."""
     name: str
     base: str
     training_params: TrainingParams
     description: NotRequired[str]
 
-model_configs: dict[str, ResolvedModelConfig] = {
+model_configs: dict[str, ModelConfig] = {
     # ---------------------------------------------------------------------
     # Canonical base presets
     # ---------------------------------------------------------------------
@@ -218,7 +218,7 @@ model_configs: dict[str, ResolvedModelConfig] = {
 }
 
 
-def _enrich_model_config(model_config: ResolvedModelConfig) -> ResolvedModelConfig:
+def _enrich_model_config(model_config: ModelConfig) -> ModelConfig:
     """
     Enrich a model config with default values if some were not set above.
 
