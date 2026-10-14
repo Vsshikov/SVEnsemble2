@@ -138,62 +138,6 @@ def summarise_shap_values(
 
 
 # ---------------------------------------------------------------------------
-# Plotting helpers
-# ---------------------------------------------------------------------------
-def generate_shap_plots(
-    shap_values: shap.Explanation,
-    output_dir: Path,
-    prefix: str,
-    top_n: int = 20,
-    verbose: bool = False,
-) -> list[Path]:
-    """
-    Generate beeswarm and bar SHAP summary plots.
-
-    Saves to *output_dir* with filenames prefixed by *prefix*.
-    Returns list of saved file paths.
-    """
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    saved: list[Path] = []
-
-    sv = shap_values
-    if sv.values.ndim == 3:
-        sv = shap_values[:, :, 1]
-
-    # Beeswarm
-    try:
-        fig_bee = plt.figure()
-        shap.plots.beeswarm(sv, max_display=top_n, show=False)
-        bee_path = output_dir / f'{prefix}.beeswarm.png'
-        plt.savefig(bee_path, dpi=150, bbox_inches='tight')
-        plt.close(fig_bee)
-        saved.append(bee_path)
-        if verbose:
-            print(f"Saved beeswarm plot: {bee_path}")
-    except Exception as e:
-        print(f"Warning: beeswarm plot failed: {e}")
-
-    # Bar
-    try:
-        fig_bar = plt.figure()
-        shap.plots.bar(sv, max_display=top_n, show=False)
-        bar_path = output_dir / f'{prefix}.bar.png'
-        plt.savefig(bar_path, dpi=150, bbox_inches='tight')
-        plt.close(fig_bar)
-        saved.append(bar_path)
-        if verbose:
-            print(f"Saved bar plot: {bar_path}")
-    except Exception as e:
-        print(f"Warning: bar plot failed: {e}")
-
-    return saved
-
-
-# ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
 def run_shap(
