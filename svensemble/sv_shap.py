@@ -148,13 +148,24 @@ def run_shap(
     training_set: str,
     output_dir: Path,
     model_config: dict | None = None,
+    use_gpu: bool = False,
+    max_samples: Optional[int] = None,
+    top_n: int = 20,
+    plot: bool = False,
     verbose: bool = False,
 ) -> Path:
     """
     Pipeline-friendly SHAP entry point.  Accepts file paths directly
     rather than discovering them via sample/model configs.
 
-    Writes {prefix}.shap_summary.csv and {prefix}.shap_values.pkl into output_dir.
+    Writes {prefix}.shap_summary.csv and {prefix}.shap_values.pkl into output_dir,
+    plus beeswarm/bar PNGs when plot is True.
+
+    Args:
+        use_gpu: Use GPUTreeExplainer (requires CUDA).
+        max_samples: Subsample the feature matrix to at most this many rows.
+        top_n: Number of top features in the summary CSV and plots.
+        plot: Write beeswarm and bar summary plots.
     """
     # Load model
     with open(model_pkl, 'rb') as f:
@@ -181,10 +192,12 @@ def run_shap(
     if verbose:
         print(f"Feature matrix shape: {X.shape}")
 
-    shap_values = compute_shap_values(model, X, verbose=verbose)
+    shap_values = compute_shap_values(
+        model, X, use_gpu=use_gpu, max_samples=max_samples, verbose=verbose,
+    )
 
     prefix = f'{sample_name}.{mid}.{training_set}'
-    summary = summarise_shap_values(shap_values)
+    summary = summarise_shap_values(shap_values, top_n=top_n)
     summary_csv_path = output_dir / f'{prefix}.shap_summary.csv'
     summary.to_csv(summary_csv_path, index=False)
     print(f"Saved SHAP summary (top {len(summary)}): {summary_csv_path}")
@@ -194,5 +207,12 @@ def run_shap(
     with open(shap_pkl_path, 'wb') as f:
         pickle.dump(shap_values, f)
     print(f"Saved SHAP values: {shap_pkl_path}")
+
+    if plot:
+        from .plotting import generate_shap_plots
+        generate_shap_plots(
+            shap_values, output_dir=output_dir, prefix=prefix,
+            top_n=top_n, verbose=verbose,
+        )
 
     return shap_pkl_path

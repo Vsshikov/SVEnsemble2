@@ -5,6 +5,8 @@ The single command-line entry point for the package. Provides:
   * per-stage subcommands (preprocess-raw, preprocess, match, train, predict,
     ground-truth, benchmark-callset, shap) that accept explicit file paths.
     These are the units invoked by Nextflow modules.
+  * utilities: validation-set (preprocess a raw truth set into breakpoints)
+    and model-id (print the hashed id for a preset or model config).
   * a `run` subcommand that chains all stages against explicit full input
     paths and an explicit workdir. This is the standalone entry point for
     running the pipeline without a workflow manager -- it does not expect
@@ -37,6 +39,7 @@ def main():
     _register_benchmark_callset(subparsers)
     _register_shap(subparsers)
     _register_ground_truth(subparsers)
+    _register_validation_set(subparsers)
     _register_run(subparsers)
     _register_model_id(subparsers)
 
@@ -460,6 +463,10 @@ def _register_shap(subparsers):
     p.add_argument("--model", type=str, required=True, help="Model name.")
     p.add_argument("--training_set", type=str, required=True, help="Training set name.")
     p.add_argument("--output_dir", type=Path, required=True, help="Output directory for SHAP results.")
+    p.add_argument("--use_gpu", action="store_true", default=False, help="Use GPUTreeExplainer (requires CUDA).")
+    p.add_argument("--max_samples", type=int, default=None, help="Subsample the feature matrix to at most N rows.")
+    p.add_argument("--top_n", type=int, default=20, help="Number of top features in the summary CSV and plots (default 20).")
+    p.add_argument("--plot", action="store_true", default=False, help="Also write beeswarm and bar summary plots.")
     _add_model_config_arg(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_shap)
@@ -480,6 +487,10 @@ def _cmd_shap(args):
         training_set=args.training_set,
         output_dir=args.output_dir,
         model_config=model_config,
+        use_gpu=args.use_gpu,
+        max_samples=args.max_samples,
+        top_n=args.top_n,
+        plot=args.plot,
         verbose=args.verbose,
     )
 
@@ -551,6 +562,42 @@ def _cmd_ground_truth(args):
         write_manifest=not args.no_manifest,
         verbose=args.verbose,
     )
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: validation-set
+# ---------------------------------------------------------------------------
+#
+# Converts a published truth set into the breakpoints CSV consumed by
+# `benchmark-callset --val_bps`. --name must match the later --val_name.
+#
+
+def _register_validation_set(subparsers):
+    from .validation_sets import VALIDATION_SET_NAMES
+
+    p = subparsers.add_parser(
+        "validation-set",
+        help="Preprocess a published validation set into a breakpoints CSV for benchmark-callset.",
+    )
+    p.add_argument("--name", type=str, required=True, choices=VALIDATION_SET_NAMES, help="Validation set name; pass the same value as benchmark-callset --val_name.")
+    p.add_argument("--raw_path", type=Path, required=True, help="Published truth file (VCF, BED or CSV depending on the set).")
+    p.add_argument("--output", type=Path, required=True, help="Output breakpoints CSV path.")
+    p.add_argument("--force_rerun", action="store_true", default=False, help="Overwrite existing output.")
+    _add_verbose_arg(p)
+    p.set_defaults(func=_cmd_validation_set)
+
+
+def _cmd_validation_set(args):
+    from . import validation_sets
+
+    out = validation_sets.preprocess_validation_set(
+        name=args.name,
+        raw_path=args.raw_path,
+        output_path=args.output,
+        force_rerun=args.force_rerun,
+    )
+    if args.verbose:
+        print(f"Wrote {args.name} validation breakpoints to {out}")
 
 
 # ---------------------------------------------------------------------------
@@ -731,14 +778,20 @@ def _register_model_id(subparsers):
         "model-id",
         help="Print the reconstructible model_id for a model (preset name or --model_config).",
     )
-    p.add_argument("--model", type=str, default=None, help="Preset / base name.")
-    _add_model_config_arg(p)
+    grp = p.add_mutually_exclusive_group()
+    grp.add_argument("--model", type=str, default=None, help="Preset / base name.")
+    _add_model_config_arg(grp)
+    grp.add_argument("--all", action="store_true", default=False, help="Print 'preset<TAB>model_id' for every preset.")
     p.set_defaults(func=_cmd_model_id)
 
 
 def _cmd_model_id(args):
     from . import _config as sv_config
 
+    if args.all:
+        for name, mid in sv_config.list_preset_ids().items():
+            print(f"{name}\t{mid}")
+        return
     model_config = _load_model_config(args)
     if model_config is not None:
         resolved = sv_config.resolve_model_config(config=model_config)
