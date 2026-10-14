@@ -143,6 +143,80 @@ class TestSubcommandParsing:
         assert exc.value.code == 2
 
 
+class TestModelIdSubcommand:
+    def test_all_lists_every_preset(self, capsys):
+        from svensemble import api
+
+        sys.argv = ["svensemble", "model-id", "--all"]
+        main()
+        lines = capsys.readouterr().out.splitlines()
+        assert dict(line.split("\t") for line in lines) == api.list_preset_ids()
+
+    @pytest.mark.parametrize("other", [["--model", "unbiased_xgb"], ["--model_config", "cfg.json"]])
+    def test_all_excludes_model_selection(self, other):
+        sys.argv = ["svensemble", "model-id", "--all", *other]
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 2
+
+    def test_preset_prints_id_only(self, capsys):
+        sys.argv = ["svensemble", "model-id", "--model", "unbiased_xgb"]
+        main()
+        assert capsys.readouterr().out == "unbiased_xgb-855c4c13\n"
+
+
+class TestShapSubcommand:
+    @pytest.fixture
+    def captured(self, monkeypatch):
+        pytest.importorskip("shap")
+        captured = {}
+        monkeypatch.setattr("svensemble.sv_shap.run_shap", lambda **kw: captured.update(kw))
+        return captured
+
+    def _argv(self, tmp_path):
+        return [
+            "svensemble", "shap",
+            "--model_pkl", str(tmp_path / "model.pkl"),
+            "--feature_matrix", str(tmp_path / "feature_matrix.csv"),
+            "--sample", "s", "--model", "unbiased_xgb", "--training_set", "ts",
+            "--output_dir", str(tmp_path / "shap"),
+        ]
+
+    def test_new_flags_default_off(self, tmp_path, captured):
+        sys.argv = self._argv(tmp_path)
+        main()
+        assert (captured["use_gpu"], captured["max_samples"], captured["top_n"], captured["plot"]) == (False, None, 20, False)
+
+    def test_new_flags_passed_through(self, tmp_path, captured):
+        sys.argv = self._argv(tmp_path) + ["--use_gpu", "--max_samples", "50", "--top_n", "7", "--plot"]
+        main()
+        assert (captured["use_gpu"], captured["max_samples"], captured["top_n"], captured["plot"]) == (True, 50, 7, True)
+
+
+class TestValidationSetSubcommand:
+    def test_dispatches_to_api(self, tmp_path, monkeypatch):
+        captured = {}
+        monkeypatch.setattr(
+            "svensemble.api.preprocess_validation_set",
+            lambda **kw: captured.update(kw) or kw["output_path"],
+        )
+        sys.argv = [
+            "svensemble", "validation-set", "--name", "hg002_val",
+            "--raw_path", str(tmp_path / "raw.vcf.gz"), "--output", str(tmp_path / "out.csv"), "--force_rerun",
+        ]
+        main()
+        assert captured == {
+            "name": "hg002_val", "raw_path": tmp_path / "raw.vcf.gz",
+            "output_path": tmp_path / "out.csv", "force_rerun": True,
+        }
+
+    def test_unknown_name_is_a_usage_error(self, tmp_path):
+        sys.argv = ["svensemble", "validation-set", "--name", "nope", "--raw_path", "x", "--output", "y"]
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 2
+
+
 class TestTrainSubcommandPooledValidation:
     """--matched_bps and --train_samples/--train_matched_bps are mutually
     exclusive alternatives; exactly one form must be given (see
