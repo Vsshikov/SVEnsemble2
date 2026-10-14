@@ -2,8 +2,9 @@
 SVEnsemble2 Python API.
 
 Each pipeline step takes DataFrames and plain values and returns DataFrames
-or a fitted model; none of them read or write files. Pair them with
-``svensemble.io`` to load inputs and save outputs:
+or a fitted model; apart from preprocess_raw parsing its VCF, none of them
+read or write files. Pair them with ``svensemble.io`` to load inputs and
+save outputs:
 
     raw = api.preprocess_raw(vcf, "manta_diploid", ref)
     bps = api.preprocess(raw, "manta_diploid", model="unbiased_xgb")
@@ -12,7 +13,8 @@ or a fitted model; none of them read or write files. Pair them with
     calls = api.predict(model_fit, X, matched, "unbiased_xgb", "manta_diploid")
 
 Ground truth, validation sets, benchmarking and SHAP are file-to-file and
-are exposed here unchanged.
+are exposed here unchanged. ``run`` chains every step through io into a
+workdir, as ``svensemble run`` does.
 """
 
 from pathlib import Path
@@ -23,6 +25,7 @@ import pandas as pd
 from . import _config as sv_config
 from . import breakpoints as bps_mod
 from . import chunk_match
+from . import io as sv_io
 from . import matched_breakpoints as mbps
 from . import models
 from . import pipeline
@@ -33,6 +36,7 @@ from .validation_sets import preprocess_validation_set
 __all__ = [
     "preprocess_raw", "preprocess", "match", "train", "predict",
     "preprocess_ground_truth", "preprocess_validation_set", "benchmark_callset", "shap",
+    "run",
 ]
 
 
@@ -236,3 +240,127 @@ def shap(
         plot=plot,
         verbose=verbose,
     )
+
+
+# ---------------------------------------------------------------------------
+# End-to-end run
+# ---------------------------------------------------------------------------
+
+def run(
+    sample: str,
+    workdir: Path,
+    ref: Path,
+    callers: list[str],
+    caller_vcfs: list[Path],
+    model: str,
+    training_set: str,
+    ground_truth_vcf: Path | None = None,
+    ground_truth_bps: Path | None = None,
+    ground_truth_name: str = "gnomad",
+    model_config: dict | None = None,
+    max_dist: int = 100,
+    insert_delta_threshold: float = 0.7,
+    output_dir: Path | None = None,
+    ground_truth_filters: list[str] | None = None,
+    ground_truth_svtypes: list[str] | None = None,
+    ground_truth_svlen_lower: int = 50,
+    ground_truth_svlen_upper: float | None = None,
+    verbose: bool = False,
+) -> Path:
+    """Run every step for one sample and return the path to the calls CSV.
+
+    Intermediate outputs land under ``workdir/{preprocess_raw, preprocess/<caller>,
+    ground_truth, match, train}`` and the calls under *output_dir* (default
+    ``workdir/predict``), with the same filenames the per-stage subcommands
+    write. Each artifact is read back from its file before the next step, so
+    the results equal running the subcommands one by one, as Nextflow does.
+
+    Args:
+        sample: Sample name; used only in the VCF outputs.
+        callers, caller_vcfs: Caller names and their VCFs, paired by position.
+        ground_truth_vcf, ground_truth_bps: Exactly one. A VCF goes through
+            preprocess_ground_truth (with the ground_truth_* filters); a
+            preprocessed breakpoints CSV is symlinked into the workdir.
+        model_config: Optional decoded model config override (with 'base').
+
+    Remaining arguments are passed to the step of the same name.
+    """
+    if len(callers) != len(caller_vcfs):
+        raise ValueError(
+            f"callers ({len(callers)}) and caller_vcfs ({len(caller_vcfs)}) must be the same length."
+        )
+    if (ground_truth_vcf is None) == (ground_truth_bps is None):
+        raise ValueError("Provide exactly one of ground_truth_vcf or ground_truth_bps.")
+
+    workdir = Path(workdir).resolve()
+    output_dir = Path(output_dir or workdir / "predict").resolve()
+    raw_dir = workdir / "preprocess_raw"
+    pre_dir = workdir / "preprocess"
+    gt_dir = workdir / "ground_truth"
+    match_dir = workdir / "match"
+    train_dir = workdir / "train"
+    for d in (raw_dir, pre_dir, gt_dir, match_dir, train_dir, output_dir):
+        d.mkdir(parents=True, exist_ok=True)
+    if verbose:
+        print(f"[run] workdir: {workdir}")
+        print(f"[run] output_dir: {output_dir}")
+
+    caller_bps = {}
+    for caller, vcf in zip(callers, caller_vcfs):
+        raw_path = sv_io.write_bps(
+            preprocess_raw(Path(vcf).resolve(), caller, Path(ref).resolve(), verbose=verbose),
+            raw_dir / sv_io.RAW_BPS.format(caller=caller),
+        )
+        bps_path, _ = sv_io.write_callset(
+            preprocess(sv_io.read_bps(raw_path), caller, model=model, model_config=model_config),
+            pre_dir / caller, caller, sample,
+        )
+        caller_bps[caller] = sv_io.read_bps(bps_path)
+        if verbose:
+            print(f"[run] {caller}: {len(caller_bps[caller])} breakpoints -> {bps_path}")
+
+    gt_path = gt_dir / sv_io.CALLSET_BPS.format(caller=ground_truth_name)
+    if ground_truth_vcf is not None:
+        preprocess_ground_truth(
+            vcf_path=Path(ground_truth_vcf).resolve(),
+            output_path=gt_path,
+            ground_truth_name=ground_truth_name,
+            filters=ground_truth_filters,
+            svtypes=ground_truth_svtypes,
+            svlens=(ground_truth_svlen_lower,
+                    ground_truth_svlen_upper if ground_truth_svlen_upper is not None else np.inf),
+            verbose=verbose,
+        )
+    else:
+        src = Path(ground_truth_bps).resolve()
+        if gt_path.exists() or gt_path.is_symlink():
+            gt_path.unlink()
+        gt_path.symlink_to(src)
+        if verbose:
+            print(f"[run] symlinked ground truth bps: {gt_path} -> {src}")
+
+    matched_path = sv_io.write_bps(
+        match(
+            caller_bps, sv_io.read_bps(gt_path), ground_truth_name=ground_truth_name,
+            model=model, model_config=model_config, max_dist=max_dist,
+            insert_delta_threshold=insert_delta_threshold, verbose=verbose,
+        ),
+        match_dir / sv_io.MATCHED_BPS,
+    )
+    matched_bps = sv_io.read_bps(matched_path)
+
+    X, model_fit = train(
+        matched_bps, callers, model, training_set, model_config=model_config,
+        ground_truth_name=ground_truth_name, verbose=verbose,
+    )
+    sv_io.write_model(model_fit, train_dir / sv_io.MODEL)
+    fm_path = sv_io.write_feature_matrix(X, train_dir / sv_io.FEATURE_MATRIX)
+
+    calls = predict(
+        model_fit, sv_io.read_feature_matrix(fm_path), matched_bps, model, training_set,
+        model_config=model_config,
+    )
+    calls_csv, _ = sv_io.write_calls(calls, output_dir, sample)
+    if verbose:
+        print(f"[run] done. calls -> {calls_csv}")
+    return calls_csv

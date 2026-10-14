@@ -15,7 +15,6 @@ The single command-line entry point for the package. Provides:
 
 import argparse
 import sys
-from argparse import Namespace
 from pathlib import Path
 
 from . import __version__
@@ -468,7 +467,7 @@ def _cmd_validation_set(args):
 # Subcommand: run (end-to-end standalone pipeline)
 # ---------------------------------------------------------------------------
 #
-# Chains the per-stage subcommands in a single process. Accepts full input
+# Chains every step in a single process via api.run. Accepts full input
 # paths and an explicit `--workdir`; does not expect files to be pre-staged.
 # Intermediate outputs land under workdir/{preprocess_raw,preprocess,ground_truth,match,train}
 # and the final calls under `--output_dir` (defaults to workdir/predict).
@@ -507,130 +506,27 @@ def _register_run(subparsers):
 
 
 def _cmd_run(args):
-    if len(args.callers) != len(args.caller_vcfs):
-        raise ValueError(
-            f"--callers ({len(args.callers)}) and --caller_vcfs ({len(args.caller_vcfs)}) must be the same length."
-        )
-
-    workdir = args.workdir.resolve()
-    workdir.mkdir(parents=True, exist_ok=True)
-    output_dir = (args.output_dir or workdir / "predict").resolve()
-
-    if args.verbose:
-        print(f"[run] workdir: {workdir}")
-        print(f"[run] output_dir: {output_dir}")
-
-    raw_dir = workdir / "preprocess_raw"
-    pre_dir = workdir / "preprocess"
-    gt_dir = workdir / "ground_truth"
-    match_dir = workdir / "match"
-    train_dir = workdir / "train"
-    for d in (raw_dir, pre_dir, gt_dir, match_dir, train_dir, output_dir):
-        d.mkdir(parents=True, exist_ok=True)
-
-    # Stage 1: preprocess-raw for each caller.
-    raw_bps_paths = []
-    for callset, vcf in zip(args.callers, args.caller_vcfs):
-        raw_out = raw_dir / f"{callset}.raw_bps.csv"
-        _cmd_preprocess_raw(Namespace(
-            vcf=Path(vcf).resolve(),
-            caller=callset,
-            ref=Path(args.ref).resolve(),
-            output=raw_out,
-            verbose=args.verbose,
-        ))
-        raw_bps_paths.append(raw_out)
-
-    # Stage 2: preprocess for each caller.
-    bps_paths = []
-    for callset, raw_out in zip(args.callers, raw_bps_paths):
-        callset_pre_dir = pre_dir / callset
-        _cmd_preprocess(Namespace(
-            raw_bps=raw_out,
-            caller=callset,
-            model=args.model,
-            model_config=args.model_config,
-            sample=args.sample,
-            output=callset_pre_dir,
-            verbose=args.verbose,
-        ))
-        bps_paths.append(callset_pre_dir / f"{callset}.bps.csv")
-
-    # Stage 3: ground truth (or symlink if a bps CSV was provided).
-    ground_truth_bps = gt_dir / f"{args.ground_truth_name}.bps.csv"
-    if args.ground_truth_vcf is not None:
-        _cmd_ground_truth(Namespace(
-            vcf_path=Path(args.ground_truth_vcf).resolve(),
-            output_path=ground_truth_bps,
-            ground_truth_name=args.ground_truth_name,
-            filters=args.ground_truth_filters,
-            evidence=None,
-            svtypes=args.ground_truth_svtypes,
-            algorithms=None,
-            min_af=None,
-            max_af=None,
-            svlen_lower=args.ground_truth_svlen_lower,
-            svlen_upper=args.ground_truth_svlen_upper,
-            bothsides_support_only=False,
-            no_canonical_chroms=False,
-            force_rerun=False,
-            no_manifest=False,
-            verbose=args.verbose,
-        ))
-    else:
-        src = Path(args.ground_truth_bps).resolve()
-        if ground_truth_bps.exists() or ground_truth_bps.is_symlink():
-            ground_truth_bps.unlink()
-        ground_truth_bps.symlink_to(src)
-        if args.verbose:
-            print(f"[run] symlinked ground truth bps: {ground_truth_bps} -> {src}")
-
-    # Stage 4: match.
-    matched_bps = match_dir / "matched_bps.csv"
-    _cmd_match(Namespace(
+    api.run(
         sample=args.sample,
-        model=args.model,
-        model_config=args.model_config,
-        bps=bps_paths,
-        ground_truth_bps=ground_truth_bps,
+        workdir=args.workdir,
+        ref=args.ref,
         callers=args.callers,
+        caller_vcfs=args.caller_vcfs,
+        model=args.model,
+        training_set=args.training_set,
+        ground_truth_vcf=args.ground_truth_vcf,
+        ground_truth_bps=args.ground_truth_bps,
         ground_truth_name=args.ground_truth_name,
+        model_config=_load_model_config(args),
         max_dist=args.max_dist,
         insert_delta_threshold=args.insert_delta_threshold,
-        output=matched_bps,
+        output_dir=args.output_dir,
+        ground_truth_filters=args.ground_truth_filters.split(",") if args.ground_truth_filters else None,
+        ground_truth_svtypes=args.ground_truth_svtypes.split(",") if args.ground_truth_svtypes else None,
+        ground_truth_svlen_lower=args.ground_truth_svlen_lower,
+        ground_truth_svlen_upper=args.ground_truth_svlen_upper,
         verbose=args.verbose,
-    ))
-
-    # Stage 5: train.
-    _cmd_train(Namespace(
-        matched_bps=matched_bps,
-        model=args.model,
-        model_config=args.model_config,
-        training_set=args.training_set,
-        callers=args.callers,
-        ground_truth_name=args.ground_truth_name,
-        sample=args.sample,
-        output_dir=train_dir,
-        train_samples=None, train_matched_bps=None,
-        verbose=args.verbose,
-    ))
-
-    # Stage 6: predict.
-    _cmd_predict(Namespace(
-        model_pkl=train_dir / "model.pkl",
-        feature_matrix=train_dir / "feature_matrix.csv",
-        matched_bps=matched_bps,
-        sample=args.sample,
-        callers=args.callers,
-        training_set=args.training_set,
-        model=args.model,
-        model_config=args.model_config,
-        output_dir=output_dir,
-        verbose=args.verbose,
-    ))
-
-    if args.verbose:
-        print(f"[run] done. calls -> {output_dir / 'svensemble2_calls.csv'}")
+    )
 
 
 # ---------------------------------------------------------------------------

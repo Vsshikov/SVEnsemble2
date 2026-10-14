@@ -1,36 +1,30 @@
 """
-Python-API entry point for the SVEnsemble2 pipeline.
+VCF-to-breakpoints parsing for SVEnsemble2 callers.
 
-The command-line surface lives
-in svensemble.cli.
+parse_preprocess_vcf handles every caller with an entry in
+callset_specific.parse_recipes; parse_preprocess_delly handles Delly, whose
+BND/TRA records need converting with delly2bnd first. Both return the raw
+breakpoints DataFrame behind api.preprocess_raw.
 """
 
-import os
-import pickle
-import time
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from pysam import VariantFile
+
+from . import vcfparse as vcfp
+from . import breakends as bnds
+from . import events as evts
+from . import callset_specific as callset_specific
+from . import delly2bnd as delly2bnd
 
 
 def _log(msg: str) -> None:
     """Print a message with an ISO 8601 timestamp prefix."""
     print(f"{datetime.now().astimezone().isoformat()} {msg}")
 
-from . import vcfparse as vcfp  # noqa: E402
-from . import vcfwrite as vcfw  # noqa: E402
-from . import breakends as bnds  # noqa: E402
-from . import breakpoints as bps  # noqa: E402
-from . import events as evts  # noqa: E402
-from . import callset_specific as callset_specific  # noqa: E402
-from . import utils as sv_utils  # noqa: E402
-from . import chunk_match as chunk_match  # noqa: E402
-from . import matched_breakpoints as mbps  # noqa: E402
-from . import models as models  # noqa: E402
-from . import delly2bnd as delly2bnd  # noqa: E402
 
 def parse_preprocess_delly(
     sample_name: str,
@@ -50,32 +44,29 @@ def parse_preprocess_delly(
     """
     callset = workflow_config['callsets']['delly']
     if 'ref_path' not in workflow_config:
-        raise ValueError("Reference path not found in sample config")
-    temp_dir = workflow_config['workflow_dir'] / 'temp'
+        raise ValueError("Reference path not found in workflow config")
     ref_path = workflow_config['ref_path']
 
-    if not (temp_dir / 'delly_bnd.tmp.vcf').exists():
-        temp_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='svensemble_delly_') as temp_dir:
+        bnd_vcf_path = Path(temp_dir) / 'delly_bnd.tmp.vcf'
+        if verbose:
+            _log("Converting DELLY BND/TRA records via delly2bnd")
+        delly2bnd.delly2bnd_noargparse(
+            vcf=callset['path'],
+            ref=ref_path,
+            out=bnd_vcf_path
+        )
 
-    if verbose:
-        _log("Converting DELLY BND/TRA records via delly2bnd")
-    delly2bnd.delly2bnd_noargparse(
-        vcf=callset['path'],
-        ref=ref_path,
-        out=temp_dir / 'delly_bnd.tmp.vcf'
-    )
-
-    if verbose:
-        _log(f"Loading DELLY BND VCF from {temp_dir / 'delly_bnd.tmp.vcf'}")
-    delly_bnd_only_vcf = VariantFile(temp_dir / 'delly_bnd.tmp.vcf')
-    delly_bnd_only_df, _ = vcfp.parse_vcf_to_df(
-        vcf_file=delly_bnd_only_vcf,
-        caller_params=callset['params']
-    )
+        if verbose:
+            _log(f"Loading DELLY BND VCF from {bnd_vcf_path}")
+        with VariantFile(bnd_vcf_path) as delly_bnd_only_vcf:
+            delly_bnd_only_df, _ = vcfp.parse_vcf_to_df(
+                vcf_file=delly_bnd_only_vcf,
+                caller_params=callset['params']
+            )
     delly_bnd_only_df = callset_specific.delly_preprocess_bnds_only(
         delly_bnd_only_df, caller_params=callset['params']
     )
-    os.remove(temp_dir / 'delly_bnd.tmp.vcf')
 
     if verbose:
         _log(f"Loading DELLY event VCF from {callset['path']}")
