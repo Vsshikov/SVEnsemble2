@@ -1787,36 +1787,24 @@ PLOT_FUNC_KINDS = {
 
 
 def get_truth_count(
-    sample_name: str,
+    val_set_path: str | Path,
+    val_set_name: str,
     svtypes: list[str] | None = None,
     svlens: tuple[float, float] = (50, np.inf),
-    val_set_path: str | None = None,
-    val_set_name: str | None = None,
 ) -> int:
     """Return the number of truth variants that survive the svtype/svlen filter.
 
     Args:
-        sample_name: Sample name (key in sample_val_sets, e.g. 'NA12878').
-        svtypes: List of SV types to include.  Defaults to the sample meta svtypes.
-        svlens: (min, max) SVLEN range.  Defaults to (50, inf).
-        val_set_path: Override path to truth BPS CSV.
-        val_set_name: Override caller-param source name for annotation.
+        val_set_path: Path to the validation breakpoints CSV.
+        val_set_name: Validation set name (callset_param_dict key, used for annotation).
+        svtypes: List of SV types to include. Defaults to caller_params.default_sv_types.
+        svlens: (min, max) SVLEN range. Defaults to (50, inf).
 
     Returns:
         Integer count of truth variants passing the filter.
     """
-    from ._sample_params import sample_val_sets
-    from . import breakpoints as bps_mod
-
-    if val_set_path is None or val_set_name is None:
-        sample_cfg = sample_val_sets[sample_name]
-        val_set_path = val_set_path or sample_cfg['path']
-        val_set_name = val_set_name or sample_cfg['name']
-        if svtypes is None:
-            svtypes = sample_cfg.get('meta', {}).get('svtypes')
-
     truth = pd.read_csv(val_set_path)
-    truth_filtered = bps_mod.svlen_svtype_filter(truth, val_set_name, svtypes=svtypes, svlens=svlens)
+    truth_filtered = bps.svlen_svtype_filter(truth, val_set_name, svtypes=svtypes, svlens=svlens)
     return len(truth_filtered)
 
 
@@ -1831,24 +1819,22 @@ _val_set_preprocessors = {
 }
 
 
-def preprocess_hg002_val_set(sample, vcf_path, force_rerun=False, long_val=False):
+def preprocess_hg002_val_set(raw_path, output_path, force_rerun=False, long_val=False):
     """
     Preprocess the HG002 validation VCF file for benchmarking by parsing, annotating,
     and converting SV events to breakpoints. Results are stored as a CSV.
 
     Args:
-        sample (dict): Dictionary containing metadata for HG002 sample, must include correct 'val_set' key with 'path' value.
-        vcf_path (str or Path): Path to the input VCF file for HG002.
+        raw_path (str or Path): Path to the input VCF file for HG002.
+        output_path (str or Path): Path of the breakpoints CSV to write.
         force_rerun (bool, optional): If True, forces preprocessing even if the output exists.
-
-    Saves:
-        Writes the processed breakpoints dataframe to sample['val_set']['path'] as CSV.
+        long_val (bool, optional): Only retain variants with SVLEN > 50 if True.
     """
     # Only run if the annotated file does not exist, or if force_rerun is True
-    if not Path(sample['val_set']['path']).exists() or force_rerun:
+    if not Path(output_path).exists() or force_rerun:
 
         # Parse the input VCF file using the predefined caller parameters
-        hg002_val_vcf = pysam.VariantFile(vcf_path)
+        hg002_val_vcf = pysam.VariantFile(raw_path)
         hg002_val_vcf_df, hg002_val_vcf_meta = vcfp.parse_vcf_to_df(
             hg002_val_vcf, caller_params=caller_params.hg002_params
         )
@@ -1883,26 +1869,24 @@ def preprocess_hg002_val_set(sample, vcf_path, force_rerun=False, long_val=False
             ]
 
         # Save the processed DataFrame as CSV
-        hg002_val_vcf_df_bps.to_csv(sample['val_set']['path'], index=False)
+        hg002_val_vcf_df_bps.to_csv(output_path, index=False)
 
 
-def preprocess_kosugi_val_set(sample, vcf_path, force_rerun=False, long_val=False):
+def preprocess_kosugi_val_set(raw_path, output_path, force_rerun=False, long_val=False):
     """
     Preprocess the Kosugi validation set, converting to VCF-like breakpoints and saving as CSV.
 
     Args:
-        sample (dict): Dictionary with at least key 'val_set' containing 'path'.
+        raw_path (str or Path): Path to the Kosugi BED-like truth file.
+        output_path (str or Path): Path of the breakpoints CSV to write.
         force_rerun (bool, optional): If True, regenerate even if the file already exists.
         long_val (bool, optional): Only retain variants with SVLEN > 50 if True.
-
-    Saves:
-        CSV file at sample['val_set']['path'] with breakpoint-format variants.
     """
-    out_path = Path(sample['val_set']['path'])
+    out_path = Path(output_path)
 
     if not out_path.exists() or force_rerun:
         val_df = load_truth_variants(
-            vcf_path
+            raw_path
         )
         val_vcf = truth_to_vcf_df(val_df)
 
@@ -1915,23 +1899,21 @@ def preprocess_kosugi_val_set(sample, vcf_path, force_rerun=False, long_val=Fals
         val_vcf_bps.to_csv(out_path, index=False)
 
 
-def preprocess_chm13_val_set(sample, vcf_path, force_rerun=False):
+def preprocess_chm13_val_set(raw_path, output_path, force_rerun=False):
     """
     Preprocess CHM13 validation set: filter, normalize, convert to breakpoints, save as CSV.
 
     Args:
-        sample (dict): Dictionary with at least key 'val_set' containing 'path'.
+        raw_path (str or Path): Path to the CHM13 validation annotation CSV.
+        output_path (str or Path): Path of the breakpoints CSV to write.
         force_rerun (bool, optional): If True, regenerate even if the file already exists.
-
-    Saves:
-        CSV file at sample['val_set']['path'] with breakpoint-format variants.
     """
-    out_path = Path(sample['val_set']['path'])
+    out_path = Path(output_path)
 
     if not out_path.exists() or force_rerun:
         # Read raw CHM13 validation annotation data
         chm_val_df = pd.read_csv(
-            vcf_path
+            raw_path
         )
 
         chm_val_vcf_df = chm_val_df.copy()
@@ -1992,24 +1974,20 @@ def preprocess_chm13_val_set(sample, vcf_path, force_rerun=False):
         result_bps.to_csv(out_path, index=False)
 
 
-def preprocess_hg00514_val_set(sample, vcf_path, force_rerun=False):
+def preprocess_hg00514_val_set(raw_path, output_path, force_rerun=False):
     """
     Preprocess the HG00514 validation VCF file for benchmarking by parsing, annotating,
     and converting SV events to breakpoints. Results are stored as a bps CSV.
 
     Args:
-        sample (dict): Dictionary containing metadata for the HG00514 sample, must include
-            key 'val_set' with sub-key 'path' pointing to the desired output CSV path.
-        vcf_path (str or Path): Path to nstd152.GRCh38.variant_call.vcf.gz (or uncompressed).
+        raw_path (str or Path): Path to nstd152.GRCh38.variant_call.vcf.gz (or uncompressed).
+        output_path (str or Path): Path of the breakpoints CSV to write.
         force_rerun (bool, optional): If True, regenerate even if the output CSV already exists.
-
-    Saves:
-        CSV file at sample['val_set']['path'] with breakpoint-format variants.
     """
-    out_path = Path(sample['val_set']['path'])
+    out_path = Path(output_path)
 
     if not out_path.exists() or force_rerun:
-        hg00514_vcf = pysam.VariantFile(vcf_path)
+        hg00514_vcf = pysam.VariantFile(raw_path)
         hg00514_vcf_df, _ = vcfp.parse_vcf_to_df(
             hg00514_vcf, caller_params=caller_params.hg00514_params
         )
@@ -2049,7 +2027,7 @@ def preprocess_hg00514_val_set(sample, vcf_path, force_rerun=False):
         hg00514_bp_df.to_csv(out_path, index=False)
 
 
-def preprocess_hgsvc2_val_set(sample, vcf_path, force_rerun=False, sample_name='NA12878'):
+def preprocess_hgsvc2_val_set(raw_path, output_path, force_rerun=False, sample_name='NA12878'):
     """
     Preprocess the HGSVC2 freeze-4 integrated SV callset for benchmarking.
 
@@ -2059,19 +2037,15 @@ def preprocess_hgsvc2_val_set(sample, vcf_path, force_rerun=False, sample_name='
     chromosomes and DEL/INS types, then converts events to breakpoints.
 
     Args:
-        sample (dict): Sample config with sample['val_set']['path'] pointing
-            to the desired output CSV.
-        vcf_path (str or Path): Path to variants_freeze4_sv_insdel_alt.vcf.gz.
+        raw_path (str or Path): Path to variants_freeze4_sv_insdel_alt.vcf.gz.
+        output_path (str or Path): Path of the breakpoints CSV to write.
         force_rerun (bool, optional): If True, regenerate even if the output exists.
         sample_name (str, optional): Sample to extract from the multi-sample VCF.
-
-    Saves:
-        CSV file at sample['val_set']['path'] with breakpoint-format variants.
     """
-    out_path = Path(sample['val_set']['path'])
+    out_path = Path(output_path)
 
     if not out_path.exists() or force_rerun:
-        hgsvc2_vcf = pysam.VariantFile(str(vcf_path))
+        hgsvc2_vcf = pysam.VariantFile(str(raw_path))
         hgsvc2_df, _ = vcfp.parse_vcf_to_df(
             hgsvc2_vcf,
             caller_params=caller_params.hgsvc2_params,
@@ -2113,14 +2087,14 @@ def preprocess_hgsvc2_val_set(sample, vcf_path, force_rerun=False, sample_name='
         hgsvc2_bp_df.to_csv(out_path, index=False)
 
 
-def preprocess_huddleston_val_set(sample, vcf_path, force_rerun=False):
+def preprocess_huddleston_val_set(raw_path, output_path, force_rerun=False):
     """
     Preprocess the Huddleston CHM13 validation set, converting to VCF-like breakpoints and saving as CSV.
     """
-    out_path = Path(sample['val_set']['path'])
+    out_path = Path(output_path)
 
     if not out_path.exists() or force_rerun:
-        huddleston_vcf_df, huddleston_vcf_df_meta  = vcfp.parse_vcf_to_df(pysam.VariantFile(vcf_path), caller_params=caller_params.huddleston_params, sample_name='huddleston')
+        huddleston_vcf_df, huddleston_vcf_df_meta  = vcfp.parse_vcf_to_df(pysam.VariantFile(raw_path), caller_params=caller_params.huddleston_params, sample_name='huddleston')
         huddleston_vcf_df.loc[:, 'INFO_SVLEN'] = huddleston_vcf_df['INFO_SVLEN'].str[0]
         # Replace all strings in INFO_SVTYPE using the mapping dictionary from caller_params.huddleston_params
         mapping = caller_params.huddleston_params['svtype_mapping']
@@ -2138,14 +2112,16 @@ def preprocess_huddleston_val_set(sample, vcf_path, force_rerun=False):
         huddleston_bp_df.to_csv(out_path, index=False)
 
 
-def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True):
+def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True):
     """
     Given dataframes of a callset and a validation set, match them and return a dataframe with the following columns:
     INFO_EVENT, {qual_metric}, is_in_val, INFO_INFERRED_SVTYPE, {FILTER_PASS}
 
-    qual_metric column is dependent on the callset and is specified in the callset params
+    qual_metric column is dependent on the callset and is read from callset_param_dict[callset_name]
     FILTER_PASS column is returned only if it is present in the callset
+    val_name is the validation set's callset_param_dict key
     """
+    qual_metric = caller_params.callset_param_dict[callset_name]['qual_metric']
     callset_bps_ = callset_bps.copy()
     val_set_ = val_set.copy()
 
@@ -2161,17 +2137,17 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
     if 'INFO_INFERRED_SVTYPE' not in callset_bps_.columns:
         callset_bps_.loc[:, 'INFO_INFERRED_SVTYPE'] = bps.annotate_svtypes(callset_bps_, callset_name)
 
-    val_key = sample_config['val_set']['name']
+    val_key = val_name
     if val_key == callset_name:
         i = 0
         val_key = f'{val_key}_{i}'
         if val_key not in caller_params.callset_param_dict:
-            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[sample_config['val_set']['name']]
+            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[val_name]
         else:
             while val_key in caller_params.callset_param_dict:
                 i += 1
                 val_key = val_key.replace(f'_{i-1}', f'_{i}')
-            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[sample_config['val_set']['name']]
+            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[val_name]
             if i > 1000000:
                 raise ValueError(f'Too many temporary validation set names generated for {val_key}')
 
@@ -2186,7 +2162,7 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
         ignore_size=False
     )
     callset_bps_.loc[:, 'is_in_val'] = callset_bps_['INFO_EVENT'].astype(str).isin(matched_ids[f'{callset_name}_INFO_EVENT'])
-    cols_to_keep = ['INFO_EVENT', f"{sample_config['callsets'][callset_name]['params']['qual_metric']}", 'is_in_val']
+    cols_to_keep = ['INFO_EVENT', qual_metric, 'is_in_val']
     if 'FILTER_PASS' in callset_bps_.columns:
         cols_to_keep.append('FILTER_PASS')
     if 'INFO_INFERRED_SVTYPE' in callset_bps_.columns:
@@ -2194,11 +2170,11 @@ def validate_basic_callset(callset_bps, val_set, sample_config, callset_name, va
     if isinstance(additional_cols, list):
         cols_to_keep.extend([col for col in additional_cols if ((col not in cols_to_keep) and (col in callset_bps_.columns))])
 
-    return callset_bps_.loc[callset_bps_['INFO_EVENT'].notna(), cols_to_keep].rename(columns={f"{sample_config['callsets'][callset_name]['params']['qual_metric']}": 'qual_metric'})
+    return callset_bps_.loc[callset_bps_['INFO_EVENT'].notna(), cols_to_keep].rename(columns={qual_metric: 'qual_metric'})
 
 
 
-def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, training_set_name=None, model_name=None, pred_col=None, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True):
+def validate_svensemble2_predictions(svensemble2_bps, val_set, val_name, training_set_name=None, model_name=None, pred_col=None, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True):
     svens_calls_ = svensemble2_bps.copy()
     val_set_ = val_set.copy()
 
@@ -2221,17 +2197,17 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, sample_config, tr
     if 'INFO_INFERRED_SVTYPE' not in svens_calls_.columns:
         svens_calls_.loc[:, 'INFO_INFERRED_SVTYPE'] = bps.annotate_svtypes(svens_calls_, 'svensemble2')
 
-    val_key = sample_config['val_set']['name']
+    val_key = val_name
     if val_key == 'svensemble2':
         i = 0
         val_key = f'{val_key}_val_{i}'
         if val_key not in caller_params.callset_param_dict:
-            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[sample_config['val_set']['name']]
+            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[val_name]
         else:
             while val_key in caller_params.callset_param_dict:
                 i += 1
                 val_key = val_key.replace(f'_val_{i-1}', f'_val_{i}')
-            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[sample_config['val_set']['name']]
+            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[val_name]
             if i > 1000000:
                 raise ValueError(f'Too many temporary validation set names generated for {val_key}')
 
@@ -2309,7 +2285,6 @@ def run_single_callset_benchmark(
     """
     val_set = pd.read_csv(val_bps_path)
     callset_bps = pd.read_csv(callset_bps_path, low_memory=False)
-    sample_config = {'val_set': {'name': val_name}}
 
     source = 'svensemble2' if callset_name.startswith('svensemble2') else callset_name
 
@@ -2327,17 +2302,14 @@ def run_single_callset_benchmark(
         val_df = validate_svensemble2_predictions(
             svensemble2_bps=callset_bps,
             val_set=val_set,
-            sample_config=sample_config,
+            val_name=val_name,
             verbose=verbose,
         )
     else:
-        sample_config['callsets'] = {
-            callset_name: {'params': caller_params.callset_param_dict[callset_name]}
-        }
         val_df = validate_basic_callset(
             callset_bps=callset_bps,
             val_set=val_set,
-            sample_config=sample_config,
+            val_name=val_name,
             callset_name=callset_name,
             verbose=verbose,
         )
