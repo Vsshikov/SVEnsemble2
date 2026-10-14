@@ -1,28 +1,128 @@
 """
-Lossless config encoding and file I/O for SVEnsemble2.
+File I/O for SVEnsemble2: every pipeline filename and every read/write.
 
-Provides two decoupled layers:
+  Filenames -- the constants below name each artifact a pipeline stage
+  writes. ``{caller}`` placeholders are filled with ``str.format``.
+
+  Artifacts -- ``read_*`` / ``write_*`` for breakpoint CSVs, the feature
+  matrix, the model pickle and the final calls. Writers take the object
+  first and the location second, create parent directories and return the
+  path(s) they wrote. Readers take only the location, and exist only for
+  artifacts the pipeline reads back. A one-file artifact takes a file path;
+  a CSV-plus-VCF artifact takes a directory and uses the constants.
 
   Encoding -- ``dict_json_encode`` / ``dict_json_decode`` convert between
   native Python objects (Path, inf, tuple, set, numpy scalars) and a
   JSON-safe tagged representation using Kombu/Celery-style envelopes:
   ``{"__type__": "<marker>", "__value__": <data>}``.
 
-  File I/O -- ``dump_config`` / ``load_config`` read and write dicts as
-  JSON or YAML (by suffix).  They perform **no** encoding or decoding;
-  callers compose the layers explicitly.
+  Config files -- ``write_config`` / ``read_config`` read and write dicts
+  as JSON or YAML (by suffix) with **no** encoding or decoding; callers
+  compose the layers explicitly. ``read_model_config`` is the one reader
+  that also decodes.
 
   Hashing -- ``canonical_json`` encodes and serialises deterministically
   for content-addressable hashing (used by ``_config.model_config_hash``).
 """
 
 import json
+import pickle
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
+from . import vcfwrite
+
+
+RAW_BPS = "{caller}.raw_bps.csv"
+CALLSET_BPS = "{caller}.bps.csv"
+CALLSET_VCF = "{caller}.vcf"
+MATCHED_BPS = "matched_bps.csv"
+MODEL = "model.pkl"
+FEATURE_MATRIX = "feature_matrix.csv"
+CALLS_CSV = "svensemble2_calls.csv"
+CALLS_VCF = "svensemble2_calls.vcf"
 
 REQUIRED_KEYS = {"sample_name"}
+
+
+# -- Pipeline artifacts -----------------------------------------------------
+
+def read_bps(path: Path) -> pd.DataFrame:
+    """Read any breakpoint CSV: raw, processed, matched or ground truth."""
+    return pd.read_csv(path, low_memory=False)
+
+
+def write_bps(bp_df: pd.DataFrame, path: Path) -> Path:
+    """Write a breakpoint CSV without its index (e.g. RAW_BPS, MATCHED_BPS)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    bp_df.to_csv(path, index=False)
+    return path
+
+
+def write_callset(bp_df: pd.DataFrame, out_dir: Path, caller: str, sample: str) -> tuple[Path, Path]:
+    """Write a processed callset as CALLSET_BPS plus CALLSET_VCF in *out_dir*."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    bps_path = out_dir / CALLSET_BPS.format(caller=caller)
+    vcf_path = out_dir / CALLSET_VCF.format(caller=caller)
+    bp_df.to_csv(bps_path, index=False)
+    vcfwrite.write_vcf(bp_df, vcf_path, source=caller, sample_name=sample)
+    return bps_path, vcf_path
+
+
+def read_feature_matrix(path: Path) -> pd.DataFrame:
+    """Read a feature matrix and restore its ``<callset>_INFO_EVENT`` index.
+
+    The index columns map each row back to its matched breakpoints, so a
+    matrix without them is rejected rather than silently re-indexed.
+    """
+    X = pd.read_csv(path, low_memory=False)
+    index_cols = [c for c in X.columns if c.endswith("_INFO_EVENT")]
+    if not index_cols:
+        raise ValueError(
+            f"Feature matrix at {path} has no '<callset>_INFO_EVENT' index "
+            f"columns. These are required for reconstructing calls and should have been "
+            f"written by the training step; their absence indicates a broken or truncated "
+            f"feature matrix. Found columns: {list(X.columns)[:20]}{'...' if len(X.columns) > 20 else ''}"
+        )
+    return X.set_index(index_cols)
+
+
+def write_feature_matrix(X: pd.DataFrame, path: Path) -> Path:
+    """Write a feature matrix with its ``<callset>_INFO_EVENT`` index."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    X.to_csv(path, index=True)
+    return path
+
+
+def read_model(path: Path):
+    """Unpickle a fitted model."""
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+def write_model(model_fit, path: Path) -> Path:
+    """Pickle a fitted model."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as f:
+        pickle.dump(model_fit, f)
+    return path
+
+
+def write_calls(calls_df: pd.DataFrame, out_dir: Path, sample: str) -> tuple[Path, Path]:
+    """Write ensemble calls as CALLS_CSV (with index) plus CALLS_VCF in *out_dir*."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = out_dir / CALLS_CSV
+    vcf_path = out_dir / CALLS_VCF
+    calls_df.to_csv(csv_path, index=True)
+    vcfwrite.write_vcf(calls_df, vcf_path, source="svensemble2", sample_name=sample)
+    return csv_path, vcf_path
 
 # -- Tagged envelope (Kombu/Celery convention) ------------------------------
 
@@ -144,15 +244,15 @@ def canonical_json(obj) -> str:
     )
 
 
-# -- File I/O (no encoding / decoding) -------------------------------------
+# -- Config files (no encoding / decoding, except read_model_config) -------
 
-def dump_config(config: dict, path: Path) -> None:
+def write_config(config: dict, path: Path) -> Path:
     """Write *config* to *path* as JSON or YAML (by suffix).
 
     Pure I/O -- **no** encoding is applied.  To write a lossless tagged
     representation, encode first::
 
-        dump_config(dict_json_encode(cfg), path)
+        write_config(dict_json_encode(cfg), path)
 
     Parent directories are created if missing.
     """
@@ -164,14 +264,15 @@ def dump_config(config: dict, path: Path) -> None:
             yaml.safe_dump(config, f, sort_keys=False, default_flow_style=False)
         else:
             json.dump(config, f, indent=2)
+    return path
 
 
-def load_config(path: Path) -> dict:
+def read_config(path: Path) -> dict:
     """Read a dict from a JSON or YAML file (by suffix).
 
     Pure I/O -- **no** decoding is applied.  To restore tagged values::
 
-        cfg = dict_json_decode(load_config(path))
+        cfg = dict_json_decode(read_config(path))
     """
     path = Path(path)
     with open(path) as f:
@@ -179,6 +280,15 @@ def load_config(path: Path) -> dict:
             import yaml
             return yaml.safe_load(f)
         return json.load(f)
+
+
+def read_model_config(path: Path) -> dict:
+    """Read a model config file and decode its tagged values.
+
+    Plain JSON/YAML without envelopes decodes to itself, so hand-written
+    configs and their model_ids are unaffected.
+    """
+    return dict_json_decode(read_config(path))
 
 
 # -- Validation -------------------------------------------------------------

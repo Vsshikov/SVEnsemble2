@@ -3,7 +3,7 @@ import hashlib
 from pathlib import Path
 from typing import TypedDict, NotRequired
 
-from . import config_io
+from .io import canonical_json
 from ._model_configs import model_configs, TrainingParams, ModelConfig
 from ._model_configs import default_model_name as DEFAULT_MODEL_NAME
 from .utils import update
@@ -15,7 +15,7 @@ from ._caller_params import callset_param_dict as CALLSET_PARAM_DICT
 # Model config resolution + reconstructible identity (model_id)
 #
 # _model_configs.py holds pure preset data; the two-branch resolver, the hasher
-# and model_id live here (they need the deep-merge `update` and config_io
+# and model_id live here (they need the deep-merge `update` and io
 # canonicalisation, and _model_configs must never import from utils).
 # ---------------------------------------------------------------------------
 
@@ -159,7 +159,7 @@ def model_config_hash(resolved_cfg: dict, length: int = 8) -> str:
     workflow_config['model'] sub-dict. Canonicalised for cross-process stability.
     """
     payload = resolved_cfg.get("training_params", {})
-    canonical = config_io.canonical_json(payload)
+    canonical = canonical_json(payload)
     digest = hashlib.blake2b(
         f"{_MODEL_ID_HASH_VERSION}:{canonical}".encode(), digest_size=16
     ).hexdigest()

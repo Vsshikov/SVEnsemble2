@@ -18,6 +18,7 @@ import shap
 
 
 from . import _config as sv_config
+from . import io as sv_io
 
 
 # ---------------------------------------------------------------------------
@@ -167,15 +168,9 @@ def run_shap(
         top_n: Number of top features in the summary CSV and plots.
         plot: Write beeswarm and bar summary plots.
     """
-    # Load model
-    with open(model_pkl, 'rb') as f:
-        model = pickle.load(f)
-
-    fm = pd.read_csv(feature_matrix, low_memory=False)
+    model = sv_io.read_model(model_pkl)
+    fm = sv_io.read_feature_matrix(feature_matrix)
     fm = fm.drop(columns=['ref_match'], errors='ignore')
-    id_cols = [c for c in fm.columns if c.endswith('_INFO_EVENT')]
-    if id_cols:
-        fm = fm.set_index(id_cols)
 
     resolved = (
         sv_config.resolve_model_config(config=model_config) if model_config

@@ -72,8 +72,8 @@ def _load_model_config(args) -> dict | None:
     path = getattr(args, "model_config", None)
     if path is None:
         return None
-    from .config_io import load_config
-    return load_config(path)
+    from .io import read_model_config
+    return read_model_config(path)
 
 
 # ---------------------------------------------------------------------------
