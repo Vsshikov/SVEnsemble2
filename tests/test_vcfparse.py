@@ -2,8 +2,10 @@
 Unit tests for svensemble.vcfparse.
 """
 
-import tempfile
 import os
+import subprocess
+import sys
+import tempfile
 
 import pytest
 import pysam
@@ -13,6 +15,7 @@ from svensemble.vcfparse import (
     parse_vcf_to_df_with_format,
     _fetch_filter_fields,
     _fetch_info_fields,
+    _ordered_info_col_names,
 )
 from svensemble import _caller_params
 
@@ -149,13 +152,45 @@ class TestFetchInfoFields:
         _fetch_info_fields(record, acc, names)
         assert acc["INFO_IMPRECISE"] == [False]
 
-    def test_duplicate_names_deduplicated(self):
-        """frozenset deduplicates fields that appear in both pred and mandatory."""
-        record = self._make_record("SVTYPE=DEL;SVLEN=100")
-        names = frozenset(["SVLEN", "SVLEN"])  # explicit duplicate
-        acc = {"INFO_SVLEN": []}
-        _fetch_info_fields(record, acc, names)
-        assert acc["INFO_SVLEN"] == [100]
+
+
+# ---------------------------------------------------------------------------
+# Column order
+# ---------------------------------------------------------------------------
+
+class TestColumnOrder:
+    """Parsed column order feeds the training feature matrix, so it must be
+    fixed by caller_params rather than by per-process set iteration."""
+
+    def test_info_col_names_dedupe_in_caller_params_order(self):
+        params = {
+            "info_cols_pred": ["SVLEN", "CT", "PE"],
+            "info_cols_mandatory": ["SVTYPE", "SVLEN"],
+        }
+        assert _ordered_info_col_names(params) == ("SVLEN", "CT", "PE", "SVTYPE")
+
+    def test_columns_independent_of_hash_seed(self):
+        path = _write_vcf(["chr1\t1000\tsv1\tN\t<DEL>\t50\tPASS\tSVTYPE=DEL;SVLEN=500\n"])
+        script = (
+            "import sys, pysam\n"
+            "from svensemble import _caller_params\n"
+            "from svensemble.vcfparse import parse_vcf_to_df_no_format\n"
+            "with pysam.VariantFile(sys.argv[1]) as vf:\n"
+            "    df, _ = parse_vcf_to_df_no_format(vf, _caller_params.delly_params)\n"
+            "print(','.join(df.columns))\n"
+        )
+        try:
+            columns = {
+                subprocess.run(
+                    [sys.executable, "-c", script, path],
+                    env=os.environ | {"PYTHONHASHSEED": seed},
+                    capture_output=True, text=True, check=True,
+                ).stdout
+                for seed in ("1", "2")
+            }
+        finally:
+            os.unlink(path)
+        assert len(columns) == 1
 
 
 # ---------------------------------------------------------------------------

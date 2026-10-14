@@ -4,6 +4,7 @@ Functions for parsing VCF files.
 """
 
 import logging
+from collections.abc import Iterable
 
 import pandas as pd
 from pysam import VariantFile, VariantRecord
@@ -67,9 +68,9 @@ def parse_vcf_to_df_no_format(
         caller_params = _caller_params.default_params
 
     base_fields = {col: [] for col in caller_params['base_cols']}
-    filter_fields = {f'FILTER_{name}': [] for name in set(caller_params['filter_cols'])}
+    filter_fields = {f'FILTER_{name}': [] for name in dict.fromkeys(caller_params['filter_cols'])}
 
-    info_col_names = frozenset(caller_params['info_cols_pred'] + caller_params['info_cols_mandatory'])
+    info_col_names = _ordered_info_col_names(caller_params)
     info_fields = {
         f'INFO_{name}': []
         for name in info_col_names
@@ -120,8 +121,8 @@ def parse_vcf_to_df_with_format(
         )
 
     base_fields = {col: [] for col in caller_params['base_cols']}
-    filter_fields = {f'FILTER_{name}': [] for name in set(caller_params['filter_cols'])}
-    info_col_names = frozenset(caller_params['info_cols_pred'] + caller_params['info_cols_mandatory'])
+    filter_fields = {f'FILTER_{name}': [] for name in dict.fromkeys(caller_params['filter_cols'])}
+    info_col_names = _ordered_info_col_names(caller_params)
     info_fields = {
         f'INFO_{name}': []
         for name in info_col_names
@@ -152,6 +153,16 @@ def parse_vcf_to_df_with_format(
         len(df), sample_name,
     )
     return df, vcf_file.header
+
+
+def _ordered_info_col_names(caller_params: dict) -> tuple[str, ...]:
+    """Deduplicated INFO column names in caller_params order.
+
+    Column order must not depend on set iteration: it reaches the training
+    feature matrix, where position-based column sampling makes models
+    differ between processes.
+    """
+    return tuple(dict.fromkeys(caller_params['info_cols_pred'] + caller_params['info_cols_mandatory']))
 
 
 def _remove_unused_info_header_fields(vcf_file: VariantFile, field_info: dict) -> None:
@@ -232,7 +243,7 @@ def _fetch_filter_fields(
 def _fetch_info_fields(
     record: VariantRecord,
     info_fields: dict,
-    info_col_names: frozenset[str],
+    info_col_names: Iterable[str],
 ) -> None:
     """Append INFO fields from a record to the accumulator dict (None when absent)."""
     for info_name in info_col_names:
