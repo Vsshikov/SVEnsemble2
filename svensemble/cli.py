@@ -19,6 +19,8 @@ from argparse import Namespace
 from pathlib import Path
 
 from . import __version__
+from . import api
+from . import io as sv_io
 
 
 def main():
@@ -72,8 +74,7 @@ def _load_model_config(args) -> dict | None:
     path = getattr(args, "model_config", None)
     if path is None:
         return None
-    from .io import read_model_config
-    return read_model_config(path)
+    return sv_io.read_model_config(path)
 
 
 # ---------------------------------------------------------------------------
@@ -100,35 +101,8 @@ def _register_preprocess_raw(subparsers):
 
 
 def _cmd_preprocess_raw(args):
-    from . import pipeline
-    from . import _config as sv_config
-
-    workflow_config = sv_config.build_workflow_config(
-        sample_name="sample",
-        callers=[args.caller],
-        model_name=None,
-        ref_path=args.ref,
-    )
-
-    callset_name = args.caller
-    callset = workflow_config["callsets"][callset_name]
-    callset["path"] = args.vcf
-
-    if callset_name == "delly":
-        bp_df = pipeline.parse_preprocess_delly(
-            sample_name="sample",
-            workflow_config=workflow_config,
-            verbose=args.verbose,
-        )
-    else:
-        bp_df = pipeline.parse_preprocess_vcf(
-            callset_name=callset_name,
-            callset=callset,
-            verbose=args.verbose,
-        )
-
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    bp_df.to_csv(args.output, index=False)
+    bp_df = api.preprocess_raw(args.vcf, args.caller, args.ref, verbose=args.verbose)
+    sv_io.write_bps(bp_df, args.output)
 
     if args.verbose:
         print(f"Wrote {len(bp_df)} raw breakpoints to {args.output}")
@@ -154,28 +128,11 @@ def _register_preprocess(subparsers):
 
 
 def _cmd_preprocess(args):
-    import pandas as pd
-    from . import breakpoints as bps_mod
-    from . import _config as sv_config
-    from . import vcfwrite as vcfw
-
-    workflow_config = sv_config.build_workflow_config(
-        sample_name=args.sample,
-        callers=[args.caller],
-        model_name=args.model,
-        model_config=_load_model_config(args),
+    bp_df = api.preprocess(
+        sv_io.read_bps(args.raw_bps), args.caller,
+        model=args.model, model_config=_load_model_config(args),
     )
-
-    callset = workflow_config["callsets"][args.caller]
-    bp_df = pd.read_csv(args.raw_bps, low_memory=False)
-    bp_df = bps_mod.common_bps_preprocess(bp_df, callset["params"])
-
-    args.output.mkdir(parents=True, exist_ok=True)
-    bps_path = args.output / f"{args.caller}.bps.csv"
-    vcf_path = args.output / f"{args.caller}.vcf"
-
-    bp_df.to_csv(bps_path, index=False)
-    vcfw.write_vcf(bp_df, vcf_path, source=args.caller, sample_name=args.sample)
+    bps_path, _ = sv_io.write_callset(bp_df, args.output, args.caller, args.sample)
 
     if args.verbose:
         print(f"Wrote {len(bp_df)} processed breakpoints to {bps_path}")
@@ -205,42 +162,21 @@ def _register_match(subparsers):
 
 
 def _cmd_match(args):
-    import pandas as pd
-    from . import chunk_match
-    from . import _config as sv_config
-
-    workflow_config = sv_config.build_workflow_config(
-        sample_name=args.sample,
-        callers=args.callers,
-        model_name=args.model,
-        model_config=_load_model_config(args),
-        ground_truth_name=args.ground_truth_name,
-        ground_truth_bps_path=args.ground_truth_bps,
-    )
-
     if len(args.bps) != len(args.callers):
         raise ValueError(f"Number of --bps files ({len(args.bps)}) must match --callers ({len(args.callers)})")
 
-    bp_df_dict = {}
-    for callset, bps_path in zip(args.callers, args.bps):
-        bp_df_dict[callset] = pd.read_csv(bps_path, low_memory=False)
-
-    ground_truth_df = pd.read_csv(args.ground_truth_bps, low_memory=False)
-    bp_df_dict[args.ground_truth_name] = ground_truth_df
-
-    if args.verbose:
-        print(f"Matching breakpoints: {list(bp_df_dict.keys())}")
-
-    matched_bp_df = chunk_match.outer_join_bps(
-        bp_df_dict=bp_df_dict,
-        ref_callset=args.ground_truth_name,
-        insert_delta_threshold=args.insert_delta_threshold,
+    caller_bps = {callset: sv_io.read_bps(path) for callset, path in zip(args.callers, args.bps)}
+    matched_bp_df = api.match(
+        caller_bps,
+        sv_io.read_bps(args.ground_truth_bps),
+        ground_truth_name=args.ground_truth_name,
+        model=args.model,
+        model_config=_load_model_config(args),
         max_dist=args.max_dist,
-        workflow_config=workflow_config
+        insert_delta_threshold=args.insert_delta_threshold,
+        verbose=args.verbose,
     )
-
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    matched_bp_df.to_csv(args.output, index=False)
+    sv_io.write_bps(matched_bp_df, args.output)
 
     if args.verbose:
         print(f"Wrote {len(matched_bp_df)} matched breakpoints to {args.output}")
@@ -280,20 +216,6 @@ def _register_train(subparsers):
 
 
 def _cmd_train(args):
-    import pickle
-    import pandas as pd
-    from . import models
-    from . import _config as sv_config
-
-    workflow_config = sv_config.build_workflow_config(
-        sample_name=args.sample,
-        callers=args.callers,
-        model_name=args.model,
-        training_set=args.training_set,
-        model_config=_load_model_config(args),
-        ground_truth_name=args.ground_truth_name,
-    )
-
     pooled = args.train_samples is not None or args.train_matched_bps is not None
     if pooled and args.matched_bps is not None:
         raise ValueError("--matched_bps cannot be combined with --train_samples/--train_matched_bps")
@@ -302,30 +224,23 @@ def _cmd_train(args):
             raise ValueError("--train_samples and --train_matched_bps must be provided together")
         if len(args.train_samples) != len(args.train_matched_bps):
             raise ValueError("--train_samples and --train_matched_bps must have the same length")
-        matched_bps_sources = dict(zip(args.train_samples, args.train_matched_bps))
-        joint_bp_df = None
+        matched_bps = dict(zip(args.train_samples, args.train_matched_bps))
     elif args.matched_bps is not None:
-        matched_bps_sources = None
-        joint_bp_df = pd.read_csv(args.matched_bps, low_memory=False)
+        matched_bps = sv_io.read_bps(args.matched_bps)
     else:
         raise ValueError("Either --matched_bps or --train_samples/--train_matched_bps must be provided")
 
-    X, model_fit = models.train_model(
-        joint_bp_df,
-        workflow_config,
+    X, model_fit = api.train(
+        matched_bps,
+        args.callers,
+        args.model,
         args.training_set,
+        model_config=_load_model_config(args),
+        ground_truth_name=args.ground_truth_name,
         verbose=args.verbose,
-        matched_bps_sources=matched_bps_sources,
     )
-
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    model_path = args.output_dir / "model.pkl"
-    with open(model_path, "wb") as f:
-        pickle.dump(model_fit, f)
-
-    fm_path = args.output_dir / "feature_matrix.csv"
-    X.to_csv(fm_path, index=True)
+    model_path = sv_io.write_model(model_fit, args.output_dir / sv_io.MODEL)
+    fm_path = sv_io.write_feature_matrix(X, args.output_dir / sv_io.FEATURE_MATRIX)
 
     if args.verbose:
         print(f"Saved model to {model_path}")
@@ -355,53 +270,15 @@ def _register_predict(subparsers):
 
 
 def _cmd_predict(args):
-    import pickle
-    import numpy as np
-    import pandas as pd
-    from . import matched_breakpoints as mbps
-    from . import vcfwrite as vcfw
-    from . import _config as sv_config
-
-    workflow_config = sv_config.build_workflow_config(
-        sample_name=args.sample,
-        callers=args.callers,
-        model_name=args.model,
-        training_set=args.training_set,
+    svensemble2_calls_df = api.predict(
+        sv_io.read_model(args.model_pkl),
+        sv_io.read_feature_matrix(args.feature_matrix),
+        sv_io.read_bps(args.matched_bps),
+        args.model,
+        args.training_set,
         model_config=_load_model_config(args),
     )
-
-    with open(args.model_pkl, "rb") as f:
-        model_fit = pickle.load(f)
-
-    X = pd.read_csv(args.feature_matrix, low_memory=False)
-    index_cols = [c for c in X.columns if c.endswith("_INFO_EVENT")]
-    if not index_cols:
-        raise ValueError(
-            f"Feature matrix at {args.feature_matrix} has no '<callset>_INFO_EVENT' index "
-            f"columns. These are required for reconstructing calls and should have been "
-            f"written by the training step; their absence indicates a broken or truncated "
-            f"feature matrix. Found columns: {list(X.columns)[:20]}{'...' if len(X.columns) > 20 else ''}"
-        )
-    X.set_index(index_cols, inplace=True)
-
-    training_params = workflow_config["model"]["training_params"]
-    fillna = training_params.get("fillna", 0)
-    fill_val = fillna if fillna is not None else np.nan
-    X = X.reindex(columns=model_fit.feature_names_in_, fill_value=fill_val)
-
-    y_pred = model_fit.predict_proba(X)[:, 1]
-    pred_col = f"{args.training_set}_{workflow_config['model_id']}_pred"
-    y_pred_df = pd.DataFrame(y_pred, columns=[pred_col], index=X.index).reset_index(drop=False)
-
-    matched_bp_df = pd.read_csv(args.matched_bps, low_memory=False)
-    svensemble2_calls_df = mbps.get_svensemble2_calls(matched_bp_df, y_pred_df)
-
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    calls_csv = args.output_dir / "svensemble2_calls.csv"
-    calls_vcf = args.output_dir / "svensemble2_calls.vcf"
-
-    svensemble2_calls_df.to_csv(calls_csv, index=True)
-    vcfw.write_vcf(svensemble2_calls_df, calls_vcf, source="svensemble2", sample_name=args.sample)
+    calls_csv, _ = sv_io.write_calls(svensemble2_calls_df, args.output_dir, args.sample)
 
     if args.verbose:
         print(f"Wrote {len(svensemble2_calls_df)} calls to {calls_csv}")
@@ -429,13 +306,9 @@ def _register_benchmark_callset(subparsers):
 
 
 def _cmd_benchmark_callset(args):
-    from . import benchmark as bench_mod
-
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
     svtypes = args.svtypes.split("+") if args.svtypes else None
 
-    bench_mod.run_single_callset_benchmark(
+    api.benchmark_callset(
         callset_bps_path=args.callset_bps,
         callset_name=args.caller,
         val_bps_path=args.val_bps,
@@ -473,20 +346,14 @@ def _register_shap(subparsers):
 
 
 def _cmd_shap(args):
-    from . import sv_shap
-
-    model_config = _load_model_config(args)
-
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    sv_shap.run_shap(
+    api.shap(
         model_pkl=args.model_pkl,
         feature_matrix=args.feature_matrix,
         sample_name=args.sample,
         model_name=args.model,
         training_set=args.training_set,
         output_dir=args.output_dir,
-        model_config=model_config,
+        model_config=_load_model_config(args),
         use_gpu=args.use_gpu,
         max_samples=args.max_samples,
         top_n=args.top_n,
@@ -535,7 +402,6 @@ def _register_ground_truth(subparsers):
 
 def _cmd_ground_truth(args):
     import numpy as np
-    from . import ground_truth as gt_mod
 
     filters = args.filters.split(",") if args.filters else None
     evidence = args.evidence.split(",") if args.evidence else None
@@ -545,7 +411,7 @@ def _cmd_ground_truth(args):
     upper = args.svlen_upper if args.svlen_upper is not None else np.inf
     svlens = (args.svlen_lower, upper)
 
-    gt_mod.preprocess_ground_truth(
+    api.preprocess_ground_truth(
         vcf_path=args.vcf_path,
         output_path=args.output_path,
         ground_truth_name=args.ground_truth_name,
@@ -588,9 +454,7 @@ def _register_validation_set(subparsers):
 
 
 def _cmd_validation_set(args):
-    from . import validation_sets
-
-    out = validation_sets.preprocess_validation_set(
+    out = api.preprocess_validation_set(
         name=args.name,
         raw_path=args.raw_path,
         output_path=args.output,
