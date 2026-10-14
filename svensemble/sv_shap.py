@@ -191,6 +191,8 @@ def run_shap(
         model, X, use_gpu=use_gpu, max_samples=max_samples, verbose=verbose,
     )
 
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     prefix = f'{sample_name}.{mid}.{training_set}'
     summary = summarise_shap_values(shap_values, top_n=top_n)
     summary_csv_path = output_dir / f'{prefix}.shap_summary.csv'
