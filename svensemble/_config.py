@@ -5,12 +5,12 @@ from typing import TypedDict, NotRequired
 
 from . import config_io
 from ._model_configs import model_configs, TrainingParams, ModelConfig
+from ._model_configs import default_model_name as DEFAULT_MODEL_NAME
 from .utils import update
 from ._caller_params import training_set_presets as TRAINING_SET_PRESETS
 from ._caller_params import default_training_set as DEFAULT_TRAINING_SET
 from ._caller_params import default_reference_set as DEFAULT_REFERENCE_SET
 from ._caller_params import callset_param_dict as CALLSET_PARAM_DICT
-from ._sample_params import default_model_name as DEFAULT_MODEL_NAME
 # ---------------------------------------------------------------------------
 # Model config resolution + reconstructible identity (model_id)
 #
@@ -49,7 +49,6 @@ class CallsetParams(TypedDict, total=False):
     svlen_source: str
     bnd2_pos: str
     svlens: tuple[int | float, int | float]
-    override_bps_path: bool
     source: str
     # Ground-truth-specific optional keys
     filter_defaults: dict
@@ -192,9 +191,10 @@ def model_result_dir(
     """Reconstruct a model's results directory from its config (fetch-by-config).
 
     ``model`` may be a preset name (str), a freeform override dict (with
-    ``base``), or an already-resolved config. Mirrors the data-tree layout built
-    by :func:`create_config_dict`, so a config + sample + training_set is enough
-    to locate results in a Jupyter session without knowing the hash up front.
+    ``base``), or an already-resolved config. Builds
+    ``results_dir/svensemble/{result_type}/{sample}[/{bench_set}]/{tag}/{model_id}.{training_set}[.gt_{name}]``,
+    so a config + sample + training_set is enough to locate results in a
+    Jupyter session without knowing the hash up front.
     """
     if result_type not in ['classify', 'benchmark']:
         raise ValueError(f"Invalid result_type: {result_type}. Must be 'classify' or 'benchmark'.")

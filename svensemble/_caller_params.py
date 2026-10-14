@@ -66,7 +66,6 @@ default_params = {
     'svlen_source': 'svlen',
     'bnd2_pos': 'svlen',
     'svlens': default_sv_lens,
-    'override_bps_path': False
 }
 # Default params for evnet notation in VCF
 default_event_params = default_params | {
@@ -116,36 +115,6 @@ training_set_presets = {
     'gridss+manta_diploid+delly+svaba': ['gridss', 'manta_diploid', 'delly', 'svaba'],
     'sniffles+gridss+manta_diploid+delly+svaba': ['sniffles', 'gridss', 'manta_diploid', 'delly', 'svaba'],
     'sniffles+severus+cutesv+gridss+manta_diploid+delly+svaba': ['sniffles', 'severus', 'cutesv', 'gridss', 'manta_diploid', 'delly', 'svaba'],
-}
-
-training_set_list_presets = {
-    'default': [
-        'gridss',
-        'manta_candidate',
-        'manta_diploid',
-        'delly',
-        'gridss+manta_candidate',
-        'gridss+manta_diploid',
-        'gridss+delly',
-        'gridss+manta_candidate+delly',
-        'gridss+manta_diploid+delly',
-        'delly+manta_candidate',
-        'delly+manta_diploid'
-    ],
-    'sniffles_preset': [
-        'sniffles',
-        'sniffles+gridss',
-        'sniffles+manta_candidate',
-        'sniffles+manta_diploid',
-        'sniffles+delly',
-        'sniffles+manta_candidate+delly',
-        'sniffles+manta_diploid+delly',
-        'sniffles+gridss+manta_candidate',
-        'sniffles+gridss+manta_diploid',
-        'sniffles+gridss+manta_candidate+delly',
-        'sniffles+gridss+manta_diploid+delly',
-    ],
-    'all': [training_set for training_set in training_set_presets.keys()]
 }
 
 
@@ -230,7 +199,6 @@ gridss_params = default_params | {
     'info_cols_pred': gridss_info_pred_cols,
     'parse_format': False,
     'svlen_source': 'alt',
-    'bps_path': 'gridss.bps.csv',
     'bnd2_pos': None
 }
 
@@ -248,7 +216,6 @@ gnomad_params = default_params | {
         'RD': 500
     },
     'is_reference': True,
-    'bps_path': 'gnomad.bps.csv',
 }
 
 # `filter_defaults` encodes the per-variant filter profile consumed by
@@ -271,7 +238,6 @@ gnomad_filtered_params = gnomad_params | {
         'evidence': ['SR', 'PE'],
         'min_af': 0.01,
     },
-    'bps_path': 'gnomad_filtered.bps.csv',
 }
 
 gnomad_pass_params = gnomad_params | {
@@ -279,7 +245,6 @@ gnomad_pass_params = gnomad_params | {
         'filters': ['PASS'],
         'evidence': ['SR', 'PE'],
     },
-    'bps_path': 'gnomad_pass.bps.csv',
 }
 
 gnomad_pass_hg19_params = gnomad_pass_params
@@ -292,7 +257,6 @@ manta_candidate_params = default_params | {
     'info_cols_pred': ['IMPRECISE', 'HOMLEN', 'BND_DEPTH', 'SVLEN', 'PAIR_COUNT', 'UPSTREAM_PAIR_COUNT', 'DOWNSTREAM_PAIR_COUNT', 'BND_PAIR_COUNT'],
     'parse_format': False,
     'svlen_source': 'svlen',
-    'bps_path': 'manta_candidate.bps.csv',
     'qual_metric': 'INFO_TOTAL_PAIR_COUNT',
     'bnd2_pos': 'end'
 }
@@ -306,7 +270,6 @@ manta_diploid_params = default_params | {
     'parse_format': True,
     'format_cols': ['FT', 'GQ', 'PR', 'SR'],
     'svlen_source': 'svlen',
-    'bps_path': 'manta_diploid.bps.csv',
     'bnd2_pos': 'end'
 }
 
@@ -319,25 +282,21 @@ delly_params = default_params | {
     'parse_format': True,
     'format_cols': ['GT', 'GQ', 'RC', 'RCL', 'RCR', 'RDCN', 'DR', 'DV', 'RR', 'RV'],
     'svlen_source': 'svlen',
-    'bps_path': 'delly.bps.csv',
     'bnd2_pos': 'end'
 }
 
 survivor_params = default_event_params | {
     'source': 'survivor_short',
-    'bps_path': 'survivor_short.bps.csv',
     'bnd2_pos': 'end',
 }
 
 survivor_long_params = default_event_params | {
     'source': 'survivor_long',
-    'bps_path': 'survivor_long.bps.csv',
     'bnd2_pos': 'end',
 }
 
 survivor_all_params = default_event_params | {
     'source': 'survivor_all',
-    'bps_path': 'survivor_all.bps.csv',
     'bnd2_pos': 'end',
 }
 
@@ -392,9 +351,7 @@ hgsvc2_params = default_params | {
     'svlens': (50, np.inf)
 }
 
-gridss_H_params = gridss_params | {
-    'bps_path': 'gridss_H.bps.csv',
-}
+gridss_H_params = gridss_params.copy()
 
 # Parameters for Sniffles2 (long-read SV caller)
 # Filter entries expected from Sniffles2
@@ -463,15 +420,11 @@ sniffles_params = default_params | {
     'parse_format': True,
     'format_cols': ['GT', 'GQ', 'DR', 'DV'],
     'svlen_source': 'svlen',
-    'bps_path': 'sniffles.bps.csv',
-    'override_bps_path': False,
     'bnd2_pos': 'svlen'
 }
 
 
-sniffles_H_params = sniffles_params | {
-    'bps_path': 'sniffles_H.bps.csv',
-}
+sniffles_H_params = sniffles_params.copy()
 
 # Parameters for Sniffles2 v2.0.7 (Kosugi et al. 2024 version)
 # v2.0.7 has a smaller filter set and different INFO fields compared to v2.7.x
@@ -518,14 +471,10 @@ sniffles_207_params = default_params | {
     'parse_format': True,
     'format_cols': ['GT', 'GQ', 'DR', 'DV'],
     'svlen_source': 'svlen',
-    'bps_path': 'sniffles_207.bps.csv',
-    'override_bps_path': False,
     'bnd2_pos': 'svlen'
 }
 
-sniffles_207_H_params = sniffles_207_params | {
-    'bps_path': 'sniffles_207_H.bps.csv',
-}
+sniffles_207_H_params = sniffles_207_params.copy()
 
 # Parameters for Severus (long-read SV caller)
 severus_filters = [
@@ -557,13 +506,10 @@ severus_params = default_params | {
     'parse_format': True,
     'format_cols': ['GT', 'DR', 'DV', 'VAF', 'hVAF'],
     'svlen_source': 'svlen',
-    'bps_path': 'severus.bps.csv',
     'bnd2_pos': 'end',
 }
 
-severus_H_params = severus_params | {
-    'bps_path': 'severus_H.bps.csv',
-}
+severus_H_params = severus_params.copy()
 
 # Parameters for CuteSV (long-read SV caller)
 cutesv_filters = [
@@ -594,14 +540,11 @@ cutesv_params = default_params | {
     'parse_format': True,
     'format_cols': ['GT', 'GQ', 'DR', 'DV'],
     'svlen_source': 'svlen',
-    'bps_path': 'cutesv.bps.csv',
     'bnd2_pos': 'end',
     'qual_metric': 'INFO_RE',
 }
 
-cutesv_H_params = cutesv_params | {
-    'bps_path': 'cutesv_H.bps.csv',
-}
+cutesv_H_params = cutesv_params.copy()
 
 # Parameters for SvABA (short-read SV caller, local assembly-based)
 svaba_filters = [
@@ -656,13 +599,10 @@ svaba_params = default_params | {
     'parse_format': True,
     'format_cols': ['GT', 'GQ', 'AD', 'DP', 'SR', 'DR', 'LO', 'SL', 'LR', 'PL'],
     'svlen_source': 'alt',
-    'bps_path': 'svaba.bps.csv',
     'bnd2_pos': None,
 }
 
-svaba_H_params = svaba_params | {
-    'bps_path': 'svaba_H.bps.csv',
-}
+svaba_H_params = svaba_params.copy()
 
 # Parameters for SMOOVE/LUMPY
 smoove_filters = []
@@ -692,7 +632,6 @@ smoove_params = default_params | {
     'info_cols_pred': smoove_info_pred_cols,
     'parse_format': False,
     'svlen_source': 'svlen',
-    'bps_path': 'smoove.bps.csv',
     'bnd2_pos': 'end',
     # QUAL is '.' on every smoove/LUMPY record; SU (total supporting evidence)
     # is the usable per-call quality signal.
@@ -784,122 +723,6 @@ callset_param_dict = CallsetParamDict({
     'svaba_H': svaba_H_params,
     'smoove': smoove_params
 })
-
-# Maps each callset_name to (source, svensemble_dir_template, path_template).
-# {s} is substituted with the sample name at call time.
-# _H variants share source+paths with their base callset but reference separate params keys.
-callset_path_configs: dict[str, tuple[str, str, str]] = {
-    'gnomad': (
-        'gnomad',
-        'data/{s}/svensemble2',
-        'data/{s}/{s}.vcf.gz',
-    ),
-    'gnomad_filtered': (
-        'gnomad_filtered',
-        'data/{s}/svensemble2',
-        'data/gnomad/gnomad.vcf.gz',
-    ),
-    'gnomad_pass': (
-        'gnomad_pass',
-        'data/{s}/svensemble2',
-        'data/gnomad/gnomad.vcf.gz',
-    ),
-    'gnomad_pass_hg19': (
-        'gnomad_pass_hg19',
-        'data/{s}/svensemble2',
-        'data/gnomad/gnomad.vcf.gz',
-    ),
-    'gridss': (
-        'gridss',
-        'data/{s}/sv_calling/gridss/svensemble2',
-        'data/{s}/sv_calling/gridss/out/{s}.gridss.vcf',
-    ),
-    'gridss_H': (
-        'gridss',
-        'data/{s}/sv_calling/gridss/svensemble2',
-        'data/{s}/sv_calling/gridss/out/{s}.gridss.vcf',
-    ),
-    'manta_candidate': (
-        'manta_candidate',
-        'data/{s}/sv_calling/manta/svensemble2',
-        'data/{s}/sv_calling/manta/results/variants/candidateSV.vcf.gz',
-    ),
-    'manta_diploid': (
-        'manta_diploid',
-        'data/{s}/sv_calling/manta/svensemble2',
-        'data/{s}/sv_calling/manta/results/variants/diploidSV.vcf.gz',
-    ),
-    'delly': (
-        'delly',
-        'data/{s}/sv_calling/delly/svensemble2',
-        'data/{s}/sv_calling/delly/out/{s}.delly.bcf',
-    ),
-    'survivor_short': (
-        'survivor_short',
-        'data/{s}/sv_calling/survivor/svensemble2',
-        'data/{s}/sv_calling/survivor/{s}.survivor_short.vcf',
-    ),
-    'survivor_long': (
-        'survivor_long',
-        'data/{s}/sv_calling/survivor/svensemble2',
-        'data/{s}/sv_calling/survivor/{s}.survivor_long.vcf',
-    ),
-    'survivor_all': (
-        'survivor_all',
-        'data/{s}/sv_calling/survivor/svensemble2',
-        'data/{s}/sv_calling/survivor/{s}.survivor_all.vcf',
-    ),
-    'sniffles': (
-        'sniffles',
-        'data/{s}/sv_calling/sniffles/svensemble2',
-        'data/{s}/sv_calling/sniffles/out/{s}.long.sniffles.vcf',
-    ),
-    'sniffles_H': (
-        'sniffles',
-        'data/{s}/sv_calling/sniffles/svensemble2',
-        'data/{s}/sv_calling/sniffles/out/{s}.long.sniffles.vcf',
-    ),
-    'sniffles_207': (
-        'sniffles_207',
-        'data/{s}/sv_calling/sniffles_207/svensemble2',
-        'data/{s}/sv_calling/sniffles_207/out/{s}.long.sniffles_207.vcf',
-    ),
-    'sniffles_207_H': (
-        'sniffles_207',
-        'data/{s}/sv_calling/sniffles_207/svensemble2',
-        'data/{s}/sv_calling/sniffles_207/out/{s}.long.sniffles_207.vcf',
-    ),
-    'severus': (
-        'severus',
-        'data/{s}/sv_calling/severus/svensemble2',
-        'data/{s}/sv_calling/severus/all_SVs/severus_all.vcf',
-    ),
-    'severus_H': (
-        'severus',
-        'data/{s}/sv_calling/severus/svensemble2',
-        'data/{s}/sv_calling/severus/all_SVs/severus_all.vcf',
-    ),
-    'cutesv': (
-        'cutesv',
-        'data/{s}/sv_calling/cutesv/svensemble2',
-        'data/{s}/sv_calling/cutesv/out/{s}.long.cutesv.vcf',
-    ),
-    'cutesv_H': (
-        'cutesv',
-        'data/{s}/sv_calling/cutesv/svensemble2',
-        'data/{s}/sv_calling/cutesv/out/{s}.long.cutesv.vcf',
-    ),
-    'svaba': (
-        'svaba',
-        'data/{s}/sv_calling/svaba/svensemble2',
-        'data/{s}/sv_calling/svaba/out/{s}.svaba.unfiltered.sv.vcf',
-    ),
-    'svaba_H': (
-        'svaba_H',
-        'data/{s}/sv_calling/svaba/svensemble2',
-        'data/{s}/sv_calling/svaba/out/{s}.svaba.sv.vcf',
-    ),
-}
 
 callset_alt_priority = [
     'gridss',

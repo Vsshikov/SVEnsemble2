@@ -17,6 +17,8 @@ from typing import TypedDict, NotRequired
 # freeform overrides). See _config.resolve_model_config.
 BASE_MODELS = ('unbiased_rf', 'unbiased_xgb', 'consensus', 'unbiased_rf_topol', 'unbiased_xgb_topol')
 
+default_model_name = 'unbiased_rf'
+
 class TrainingParams(TypedDict, total=False):
     """Behavioural model parameters that determine model_id hash."""
     function: str
