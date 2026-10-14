@@ -17,6 +17,7 @@ are exposed here unchanged. ``run`` chains every step through io into a
 workdir, as ``svensemble run`` does.
 """
 
+import copy
 from pathlib import Path
 
 import numpy as np
@@ -29,11 +30,13 @@ from . import io as sv_io
 from . import matched_breakpoints as mbps
 from . import models
 from . import pipeline
+from ._config import list_preset_ids
 from .benchmark import run_single_callset_benchmark as benchmark_callset
 from .ground_truth import preprocess_ground_truth
 from .validation_sets import preprocess_validation_set
 
 __all__ = [
+    "generate_config", "model_id", "list_preset_ids",
     "preprocess_raw", "preprocess", "match", "train", "predict",
     "preprocess_ground_truth", "preprocess_validation_set", "benchmark_callset", "shap",
     "run",
@@ -50,6 +53,52 @@ def _resolve_model(model: str | None, model_config: dict | None) -> dict:
     if model_config is not None:
         return sv_config.resolve_model_config(config=model_config)
     return sv_config.resolve_model_config(name=model)
+
+
+# ---------------------------------------------------------------------------
+# Model configs
+# ---------------------------------------------------------------------------
+
+def generate_config(
+    base: str,
+    training_params: dict | None = None,
+    name: str | None = None,
+    description: str | None = None,
+    output: Path | None = None,
+) -> dict:
+    """Build a model config override, the form ``--model_config`` takes.
+
+    The result holds *base* plus only the given keys; *training_params* are
+    deep-merged onto the base preset's when the config is resolved. It is
+    validated by resolving it, so an unknown base or training function raises
+    ValueError here rather than at training time.
+
+    Args:
+        base: Preset to start from (a key of _model_configs.model_configs).
+        training_params: Overrides for the base preset's training_params.
+        name, description: Human labels; they do not affect the model_id.
+        output: If given, write the config here (JSON, or YAML by suffix),
+            tag-encoded so Paths, tuples and inf survive the round trip
+            through io.read_model_config.
+    """
+    cfg = {"base": base}
+    if name is not None:
+        cfg["name"] = name
+    if description is not None:
+        cfg["description"] = description
+    if training_params:
+        cfg["training_params"] = copy.deepcopy(training_params)
+    sv_config.resolve_model_config(config=cfg)
+    if output is not None:
+        sv_io.write_config(sv_io.dict_json_encode(cfg), output)
+    return cfg
+
+
+def model_id(model: str | None = None, model_config: dict | None = None) -> str:
+    """The reconstructible ``{base}-{hash8}`` id for a preset or a config override."""
+    if model is None and model_config is None:
+        raise ValueError("Provide model (a preset name) or model_config.")
+    return sv_config.model_id(_resolve_model(model, model_config))
 
 
 # ---------------------------------------------------------------------------

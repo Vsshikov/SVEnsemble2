@@ -546,17 +546,11 @@ def _register_model_id(subparsers):
 
 
 def _cmd_model_id(args):
-    from . import _config as sv_config
-
     if args.all:
-        for name, mid in sv_config.list_preset_ids().items():
+        for name, mid in api.list_preset_ids().items():
             print(f"{name}\t{mid}")
         return
     model_config = _load_model_config(args)
-    if model_config is not None:
-        resolved = sv_config.resolve_model_config(config=model_config)
-    elif args.model:
-        resolved = sv_config.resolve_model_config(name=args.model)
-    else:
+    if model_config is None and not args.model:
         raise SystemExit("Provide --model <preset> or --model_config <file>.")
-    print(sv_config.model_id(resolved))
+    print(api.model_id(model=args.model, model_config=model_config))
