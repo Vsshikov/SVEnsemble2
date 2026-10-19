@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import math
 from pathlib import Path
 from typing import TypedDict, NotRequired
 
@@ -8,8 +9,6 @@ from ._model_configs import model_configs, TrainingParams, ModelConfig
 from ._model_configs import default_model_name as DEFAULT_MODEL_NAME
 from .utils import update
 from ._caller_params import training_set_presets as TRAINING_SET_PRESETS
-from ._caller_params import default_training_set as DEFAULT_TRAINING_SET
-from ._caller_params import default_reference_set as DEFAULT_REFERENCE_SET
 from ._caller_params import callset_param_dict as CALLSET_PARAM_DICT
 # ---------------------------------------------------------------------------
 # Model config resolution + reconstructible identity (model_id)
@@ -86,10 +85,28 @@ class WorkflowConfig(TypedDict):
 def _tag_constructor(tag_dict):
     """
     Generates a reproducible tag string using an arbitrary dict of format {'tag_name': 'tag_value'}.
+
+    Matches benchmarkFilterTag in nf-core-svensemble (workflows/svensemble.nf), which
+    names the benchmark filter directories, e.g. 'svlenmin-50.svtypes-DEL+INS'.
+    None, +-inf and empty values are dropped; lists and '+'-joined strings are
+    sorted and '+'-joined; integral floats print as ints. Returns 'unfiltered'
+    when no tokens remain.
     """
-    tag_dict = {k: v for k, v in tag_dict.items() if v is not None}
-    tag_dict_lists_sorted_tostr = {k: '+'.join(sorted(v)) if isinstance(v, list) else v for k, v in tag_dict.items()}
-    return '.'.join([f"{k}-{v}" for k, v in sorted(tag_dict_lists_sorted_tostr.items())])
+    tokens = []
+    for k, v in tag_dict.items():
+        if isinstance(v, str) and '+' in v:
+            v = v.split('+')
+        if isinstance(v, (list, tuple, set, frozenset)):
+            v = '+'.join(sorted(v))
+        if isinstance(v, float):
+            if math.isinf(v):
+                continue
+            if v.is_integer():
+                v = int(v)
+        if v is None or v == '':
+            continue
+        tokens.append(f"{k}-{v}")
+    return '.'.join(sorted(tokens)) or 'unfiltered'
 
 tag_dict_preset_benchmark = {
     'svlenmin': None,
@@ -175,74 +192,6 @@ def list_preset_ids() -> dict:
     """Map every preset name -> its model_id. Display convenience for humans."""
     return {name: model_id(resolve_model_config(name=name)) for name in model_configs}
 
-
-def model_result_dir(
-    results_dir,
-    sample_name: str,
-    model,
-    training_set,
-    result_type: str = 'classify',
-    bench_set_name: str | None = None,
-    ground_truth_name: str | None = None,
-    svtypes: list[str] | None = None,
-    svlenmin: int | None = None,
-    svlenmax: int | None = None,
-) -> Path:
-    """Reconstruct a model's results directory from its config (fetch-by-config).
-
-    ``model`` may be a preset name (str), a freeform override dict (with
-    ``base``), or an already-resolved config. Builds
-    ``results_dir/svensemble/{result_type}/{sample}[/{bench_set}]/{tag}/{model_id}.{training_set}[.gt_{name}]``,
-    so a config + sample + training_set is enough to locate results in a
-    Jupyter session without knowing the hash up front.
-    """
-    if result_type not in ['classify', 'benchmark']:
-        raise ValueError(f"Invalid result_type: {result_type}. Must be 'classify' or 'benchmark'.")
-
-    results_dir = Path(results_dir)
-    if isinstance(model, str):
-        resolved = resolve_model_config(name=model)
-    elif isinstance(model, dict) and 'base' in model and 'training_params' in model:
-        resolved = model
-    else:
-        resolved = resolve_model_config(config=model)
-    mid = model_id(resolved)
-
-    if isinstance(training_set, (list, tuple)):
-        ts_name = '+'.join(training_set)
-    elif training_set in TRAINING_SET_PRESETS:
-        ts_name = training_set
-    elif training_set in (None, 'default'):
-        ts_name = DEFAULT_TRAINING_SET
-    else:
-        ts_name = training_set
-
-    gt_suffix = ''
-    if ground_truth_name and ground_truth_name != DEFAULT_REFERENCE_SET:
-        gt_suffix = f'.gt_{ground_truth_name}'
-
-    bench_path = ''
-    if result_type == 'benchmark':
-        bench_path = f'/{bench_set_name}'
-
-    tag = _tag_constructor(
-        {
-            'svtypes': svtypes,
-            'svlenmin': svlenmin,
-            'svlenmax': svlenmax,
-        }
-    )
-    tagged_path = ''
-    if tag:
-        tagged_path = f'/{tag}'
-    else:
-        raise ValueError("Empty tagged path not yet supported.")
-
-
-    return results_dir / Path(
-        f'svensemble/{result_type}/{sample_name}{bench_path}{tagged_path}/'
-        f'{mid}.{ts_name}{gt_suffix}'
-    )
 
 def build_ground_truth_config(
     name: str,
