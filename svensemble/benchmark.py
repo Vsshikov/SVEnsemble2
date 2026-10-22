@@ -2,8 +2,8 @@
 Benchmark a callset or SVEnsemble2 predictions against a validation set.
 
 run_single_callset_benchmark backs `svensemble benchmark-callset`. Validation
-sets are produced by validation_sets.preprocess_validation_set; curve plotting
-lives in plotting.
+sets are produced by validation_sets.preprocess_validation_set; curves and
+plots are made from the benchmark CSVs in svensemble_analyse.
 """
 
 import pandas as pd

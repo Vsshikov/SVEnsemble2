@@ -185,12 +185,12 @@ class TestShapSubcommand:
     def test_new_flags_default_off(self, tmp_path, captured):
         sys.argv = self._argv(tmp_path)
         main()
-        assert (captured["use_gpu"], captured["max_samples"], captured["top_n"], captured["plot"]) == (False, None, 20, False)
+        assert (captured["use_gpu"], captured["max_samples"], captured["top_n"]) == (False, None, 20)
 
     def test_new_flags_passed_through(self, tmp_path, captured):
-        sys.argv = self._argv(tmp_path) + ["--use_gpu", "--max_samples", "50", "--top_n", "7", "--plot"]
+        sys.argv = self._argv(tmp_path) + ["--use_gpu", "--max_samples", "50", "--top_n", "7"]
         main()
-        assert (captured["use_gpu"], captured["max_samples"], captured["top_n"], captured["plot"]) == (True, 50, 7, True)
+        assert (captured["use_gpu"], captured["max_samples"], captured["top_n"]) == (True, 50, 7)
 
 
 class TestValidationSetSubcommand:

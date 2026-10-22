@@ -266,7 +266,6 @@ def shap(
     use_gpu: bool = False,
     max_samples: int | None = None,
     top_n: int = 20,
-    plot: bool = False,
     verbose: bool = False,
 ) -> Path:
     """SHAP analysis of a trained model; see sv_shap.run_shap.
@@ -286,7 +285,6 @@ def shap(
         use_gpu=use_gpu,
         max_samples=max_samples,
         top_n=top_n,
-        plot=plot,
         verbose=verbose,
     )
 

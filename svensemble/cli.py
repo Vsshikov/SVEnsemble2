@@ -337,8 +337,7 @@ def _register_shap(subparsers):
     p.add_argument("--output_dir", type=Path, required=True, help="Output directory for SHAP results.")
     p.add_argument("--use_gpu", action="store_true", default=False, help="Use GPUTreeExplainer (requires CUDA).")
     p.add_argument("--max_samples", type=int, default=None, help="Subsample the feature matrix to at most N rows.")
-    p.add_argument("--top_n", type=int, default=20, help="Number of top features in the summary CSV and plots (default 20).")
-    p.add_argument("--plot", action="store_true", default=False, help="Also write beeswarm and bar summary plots.")
+    p.add_argument("--top_n", type=int, default=20, help="Number of top features in the summary CSV (default 20).")
     _add_model_config_arg(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_shap)
@@ -356,7 +355,6 @@ def _cmd_shap(args):
         use_gpu=args.use_gpu,
         max_samples=args.max_samples,
         top_n=args.top_n,
-        plot=args.plot,
         verbose=args.verbose,
     )
 

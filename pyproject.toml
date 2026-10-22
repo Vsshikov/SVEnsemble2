@@ -15,8 +15,6 @@ dependencies = [
     "cyvcf2",
     "igraph",
     "xgboost",
-    "matplotlib",
-    "adjustText",
     "pyyaml",
 ]
 

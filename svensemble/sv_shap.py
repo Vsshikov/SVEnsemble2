@@ -152,21 +152,19 @@ def run_shap(
     use_gpu: bool = False,
     max_samples: Optional[int] = None,
     top_n: int = 20,
-    plot: bool = False,
     verbose: bool = False,
 ) -> Path:
     """
     Pipeline-friendly SHAP entry point.  Accepts file paths directly
     rather than discovering them via sample/model configs.
 
-    Writes {prefix}.shap_summary.csv and {prefix}.shap_values.pkl into output_dir,
-    plus beeswarm/bar PNGs when plot is True.
+    Writes {prefix}.shap_summary.csv and {prefix}.shap_values.pkl into output_dir.
+    SHAP plots are made in svensemble_analyse (figures.shap_summary).
 
     Args:
         use_gpu: Use GPUTreeExplainer (requires CUDA).
         max_samples: Subsample the feature matrix to at most this many rows.
-        top_n: Number of top features in the summary CSV and plots.
-        plot: Write beeswarm and bar summary plots.
+        top_n: Number of top features in the summary CSV.
     """
     model = sv_io.read_model(model_pkl)
     fm = sv_io.read_feature_matrix(feature_matrix)
@@ -204,12 +202,5 @@ def run_shap(
     with open(shap_pkl_path, 'wb') as f:
         pickle.dump(shap_values, f)
     print(f"Saved SHAP values: {shap_pkl_path}")
-
-    if plot:
-        from .plotting import generate_shap_plots
-        generate_shap_plots(
-            shap_values, output_dir=output_dir, prefix=prefix,
-            top_n=top_n, verbose=verbose,
-        )
 
     return shap_pkl_path
