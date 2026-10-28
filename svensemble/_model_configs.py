@@ -233,6 +233,8 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         'training_params': {
             'function': 'unbiased_xgb',
             'custom_cols': ['DHFC', 'DHBFC', 'DHFFC'],
+            'model_kwargs': {},
+            'fillna': None,
         },
         'description': 'Unbiased XGBoost model for SV call probability estimation with native NaN handling. Integrates Duphold annotations.'
     }
