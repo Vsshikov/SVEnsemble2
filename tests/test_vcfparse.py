@@ -176,7 +176,7 @@ class TestColumnOrder:
             "from svensemble import _caller_params\n"
             "from svensemble.vcfparse import parse_vcf_to_df_no_format\n"
             "with pysam.VariantFile(sys.argv[1]) as vf:\n"
-            "    df, _ = parse_vcf_to_df_no_format(vf, _caller_params.delly_params)\n"
+            "    df, _ = parse_vcf_to_df_no_format(vf, _caller_params.DELLY_PARAMS)\n"
             "print(','.join(df.columns))\n"
         )
         try:
@@ -199,7 +199,7 @@ class TestColumnOrder:
 
 class TestParseVcfToDfNoFormat:
 
-    _PARAMS = _caller_params.default_params | {
+    _PARAMS = _caller_params.DEFAULT_PARAMS | {
         "filter_cols": ["PASS", "LowQual"],
         "info_cols_mandatory": ["SVTYPE", "SVLEN"],
         "info_cols_pred": [],
@@ -251,7 +251,7 @@ class TestParseVcfToDfNoFormat:
 
 class TestParseVcfToDfWithFormat:
 
-    _PARAMS = _caller_params.default_params | {
+    _PARAMS = _caller_params.DEFAULT_PARAMS | {
         "filter_cols": ["PASS"],
         "info_cols_mandatory": ["SVTYPE"],
         "info_cols_pred": [],
@@ -283,3 +283,107 @@ class TestParseVcfToDfWithFormat:
                     parse_vcf_to_df_with_format(vf, self._PARAMS)
         finally:
             os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# Annotator columns (duphold)
+# ---------------------------------------------------------------------------
+
+_DUPHOLD_FORMAT_HEADER = """\
+##FORMAT=<ID=DHFC,Number=1,Type=Float,Description="duphold depth fold-change">
+##FORMAT=<ID=DHBFC,Number=1,Type=Float,Description="duphold depth fold-change compared to bins with matching GC">
+##FORMAT=<ID=DHFFC,Number=1,Type=Float,Description="duphold depth flank fold-change">
+"""
+_DUPHOLD_INFO_HEADER = (
+    "##INFO=<ID=GCF,Number=1,Type=Float,Description=\"GC-content fraction\">\n"
+)
+
+# Annotated DEL, then an inter-chromosomal BND that duphold leaves unannotated.
+_DUPHOLD_ROWS = [
+    "chr1\t1000\tsv1\tN\t<DEL>\t50\tPASS\tSVTYPE=DEL;GCF=0.42\t"
+    "GT:DHFC:DHBFC:DHFFC\t0/1:0.5:0.48:0.45\n",
+    "chr1\t5000\tsv2\tN\tN[chr2:100[\t50\tPASS\tSVTYPE=BND\tGT\t0/1\n",
+]
+
+
+def _write_annotated_vcf(
+    rows: list[str],
+    format_header: str = _DUPHOLD_FORMAT_HEADER,
+    info_header: str = _DUPHOLD_INFO_HEADER,
+    with_sample: bool = True,
+) -> str:
+    """Write a temporary VCF carrying (some of) duphold's header lines."""
+    header = _HEADER_LINES + "##contig=<ID=chr2>\n" + info_header + _SAMPLE_COL + format_header
+    header += _CHROM_HEADER_FMT if with_sample else _CHROM_HEADER
+    with tempfile.NamedTemporaryFile(suffix=".vcf", delete=False, mode="w") as f:
+        f.write(header + "".join(rows))
+        return f.name
+
+
+class TestAnnotatorCols:
+
+    _NO_FORMAT_PARAMS = _caller_params.DEFAULT_PARAMS | {
+        "filter_cols": ["PASS"],
+        "info_cols_mandatory": ["SVTYPE"],
+        "info_cols_pred": [],
+        "parse_format": False,
+        "format_cols": [],
+    }
+    _WITH_FORMAT_PARAMS = _NO_FORMAT_PARAMS | {
+        "parse_format": True,
+        "format_cols": ["GT"],
+    }
+    _ANNOT_COLS = ["ANNOT_DHFC", "ANNOT_DHBFC", "ANNOT_DHFFC", "ANNOT_GCF"]
+
+    def _parse(self, path: str, params: dict):
+        parse = (parse_vcf_to_df_with_format if params["parse_format"]
+                 else parse_vcf_to_df_no_format)
+        try:
+            with pysam.VariantFile(path) as vf:
+                df, _ = parse(vf, params)
+            return df
+        finally:
+            os.unlink(path)
+
+    def test_parsed_without_parse_format(self):
+        df = self._parse(_write_annotated_vcf(_DUPHOLD_ROWS), self._NO_FORMAT_PARAMS)
+        assert [c for c in df.columns if c.startswith("ANNOT_")] == self._ANNOT_COLS
+        assert not any(c.startswith("SAMPLE_") for c in df.columns)
+        assert df["ANNOT_DHFC"].iloc[0] == pytest.approx(0.5)
+        assert df["ANNOT_DHBFC"].iloc[0] == pytest.approx(0.48)
+        assert df["ANNOT_DHFFC"].iloc[0] == pytest.approx(0.45)
+        assert df["ANNOT_GCF"].iloc[0] == pytest.approx(0.42)
+
+    def test_parsed_alongside_format_cols(self):
+        df = self._parse(_write_annotated_vcf(_DUPHOLD_ROWS), self._WITH_FORMAT_PARAMS)
+        assert df["SAMPLE_GT"].iloc[0] == (0, 1)
+        assert [c for c in df.columns if c.startswith("SAMPLE_")] == ["SAMPLE_GT"]
+        assert df["ANNOT_DHFFC"].iloc[0] == pytest.approx(0.45)
+
+    @pytest.mark.parametrize("params_name", ["_NO_FORMAT_PARAMS", "_WITH_FORMAT_PARAMS"])
+    def test_unannotated_record_is_nan(self, params_name):
+        df = self._parse(_write_annotated_vcf(_DUPHOLD_ROWS), getattr(self, params_name))
+        assert df[self._ANNOT_COLS].iloc[1].isna().all()
+
+    @pytest.mark.parametrize("params_name", ["_NO_FORMAT_PARAMS", "_WITH_FORMAT_PARAMS"])
+    def test_absent_without_annotator_header(self, params_name):
+        rows = ["chr1\t1000\tsv1\tN\t<DEL>\t50\tPASS\tSVTYPE=DEL\tGT\t0/1\n"]
+        df = self._parse(_write_vcf(rows, with_format=True), getattr(self, params_name))
+        assert not any(c.startswith("ANNOT_") for c in df.columns)
+
+    def test_partial_header_not_detected(self):
+        rows = ["chr1\t1000\tsv1\tN\t<DEL>\t50\tPASS\tSVTYPE=DEL\tGT:DHFC\t0/1:0.5\n"]
+        path = _write_annotated_vcf(rows, info_header="")
+        df = self._parse(path, self._NO_FORMAT_PARAMS)
+        assert not any(c.startswith("ANNOT_") for c in df.columns)
+
+    def test_disabled_by_empty_annotator_cols(self):
+        params = self._NO_FORMAT_PARAMS | {"annotator_cols": {}}
+        df = self._parse(_write_annotated_vcf(_DUPHOLD_ROWS), params)
+        assert not any(c.startswith("ANNOT_") for c in df.columns)
+
+    def test_sites_only_vcf_skips_format_annotator(self):
+        rows = ["chr1\t1000\tsv1\tN\t<DEL>\t50\tPASS\tSVTYPE=DEL;GCF=0.42\n"]
+        path = _write_annotated_vcf(rows, with_sample=False)
+        df = self._parse(path, self._NO_FORMAT_PARAMS)
+        assert not any(c.startswith("ANNOT_") for c in df.columns)

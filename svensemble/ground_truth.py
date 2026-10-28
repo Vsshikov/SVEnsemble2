@@ -11,7 +11,7 @@ call from a workflow.
 Ground-truth-family-specific processing (CI assignment, EVENT population,
 event-to-BND conversion, BND-to-BP collapse) is dispatched via
 `callset_specific.ground_truth_recipes`. The recipe key is
-`callset_param_dict[ground_truth_name]['source']`, so every variant of a
+`CALLSET_PARAM_DICT[ground_truth_name]['source']`, so every variant of a
 family (e.g. `gnomad`, `gnomad_pass`, `gnomad_filtered`) shares the same
 recipe and per-variant differences (CIPOS dictionaries, filter defaults,
 input filenames) live only in the params entry.
@@ -61,12 +61,12 @@ def preprocess_ground_truth(
         vcf_path: Full path to the input ground-truth VCF.
         output_path: Full path to the output bps.csv (parent dir will be
             created if missing).
-        ground_truth_name: Key into `_caller_params.callset_param_dict` for
+        ground_truth_name: Key into `_caller_params.CALLSET_PARAM_DICT` for
             parsing parameters and into
             `callset_specific.ground_truth_recipes` for the preprocessing
             recipe. Both registries must contain the name.
         filters: VCF FILTER values to retain. When None (the default), falls
-            back to `callset_param_dict[ground_truth_name]['filter_defaults']
+            back to `CALLSET_PARAM_DICT[ground_truth_name]['filter_defaults']
             ['filters']` if set, otherwise no FILTER filter is applied
             (all records kept). This is how e.g. `gnomad_pass` and `gnomad`
             differ in behavior from the same input VCF: `gnomad_pass` sets
@@ -104,7 +104,7 @@ def preprocess_ground_truth(
         FileNotFoundError: If `vcf_path` does not exist.
         KeyError: If `ground_truth_name` is not registered in
             `callset_specific.ground_truth_recipes` or
-            `_caller_params.callset_param_dict`.
+            `_caller_params.CALLSET_PARAM_DICT`.
     """
     vcf_path = Path(vcf_path)
     output_path = Path(output_path)
@@ -119,18 +119,18 @@ def preprocess_ground_truth(
             f'Ground-truth VCF not found at {vcf_path}'
         )
 
-    if ground_truth_name not in _caller_params.callset_param_dict:
+    if ground_truth_name not in _caller_params.CALLSET_PARAM_DICT:
         raise KeyError(
             f'No callset_params registered for ground truth {ground_truth_name!r}. '
-            f'Add an entry to _caller_params.callset_param_dict.'
+            f'Add an entry to _caller_params.CALLSET_PARAM_DICT.'
         )
-    gt_params = _caller_params.callset_param_dict[ground_truth_name]
+    gt_params = _caller_params.CALLSET_PARAM_DICT[ground_truth_name]
 
     recipe_key = gt_params.get('source', ground_truth_name)
     if recipe_key not in callset_specific.ground_truth_recipes:
         raise KeyError(
             f'No processing recipe registered for ground-truth family {recipe_key!r} '
-            f'(resolved from callset_param_dict[{ground_truth_name!r}][\"source\"]). '
+            f'(resolved from CALLSET_PARAM_DICT[{ground_truth_name!r}][\"source\"]). '
             f'Add an entry to callset_specific.ground_truth_recipes. '
             f'Available: {list(callset_specific.ground_truth_recipes)}'
         )

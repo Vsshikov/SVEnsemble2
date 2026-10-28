@@ -160,7 +160,7 @@ def matchedbps_to_bps(
 
         # Using callset priorty list from caller_params, assign ALT_bnd1 and ALT_bnd2
         merged_coords_matched_bps.loc[:, f"ALT_bnd{bnd}"] = np.nan
-        for callset_name in caller_params.callset_alt_priority:
+        for callset_name in caller_params.CALLSET_ALT_PRIORITY:
             # Skip if callset not in the data
             if callset_name not in callsets:
                 continue

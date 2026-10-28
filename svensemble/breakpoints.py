@@ -22,9 +22,29 @@ def _get_annotated_svtypes(bp_df: pd.DataFrame, caller_params: dict|None = None)
 
     return annotate_svtypes(bp_df_, caller_params['source'])
 
+def _get_annotator_col(bp_df: pd.DataFrame, col_name: str) -> pd.Series:
+    """
+    Get an annotator column (ANNOT_<col_name>, see vcfparse) for the breakpoint dataframe.
+
+    bnd_to_bp splits the column into _bnd1/_bnd2 when the two breakends of any
+    breakpoint disagree; bnd1 is then used, falling back to bnd2. Returns an
+    all-NaN column when the callset's VCF was not annotated.
+    """
+    col = f'ANNOT_{col_name}'
+    if col in bp_df.columns:
+        return bp_df[col]
+    if f'{col}_bnd1' in bp_df.columns:
+        return bp_df[f'{col}_bnd1'].fillna(bp_df[f'{col}_bnd2'])
+    return pd.Series(np.nan, index=bp_df.index)
+
 
 _custom_col_dispatch = {
-    'SVTYPE': _get_annotated_svtypes
+    'SVTYPE': _get_annotated_svtypes,
+    # duphold
+    'DHFC': lambda bp_df, caller_params: _get_annotator_col(bp_df, 'DHFC'),
+    'DHBFC': lambda bp_df, caller_params: _get_annotator_col(bp_df, 'DHBFC'),
+    'DHFFC': lambda bp_df, caller_params: _get_annotator_col(bp_df, 'DHFFC'),
+    'GCF': lambda bp_df, caller_params: _get_annotator_col(bp_df, 'GCF'),
 }
 
 def common_bps_preprocess(bp_df, caller_params: dict|None = None) -> pd.DataFrame:
@@ -255,7 +275,7 @@ def get_insert_size(bp_df: pd.DataFrame, source: str | None = None) -> pd.Series
 
     for source in bp_df_['source'].unique():
         insert_sizes.loc[bp_df_['source'] == source] = (
-            insert_source_dispatch[caller_params.callset_param_dict[source]['svlen_source']](
+            insert_source_dispatch[caller_params.CALLSET_PARAM_DICT[source]['svlen_source']](
                 bp_df_[bp_df_['source'] == source]
             )
         )
@@ -421,13 +441,13 @@ def _get_svlen_svtype_filter_mask(
         pd.Series: Mask of breakpoint DataFrame for given SVLEN and SVTYPE ranges.
     """
     if svlens is None:
-        svlens = caller_params.default_sv_lens
+        svlens = caller_params.DEFAULT_SV_LENS
     elif not isinstance(svlens, tuple):
         raise ValueError('svlens argument must be a tuple of (min, max) lengths or None')
     svlen_min, svlen_max = svlens
 
     if svtypes is None:
-        svtypes = caller_params.default_sv_types
+        svtypes = caller_params.DEFAULT_SV_TYPES
     elif isinstance(svtypes, str):
         svtypes = [svtypes]
     elif isinstance(svtypes, list):

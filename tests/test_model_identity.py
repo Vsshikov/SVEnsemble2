@@ -78,9 +78,9 @@ class TestModelId:
 
     def test_preset_ids_cover_all_presets(self):
         ids = sv_config.list_preset_ids()
-        assert set(ids) == set(_model_configs.model_configs)
+        assert set(ids) == set(_model_configs.MODEL_CONFIGS)
         for name, mid in ids.items():
-            assert mid.startswith(_model_configs.model_configs[name]["base"] + "-")
+            assert mid.startswith(_model_configs.MODEL_CONFIGS[name]["base"] + "-")
 
 
 # ---------------------------------------------------------------------------
@@ -105,12 +105,12 @@ class TestResolveModelConfig:
         assert cfg["training_params"]["function"] == "unbiased_xgb"  # inherited
 
     def test_branch2_does_not_mutate_registry(self):
-        before = dict(_model_configs.model_configs["unbiased_xgb"]["training_params"])
+        before = dict(_model_configs.MODEL_CONFIGS["unbiased_xgb"]["training_params"])
         sv_config.resolve_model_config(config={
             "base": "unbiased_xgb",
             "training_params": {"model_kwargs": {"max_depth": 99}},
         })
-        assert _model_configs.model_configs["unbiased_xgb"]["training_params"] == before
+        assert _model_configs.MODEL_CONFIGS["unbiased_xgb"]["training_params"] == before
 
     def test_unknown_name_raises(self):
         with pytest.raises(ValueError, match="Unknown model preset"):

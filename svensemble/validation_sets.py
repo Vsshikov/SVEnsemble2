@@ -3,7 +3,7 @@ Validation (benchmarking truth) set preprocessing.
 
 Each preprocessor turns one published truth set into the breakpoints CSV that
 `benchmark-callset --val_bps` consumes. preprocess_validation_set is the entry
-point; its `name` is the set's callset_param_dict key and must match the
+point; its `name` is the set's CALLSET_PARAM_DICT key and must match the
 --val_name used when benchmarking. Parallels ground_truth.py.
 """
 
@@ -107,7 +107,7 @@ def preprocess_hg002_val_set(raw_path, output_path, force_rerun=False, long_val=
         # Parse the input VCF file using the predefined caller parameters
         hg002_val_vcf = pysam.VariantFile(raw_path)
         hg002_val_vcf_df, hg002_val_vcf_meta = vcfp.parse_vcf_to_df(
-            hg002_val_vcf, caller_params=caller_params.hg002_params
+            hg002_val_vcf, caller_params=caller_params.HG002_PARAMS
         )
 
         # Filter out entries with missing SVTYPE
@@ -260,7 +260,7 @@ def preprocess_hg00514_val_set(raw_path, output_path, force_rerun=False):
     if not out_path.exists() or force_rerun:
         hg00514_vcf = pysam.VariantFile(raw_path)
         hg00514_vcf_df, _ = vcfp.parse_vcf_to_df(
-            hg00514_vcf, caller_params=caller_params.hg00514_params
+            hg00514_vcf, caller_params=caller_params.HG00514_PARAMS
         )
 
         # Filter to HG00514 sample and canonical SV types only
@@ -319,7 +319,7 @@ def preprocess_hgsvc2_val_set(raw_path, output_path, force_rerun=False, sample_n
         hgsvc2_vcf = pysam.VariantFile(str(raw_path))
         hgsvc2_df, _ = vcfp.parse_vcf_to_df(
             hgsvc2_vcf,
-            caller_params=caller_params.hgsvc2_params,
+            caller_params=caller_params.HGSVC2_PARAMS,
             sample_name=sample_name
         )
 
@@ -365,10 +365,10 @@ def preprocess_huddleston_val_set(raw_path, output_path, force_rerun=False):
     out_path = Path(output_path)
 
     if not out_path.exists() or force_rerun:
-        huddleston_vcf_df, huddleston_vcf_df_meta  = vcfp.parse_vcf_to_df(pysam.VariantFile(raw_path), caller_params=caller_params.huddleston_params, sample_name='huddleston')
+        huddleston_vcf_df, huddleston_vcf_df_meta  = vcfp.parse_vcf_to_df(pysam.VariantFile(raw_path), caller_params=caller_params.HUDDLESTON_PARAMS, sample_name='huddleston')
         huddleston_vcf_df.loc[:, 'INFO_SVLEN'] = huddleston_vcf_df['INFO_SVLEN'].str[0]
-        # Replace all strings in INFO_SVTYPE using the mapping dictionary from caller_params.huddleston_params
-        mapping = caller_params.huddleston_params['svtype_mapping']
+        # Replace all strings in INFO_SVTYPE using the mapping dictionary from caller_params.HUDDLESTON_PARAMS
+        mapping = caller_params.HUDDLESTON_PARAMS['svtype_mapping']
         huddleston_vcf_df.loc[:, 'INFO_SVTYPE'] = huddleston_vcf_df['INFO_SVTYPE'].map(mapping).fillna(huddleston_vcf_df['INFO_SVTYPE'])
         huddleston_vcf_df.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r', 'INFO_CIEND_l', 'INFO_CIEND_r']] = (-10, 10, -10, 10)
         huddleston_vcf_df.loc[:, 'ID'] = 'huddleston' + huddleston_vcf_df.index.astype(str)

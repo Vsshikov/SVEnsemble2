@@ -483,56 +483,56 @@ class TestModelDispatch:
 class TestModelConfigs:
 
     @pytest.mark.parametrize("config_name", [
-        k for k in _model_configs.model_configs if "xgb" in k
+        k for k in _model_configs.MODEL_CONFIGS if "xgb" in k
     ])
     def test_xgb_config_has_fillna_none(self, config_name):
-        cfg = _model_configs.model_configs[config_name]
+        cfg = _model_configs.MODEL_CONFIGS[config_name]
         assert cfg["training_params"]["fillna"] is None
 
     @pytest.mark.parametrize("config_name", [
-        k for k in _model_configs.model_configs if "xgb" in k
+        k for k in _model_configs.MODEL_CONFIGS if "xgb" in k
     ])
     def test_xgb_config_has_xgb_function(self, config_name):
-        cfg = _model_configs.model_configs[config_name]
+        cfg = _model_configs.MODEL_CONFIGS[config_name]
         func_name = cfg["training_params"]["function"]
         assert func_name in models.model_dispatch
 
     @pytest.mark.parametrize("config_name", [
-        k for k in _model_configs.model_configs if "xgb" not in k
+        k for k in _model_configs.MODEL_CONFIGS if "xgb" not in k
     ])
     def test_rf_config_fillna_defaults_to_zero_or_none(self, config_name):
-        cfg = _model_configs.model_configs[config_name]
+        cfg = _model_configs.MODEL_CONFIGS[config_name]
         fillna = cfg["training_params"].get("fillna", 0)
         # RF variants either fill NaN with 0 or (nosvlen variants) leave NaN.
         assert fillna == 0 or fillna is None
 
     def test_all_configs_have_base_applied(self):
-        for name, cfg in _model_configs.model_configs.items():
+        for name, cfg in _model_configs.MODEL_CONFIGS.items():
             assert "base" in cfg, f"{name} missing base"
             assert cfg["base"] in _model_configs.BASE_MODELS, (
                 f"{name} base {cfg['base']!r} is not a canonical base preset"
             )
 
     def test_no_legacy_suffix_keys_remain(self):
-        for name, cfg in _model_configs.model_configs.items():
+        for name, cfg in _model_configs.MODEL_CONFIGS.items():
             for suffix_key in ("bps_suffix", "matched_bps_suffix",
                                "model_pkl_suffix", "feature_matrix_suffix"):
                 assert suffix_key not in cfg, f"{name} still has {suffix_key}"
 
     def test_all_configs_have_concat_flag(self):
-        for name, cfg in _model_configs.model_configs.items():
+        for name, cfg in _model_configs.MODEL_CONFIGS.items():
             assert "concat" in cfg["training_params"], f"{name} missing training_params['concat']"
 
     def test_only_concat_models_declare_concat_true(self):
         concat_models = {
-            name for name, cfg in _model_configs.model_configs.items()
+            name for name, cfg in _model_configs.MODEL_CONFIGS.items()
             if cfg["training_params"]["concat"]
         }
         assert concat_models == {"unbiased_concat", "unbiased_xgb_concat"}
 
     def test_concat_models_use_pooling_functions(self):
         for name in ("unbiased_concat", "unbiased_xgb_concat"):
-            cfg = _model_configs.model_configs[name]
+            cfg = _model_configs.MODEL_CONFIGS[name]
             assert cfg["training_params"]["function"] == name
             assert "function_params" not in cfg["training_params"], (
                 f"{name} should no longer bake a fixed samples list into the config"

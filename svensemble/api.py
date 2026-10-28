@@ -74,7 +74,7 @@ def generate_config(
     ValueError here rather than at training time.
 
     Args:
-        base: Preset to start from (a key of _model_configs.model_configs).
+        base: Preset to start from (a key of _model_configs.MODEL_CONFIGS).
         training_params: Overrides for the base preset's training_params.
         name, description: Human labels; they do not affect the model_id.
         output: If given, write the config here (JSON, or YAML by suffix),

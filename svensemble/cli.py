@@ -368,7 +368,7 @@ def _cmd_shap(args):
 # argument keys two registries:
 #   * callset_specific.ground_truth_recipes  -- preprocessing / event-to-bnd
 #                                               step functions for the source
-#   * _caller_params.callset_param_dict      -- VCF parsing parameters
+#   * _caller_params.CALLSET_PARAM_DICT      -- VCF parsing parameters
 # Adding a new ground truth is a matter of registering an entry in each of
 # these; no new subcommand is required.
 #
@@ -381,7 +381,7 @@ def _register_ground_truth(subparsers):
     p.add_argument("--vcf_path", type=Path, required=True, help="Ground truth VCF file.")
     p.add_argument("--output_path", type=Path, required=True, help="Output bps.csv path.")
     p.add_argument("--ground_truth_name", type=str, default="gnomad", help="Ground truth dataset name (must exist in callset_specific.ground_truth_recipes and _caller_params.callset_param_dict).")
-    p.add_argument("--filters", type=str, default=None, help="Comma-separated FILTER values to retain. When unset, resolved from callset_param_dict[ground_truth_name]['filter_defaults']['filters']; if that is unset too, no FILTER filter is applied.")
+    p.add_argument("--filters", type=str, default=None, help="Comma-separated FILTER values to retain. When unset, resolved from CALLSET_PARAM_DICT[ground_truth_name]['filter_defaults']['filters']; if that is unset too, no FILTER filter is applied.")
     p.add_argument("--evidence", type=str, default=None, help="Comma-separated EVIDENCE types to require (e.g. SR,PE). When unset, resolved from filter_defaults['evidence']; else no filter.")
     p.add_argument("--svtypes", type=str, default=None, help="Comma-separated SV types to retain. When unset, resolved from filter_defaults['svtypes'], falling back to the recipe's supported_svtypes.")
     p.add_argument("--algorithms", type=str, default=None, help="Comma-separated ALGORITHMS to require (e.g. manta,depth). When unset, resolved from filter_defaults['algorithms']; else no filter.")

@@ -26,7 +26,7 @@ def gridss_preprocess(
         KeyError: If INFO_CIPOS column is missing from input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.gridss_params
+        caller_params = _caller_params.GRIDSS_PARAMS
 
     if verbose:
         print("Preprocessing GRIDSS callset...")
@@ -89,7 +89,7 @@ def gnomad_split_evidence(
         DataFrame with boolean columns for each evidence type indicating presence
     """
     if caller_params is None:
-        caller_params = _caller_params.gnomad_params
+        caller_params = _caller_params.GNOMAD_PARAMS
     if evidence_types is None:
         evidence_types = caller_params['method_cipos'].keys()
 
@@ -114,7 +114,7 @@ def gnomad_get_best_evidence(
         Series containing the highest priority evidence type for each variant
     """
     if caller_params is None:
-        caller_params = _caller_params.gnomad_params
+        caller_params = _caller_params.GNOMAD_PARAMS
     if evidence_types is None:
         evidence_types = caller_params['method_cipos'].keys()
 
@@ -134,13 +134,13 @@ def gnomad_get_cipos(
         evidence_series: Series containing evidence strings
         evidence_types: List of evidence types in priority order. Defaults to ['SR','PE','RD']
         cipos_dict: Dictionary mapping evidence types to (left,right) CI sizes.
-                   Defaults to values from caller_params.gnomad_method_cipos
+                   Defaults to values from _caller_params.GNOMAD_PARAMS['method_cipos']
 
     Returns:
         DataFrame with INFO_CIPOS_l and INFO_CIPOS_r columns containing CI sizes
     """
     if caller_params is None:
-        caller_params = _caller_params.gnomad_params
+        caller_params = _caller_params.GNOMAD_PARAMS
     if evidence_types is None:
         evidence_types = caller_params['method_cipos'].keys()
     if cipos_dict is None:
@@ -191,7 +191,7 @@ def gnomad_preprocess(
     if verbose:
         print("Preprocessing gnomAD callset...")
     if caller_params is None:
-        caller_params = _caller_params.gnomad_params
+        caller_params = _caller_params.GNOMAD_PARAMS
 
     svtypes_supported = caller_params['supported_svtypes']
     if verbose:
@@ -259,7 +259,7 @@ def gnomad_event_to_bnd(
         DataFrame with events converted to breakend format
     """
     if caller_params is None:
-        caller_params = _caller_params.gnomad_params
+        caller_params = _caller_params.GNOMAD_PARAMS
 
     return evts.event_to_bnd(gnomad_callset.copy())
 
@@ -284,7 +284,7 @@ def manta_preprocess_common(manta_df: pd.DataFrame, caller_params: dict|None = N
         Preprocessed Manta DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.manta_candidate_params
+        caller_params = _caller_params.MANTA_CANDIDATE_PARAMS
 
     manta_df_ = manta_df.copy()
 
@@ -503,13 +503,13 @@ def sniffles_preprocess_common(
 
     Args:
         sniffles_df: DataFrame of Sniffles2 variant calls
-        caller_params: Caller-specific parameters (defaults to sniffles_params)
+        caller_params: Caller-specific parameters (defaults to SNIFFLES_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.sniffles_params
+        caller_params = _caller_params.SNIFFLES_PARAMS
 
     sniffles_df_ = sniffles_df.copy()
 
@@ -556,13 +556,13 @@ def sniffles_preprocess_evts_only(
 
     Args:
         sniffles_df: DataFrame of Sniffles2 non-BND variant calls
-        caller_params: Caller-specific parameters (defaults to sniffles_params)
+        caller_params: Caller-specific parameters (defaults to SNIFFLES_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.sniffles_params
+        caller_params = _caller_params.SNIFFLES_PARAMS
 
     sniffles_df_ = sniffles_df.copy()
 
@@ -587,13 +587,13 @@ def sniffles_preprocess_bnds_only(
 
     Args:
         sniffles_df: DataFrame of Sniffles2 BND variant calls
-        caller_params: Caller-specific parameters (defaults to sniffles_params)
+        caller_params: Caller-specific parameters (defaults to SNIFFLES_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.sniffles_params
+        caller_params = _caller_params.SNIFFLES_PARAMS
 
     return sniffles_preprocess_common(sniffles_df, caller_params)
 
@@ -611,13 +611,13 @@ def survivor_preprocess_evts(
 
     Args:
         survivor_df: DataFrame of SURVIVOR variant calls
-        caller_params: Caller-specific parameters (defaults to survivor_params)
+        caller_params: Caller-specific parameters (defaults to SURVIVOR_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.survivor_params
+        caller_params = _caller_params.SURVIVOR_PARAMS
 
     df = survivor_df.copy()
     df.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(df['INFO_CIPOS'])
@@ -644,13 +644,13 @@ def severus_preprocess_common(
 
     Args:
         severus_df: DataFrame of Severus variant calls
-        caller_params: Caller-specific parameters (defaults to severus_params)
+        caller_params: Caller-specific parameters (defaults to SEVERUS_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.severus_params
+        caller_params = _caller_params.SEVERUS_PARAMS
 
     df = severus_df.copy()
 
@@ -696,13 +696,13 @@ def severus_preprocess_evts_only(
 
     Args:
         severus_df: DataFrame of Severus non-BND variant calls
-        caller_params: Caller-specific parameters (defaults to severus_params)
+        caller_params: Caller-specific parameters (defaults to SEVERUS_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.severus_params
+        caller_params = _caller_params.SEVERUS_PARAMS
 
     df = severus_df.copy()
 
@@ -727,13 +727,13 @@ def severus_preprocess_bnds_only(
 
     Args:
         severus_df: DataFrame of Severus BND variant calls
-        caller_params: Caller-specific parameters (defaults to severus_params)
+        caller_params: Caller-specific parameters (defaults to SEVERUS_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.severus_params
+        caller_params = _caller_params.SEVERUS_PARAMS
 
     return severus_preprocess_common(severus_df, caller_params)
 
@@ -754,13 +754,13 @@ def cutesv_preprocess_common(
 
     Args:
         cutesv_df: DataFrame of CuteSV variant calls
-        caller_params: Caller-specific parameters (defaults to cutesv_params)
+        caller_params: Caller-specific parameters (defaults to CUTESV_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.cutesv_params
+        caller_params = _caller_params.CUTESV_PARAMS
 
     df = cutesv_df.copy()
 
@@ -799,13 +799,13 @@ def cutesv_preprocess_evts_only(
 
     Args:
         cutesv_df: DataFrame of CuteSV non-BND variant calls
-        caller_params: Caller-specific parameters (defaults to cutesv_params)
+        caller_params: Caller-specific parameters (defaults to CUTESV_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.cutesv_params
+        caller_params = _caller_params.CUTESV_PARAMS
 
     df = cutesv_df.copy()
 
@@ -877,13 +877,13 @@ def cutesv_preprocess_bnds_only(
 
     Args:
         cutesv_df: DataFrame of CuteSV BND variant calls
-        caller_params: Caller-specific parameters (defaults to cutesv_params)
+        caller_params: Caller-specific parameters (defaults to CUTESV_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.cutesv_params
+        caller_params = _caller_params.CUTESV_PARAMS
 
     df = cutesv_df.copy()
 
@@ -918,13 +918,13 @@ def svaba_preprocess(
 
     Args:
         svaba_df: DataFrame of SvABA BND variant calls
-        caller_params: Caller-specific parameters (defaults to svaba_params)
+        caller_params: Caller-specific parameters (defaults to SVABA_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.svaba_params
+        caller_params = _caller_params.SVABA_PARAMS
 
     df = svaba_df.copy()
 
@@ -1039,13 +1039,13 @@ def smoove_preprocess_common(
 
     Args:
         smoove_df: DataFrame of smoove variant calls
-        caller_params: Caller-specific parameters (defaults to smoove_params)
+        caller_params: Caller-specific parameters (defaults to SMOOVE_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.smoove_params
+        caller_params = _caller_params.SMOOVE_PARAMS
 
     df = smoove_df.copy()
 
@@ -1079,13 +1079,13 @@ def smoove_preprocess_evts_only(
 
     Args:
         smoove_df: DataFrame of smoove non-BND variant calls
-        caller_params: Caller-specific parameters (defaults to smoove_params)
+        caller_params: Caller-specific parameters (defaults to SMOOVE_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.smoove_params
+        caller_params = _caller_params.SMOOVE_PARAMS
 
     df = smoove_df.copy()
 
@@ -1113,13 +1113,13 @@ def smoove_preprocess_bnds_only(
 
     Args:
         smoove_df: DataFrame of smoove BND variant calls
-        caller_params: Caller-specific parameters (defaults to smoove_params)
+        caller_params: Caller-specific parameters (defaults to SMOOVE_PARAMS)
 
     Returns:
         Preprocessed copy of the input DataFrame
     """
     if caller_params is None:
-        caller_params = _caller_params.smoove_params
+        caller_params = _caller_params.SMOOVE_PARAMS
 
     df = smoove_df.copy()
 
@@ -1291,14 +1291,14 @@ def gnomad_process(
 # ground_truth_recipes: registry of processing recipes per ground-truth family.
 #
 # Sibling of parse_recipes. Keyed by *family* name (matching the `source`
-# field of the corresponding entries in _caller_params.callset_param_dict), so
+# field of the corresponding entries in _caller_params.CALLSET_PARAM_DICT), so
 # a single recipe serves every variant of a family (e.g. gnomad, gnomad_pass,
 # gnomad_filtered all have source='gnomad' and share the 'gnomad' recipe).
 #
 # Adding a new ground-truth family: register a recipe here plus one or more
-# callset_param_dict entries in _caller_params.py whose `source` matches this
+# CALLSET_PARAM_DICT entries in _caller_params.py whose `source` matches this
 # key. Per-variant differences (CI dictionaries, filter defaults, etc.) live
-# in the callset_param_dict entries, not in the recipe.
+# in the CALLSET_PARAM_DICT entries, not in the recipe.
 #
 # Keys per entry:
 #   process - callable(df, caller_params, svtypes_retain='simple', verbose=False)

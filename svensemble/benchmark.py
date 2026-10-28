@@ -26,8 +26,8 @@ def get_truth_count(
 
     Args:
         val_set_path: Path to the validation breakpoints CSV.
-        val_set_name: Validation set name (callset_param_dict key, used for annotation).
-        svtypes: List of SV types to include. Defaults to caller_params.default_sv_types.
+        val_set_name: Validation set name (CALLSET_PARAM_DICT key, used for annotation).
+        svtypes: List of SV types to include. Defaults to caller_params.DEFAULT_SV_TYPES.
         svlens: (min, max) SVLEN range. Defaults to (50, inf).
 
     Returns:
@@ -43,11 +43,11 @@ def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_mat
     Given dataframes of a callset and a validation set, match them and return a dataframe with the following columns:
     INFO_EVENT, {qual_metric}, is_in_val, INFO_INFERRED_SVTYPE, {FILTER_PASS}
 
-    qual_metric column is dependent on the callset and is read from callset_param_dict[callset_name]
+    qual_metric column is dependent on the callset and is read from CALLSET_PARAM_DICT[callset_name]
     FILTER_PASS column is returned only if it is present in the callset
-    val_name is the validation set's callset_param_dict key
+    val_name is the validation set's CALLSET_PARAM_DICT key
     """
-    qual_metric = caller_params.callset_param_dict[callset_name]['qual_metric']
+    qual_metric = caller_params.CALLSET_PARAM_DICT[callset_name]['qual_metric']
     callset_bps_ = callset_bps.copy()
     val_set_ = val_set.copy()
 
@@ -67,13 +67,13 @@ def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_mat
     if val_key == callset_name:
         i = 0
         val_key = f'{val_key}_{i}'
-        if val_key not in caller_params.callset_param_dict:
-            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[val_name]
+        if val_key not in caller_params.CALLSET_PARAM_DICT:
+            caller_params.CALLSET_PARAM_DICT[val_key] = caller_params.CALLSET_PARAM_DICT[val_name]
         else:
-            while val_key in caller_params.callset_param_dict:
+            while val_key in caller_params.CALLSET_PARAM_DICT:
                 i += 1
                 val_key = val_key.replace(f'_{i-1}', f'_{i}')
-            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[val_name]
+            caller_params.CALLSET_PARAM_DICT[val_key] = caller_params.CALLSET_PARAM_DICT[val_name]
             if i > 1000000:
                 raise ValueError(f'Too many temporary validation set names generated for {val_key}')
 
@@ -127,13 +127,13 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, val_name, trainin
     if val_key == 'svensemble2':
         i = 0
         val_key = f'{val_key}_val_{i}'
-        if val_key not in caller_params.callset_param_dict:
-            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[val_name]
+        if val_key not in caller_params.CALLSET_PARAM_DICT:
+            caller_params.CALLSET_PARAM_DICT[val_key] = caller_params.CALLSET_PARAM_DICT[val_name]
         else:
-            while val_key in caller_params.callset_param_dict:
+            while val_key in caller_params.CALLSET_PARAM_DICT:
                 i += 1
                 val_key = val_key.replace(f'_val_{i-1}', f'_val_{i}')
-            caller_params.callset_param_dict[val_key] = caller_params.callset_param_dict[val_name]
+            caller_params.CALLSET_PARAM_DICT[val_key] = caller_params.CALLSET_PARAM_DICT[val_name]
             if i > 1000000:
                 raise ValueError(f'Too many temporary validation set names generated for {val_key}')
 
@@ -177,7 +177,7 @@ def run_single_callset_benchmark(
     prediction sets (validated via validate_svensemble2_predictions); all
     other names are basic caller callsets (validated via
     validate_basic_callset, with qual_metric resolved from
-    callset_param_dict[callset_name]). This unifies individual callers
+    CALLSET_PARAM_DICT[callset_name]). This unifies individual callers
     (gridss, delly, survivor_*, ...) and ensemble predictions behind one entry
     point.
 
@@ -189,7 +189,7 @@ def run_single_callset_benchmark(
         callset_bps_path (Path): Path to the callset breakpoints CSV.
         callset_name (str): Callset identifier. Names prefixed svensemble2
             are treated as ensemble prediction sets; all others are basic
-            caller callsets resolved against callset_param_dict.
+            caller callsets resolved against CALLSET_PARAM_DICT.
         val_bps_path (Path): Path to the validation set breakpoints CSV.
         val_name (str): Name of the validation set.
         output_dir (Path, optional): Directory to write
