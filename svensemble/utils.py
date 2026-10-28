@@ -5,7 +5,6 @@ import os
 import pandas as pd
 from pathlib import Path
 from collections import abc
-import itertools
 
 def get_base_dir() -> Path:
     base = os.environ.get("SVENSEMBLE_BASE_DIR")
@@ -89,18 +88,3 @@ def split_ciend(ciend_col: pd.Series, default_ciend: tuple[int, int] = (0, 0)) -
     ciend_df.loc[:, ciend_col.name.replace('INFO_CIEND', 'INFO_CIEND_l')] = ciend_col.str[0].fillna(default_ciend[0]).astype(int)
     ciend_df.loc[:, ciend_col.name.replace('INFO_CIEND', 'INFO_CIEND_r')] = ciend_col.str[1].fillna(default_ciend[1]).astype(int)
     return ciend_df.drop(columns=[ciend_col.name])
-
-
-def generate_callset_combinations(callset_names: list[str]) -> list[str]:
-    """
-    Generate all possible combinations - from single to pairs to triplets to ... to all of the callsets.
-    Callsets are sorted alphabetically to ensure consistent ordering.
-    Duplicate combinations are removed.
-
-    Args:
-        callset_names: List of callset names.
-
-    Returns:
-        List of all possible combinations of callsets.
-    """
-    return sorted(list(set(['+'.join(sorted(comb)) for r in range(1, len(callset_names) + 1) for comb in itertools.combinations(callset_names, r)])))

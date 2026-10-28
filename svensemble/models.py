@@ -715,7 +715,7 @@ def train_model(
         training_set_name: Name of the training set.
         verbose: If True, print verbose output.
         matched_bps_sources: Mapping of sample_name -> matched_bps DataFrame or
-            path, for pooled (concat/cross) models (see model_configs
+            path, for pooled (concat/cross) models (see MODEL_CONFIGS
             entries with training_params['concat'] = True). Required for
             those models; ignored otherwise.
     Returns:

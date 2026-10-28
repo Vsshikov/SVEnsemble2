@@ -1,21 +1,18 @@
 import copy
 import hashlib
+import math
 from pathlib import Path
 from typing import TypedDict, NotRequired
 
-from . import config_io
-from ._model_configs import model_configs, TrainingParams, ModelConfig
+from .io import canonical_json
+from ._model_configs import MODEL_CONFIGS, DEFAULT_MODEL_NAME, TrainingParams, ModelConfig
 from .utils import update
-from ._caller_params import training_set_presets as TRAINING_SET_PRESETS
-from ._caller_params import default_training_set as DEFAULT_TRAINING_SET
-from ._caller_params import default_reference_set as DEFAULT_REFERENCE_SET
-from ._caller_params import callset_param_dict as CALLSET_PARAM_DICT
-from ._sample_params import default_model_name as DEFAULT_MODEL_NAME
+from ._caller_params import TRAINING_SET_PRESETS, CALLSET_PARAM_DICT
 # ---------------------------------------------------------------------------
 # Model config resolution + reconstructible identity (model_id)
 #
 # _model_configs.py holds pure preset data; the two-branch resolver, the hasher
-# and model_id live here (they need the deep-merge `update` and config_io
+# and model_id live here (they need the deep-merge `update` and io
 # canonicalisation, and _model_configs must never import from utils).
 # ---------------------------------------------------------------------------
 
@@ -49,7 +46,7 @@ class CallsetParams(TypedDict, total=False):
     svlen_source: str
     bnd2_pos: str
     svlens: tuple[int | float, int | float]
-    override_bps_path: bool
+    annotator_cols: dict[str, dict[str, tuple[str, ...]]]
     source: str
     # Ground-truth-specific optional keys
     filter_defaults: dict
@@ -87,12 +84,30 @@ class WorkflowConfig(TypedDict):
 def _tag_constructor(tag_dict):
     """
     Generates a reproducible tag string using an arbitrary dict of format {'tag_name': 'tag_value'}.
-    """
-    tag_dict = {k: v for k, v in tag_dict.items() if v is not None}
-    tag_dict_lists_sorted_tostr = {k: '+'.join(sorted(v)) if isinstance(v, list) else v for k, v in tag_dict.items()}
-    return '.'.join([f"{k}-{v}" for k, v in sorted(tag_dict_lists_sorted_tostr.items())])
 
-tag_dict_preset_benchmark = {
+    Matches benchmarkFilterTag in nf-core-svensemble (workflows/svensemble.nf), which
+    names the benchmark filter directories, e.g. 'svlenmin-50.svtypes-DEL+INS'.
+    None, +-inf and empty values are dropped; lists and '+'-joined strings are
+    sorted and '+'-joined; integral floats print as ints. Returns 'unfiltered'
+    when no tokens remain.
+    """
+    tokens = []
+    for k, v in tag_dict.items():
+        if isinstance(v, str) and '+' in v:
+            v = v.split('+')
+        if isinstance(v, (list, tuple, set, frozenset)):
+            v = '+'.join(sorted(v))
+        if isinstance(v, float):
+            if math.isinf(v):
+                continue
+            if v.is_integer():
+                v = int(v)
+        if v is None or v == '':
+            continue
+        tokens.append(f"{k}-{v}")
+    return '.'.join(sorted(tokens)) or 'unfiltered'
+
+TAG_DICT_PRESET_BENCHMARK = {
     'svlenmin': None,
     'svlenmax': None,
     'svtypes': None,
@@ -103,7 +118,7 @@ def resolve_model_config(name: str | None = None, config: dict | None = None) ->
     """Resolve a full model config (two-branch).
 
     Branch 1 -- ``resolve_model_config(name="unbiased_xgb")``: return the named
-    preset from ``model_configs`` (enriched, deep-copied).
+    preset from ``MODEL_CONFIGS`` (enriched, deep-copied).
 
     Branch 2 -- ``resolve_model_config(config={"base": "unbiased_xgb", ...})``:
     take the ``base`` preset and deep-merge the remaining keys of ``config``
@@ -118,22 +133,22 @@ def resolve_model_config(name: str | None = None, config: dict | None = None) ->
         base = config.get("base")
         if not base:
             raise ValueError("Model config override must specify a 'base' preset.")
-        if base not in model_configs:
+        if base not in MODEL_CONFIGS:
             raise ValueError(
-                f"Unknown base preset '{base}'. Known presets: {sorted(model_configs)}"
+                f"Unknown base preset '{base}'. Known presets: {sorted(MODEL_CONFIGS)}"
             )
-        resolved = copy.deepcopy(model_configs[base])
+        resolved = copy.deepcopy(MODEL_CONFIGS[base])
         overrides = {k: v for k, v in config.items() if k != "base"}
         resolved = update(resolved, copy.deepcopy(overrides))
         resolved["base"] = base
         resolved.setdefault("name", base)
         return _validate_model_config(resolved)
     if name is not None:
-        if name not in model_configs:
+        if name not in MODEL_CONFIGS:
             raise ValueError(
-                f"Unknown model preset '{name}'. Known presets: {sorted(model_configs)}"
+                f"Unknown model preset '{name}'. Known presets: {sorted(MODEL_CONFIGS)}"
             )
-        return _validate_model_config(copy.deepcopy(model_configs[name]))
+        return _validate_model_config(copy.deepcopy(MODEL_CONFIGS[name]))
     raise ValueError("resolve_model_config requires either name= or config=.")
 
 
@@ -160,7 +175,7 @@ def model_config_hash(resolved_cfg: dict, length: int = 8) -> str:
     workflow_config['model'] sub-dict. Canonicalised for cross-process stability.
     """
     payload = resolved_cfg.get("training_params", {})
-    canonical = config_io.canonical_json(payload)
+    canonical = canonical_json(payload)
     digest = hashlib.blake2b(
         f"{_MODEL_ID_HASH_VERSION}:{canonical}".encode(), digest_size=16
     ).hexdigest()
@@ -174,75 +189,8 @@ def model_id(resolved_cfg: dict) -> str:
 
 def list_preset_ids() -> dict:
     """Map every preset name -> its model_id. Display convenience for humans."""
-    return {name: model_id(resolve_model_config(name=name)) for name in model_configs}
+    return {name: model_id(resolve_model_config(name=name)) for name in MODEL_CONFIGS}
 
-
-def model_result_dir(
-    results_dir,
-    sample_name: str,
-    model,
-    training_set,
-    result_type: str = 'classify',
-    bench_set_name: str | None = None,
-    ground_truth_name: str | None = None,
-    svtypes: list[str] | None = None,
-    svlenmin: int | None = None,
-    svlenmax: int | None = None,
-) -> Path:
-    """Reconstruct a model's results directory from its config (fetch-by-config).
-
-    ``model`` may be a preset name (str), a freeform override dict (with
-    ``base``), or an already-resolved config. Mirrors the data-tree layout built
-    by :func:`create_config_dict`, so a config + sample + training_set is enough
-    to locate results in a Jupyter session without knowing the hash up front.
-    """
-    if result_type not in ['classify', 'benchmark']:
-        raise ValueError(f"Invalid result_type: {result_type}. Must be 'classify' or 'benchmark'.")
-
-    results_dir = Path(results_dir)
-    if isinstance(model, str):
-        resolved = resolve_model_config(name=model)
-    elif isinstance(model, dict) and 'base' in model and 'training_params' in model:
-        resolved = model
-    else:
-        resolved = resolve_model_config(config=model)
-    mid = model_id(resolved)
-
-    if isinstance(training_set, (list, tuple)):
-        ts_name = '+'.join(training_set)
-    elif training_set in TRAINING_SET_PRESETS:
-        ts_name = training_set
-    elif training_set in (None, 'default'):
-        ts_name = DEFAULT_TRAINING_SET
-    else:
-        ts_name = training_set
-
-    gt_suffix = ''
-    if ground_truth_name and ground_truth_name != DEFAULT_REFERENCE_SET:
-        gt_suffix = f'.gt_{ground_truth_name}'
-
-    bench_path = ''
-    if result_type == 'benchmark':
-        bench_path = f'/{bench_set_name}'
-
-    tag = _tag_constructor(
-        {
-            'svtypes': svtypes,
-            'svlenmin': svlenmin,
-            'svlenmax': svlenmax,
-        }
-    )
-    tagged_path = ''
-    if tag:
-        tagged_path = f'/{tag}'
-    else:
-        raise ValueError("Empty tagged path not yet supported.")
-
-
-    return results_dir / Path(
-        f'svensemble/{result_type}/{sample_name}{bench_path}{tagged_path}/'
-        f'{mid}.{ts_name}{gt_suffix}'
-    )
 
 def build_ground_truth_config(
     name: str,
@@ -255,7 +203,7 @@ def build_ground_truth_config(
     into workflow configs under the 'ground_truth' key for match/train stages.
 
     Args:
-        name: Ground truth dataset name (must exist in callset_param_dict,
+        name: Ground truth dataset name (must exist in CALLSET_PARAM_DICT,
             e.g. 'gnomad', 'gnomad_pass').
         vcf_path: Optional path to the original ground truth VCF.
         bps_path: Optional path to the pre-processed ground truth bps CSV.
@@ -264,7 +212,7 @@ def build_ground_truth_config(
         Dict with 'name', 'params', and optionally 'vcf_path'/'bps_path'.
 
     Raises:
-        ValueError: If name is not found in callset_param_dict.
+        ValueError: If name is not found in CALLSET_PARAM_DICT.
     """
     params = CALLSET_PARAM_DICT.get(name)
     if params is None:
@@ -299,15 +247,15 @@ def build_workflow_config(
     or the user's cwd for standalone CLI invocations).
 
     training_set is treated as a free-form name: if it matches a preset in
-    training_set_presets, the preset's caller list is used; otherwise the
+    TRAINING_SET_PRESETS, the preset's caller list is used; otherwise the
     provided `callers` list is stored under that name.
 
     Args:
         sample_name: Sample identifier (str). Stored under 'sample_name'.
         callers: List of callset names present in this sample's matched_bps.
-        model_name: Key in model_configs; controls custom_cols_pred injection.
+        model_name: Key in MODEL_CONFIGS; controls custom_cols_pred injection.
         training_set: Name to key the training_sets dict; matched against
-            training_set_presets before falling back to `callers`.
+            TRAINING_SET_PRESETS before falling back to `callers`.
         ref_path: Optional reference FASTA, stored verbatim under 'ref_path'.
         model_config: Optional freeform model config dict override.
         ground_truth_name: Ground truth dataset name. When provided, a

@@ -1,6 +1,6 @@
 # Model config presets.
 #
-# `model_configs` is the full preset registry: the three canonical BASE presets
+# `MODEL_CONFIGS` is the full preset registry: the three canonical BASE presets
 # (see BASE_MODELS) plus retained legacy names kept for backwards compatibility.
 # Every entry carries a `base` naming the canonical base preset it derives from;
 # `base` is the human-readable prefix of the reconstructible model_id
@@ -16,6 +16,8 @@ from typing import TypedDict, NotRequired
 # The canonical base presets that new models are built on (base preset +
 # freeform overrides). See _config.resolve_model_config.
 BASE_MODELS = ('unbiased_rf', 'unbiased_xgb', 'consensus', 'unbiased_rf_topol', 'unbiased_xgb_topol')
+
+DEFAULT_MODEL_NAME = 'unbiased_rf'
 
 class TrainingParams(TypedDict, total=False):
     """Behavioural model parameters that determine model_id hash."""
@@ -35,7 +37,7 @@ class ModelConfig(TypedDict):
     training_params: TrainingParams
     description: NotRequired[str]
 
-model_configs: dict[str, ModelConfig] = {
+MODEL_CONFIGS: dict[str, ModelConfig] = {
     # ---------------------------------------------------------------------
     # Canonical base presets
     # ---------------------------------------------------------------------
@@ -215,6 +217,16 @@ model_configs: dict[str, ModelConfig] = {
         },
         'description': 'Unbiased XGBoost model trained on a pooled (concat/cross) training set from one or more samples, supplied via --train_samples/--train_matched_bps.'
     },
+    'unbiased_rf_duphold': {
+        'name': 'unbiased_rf_duphold',
+        'base': 'unbiased_rf',
+        'training_params': {
+            'function': 'unbiased',
+            'custom_cols': ['DHFC', 'DHBFC', 'DHFFC'],
+            'model_kwargs': {},
+        },
+        'description': 'Unbiased random forest model for SV call probability estimation.'
+    },
 }
 
 
@@ -233,5 +245,5 @@ def _enrich_model_config(model_config: ModelConfig) -> ModelConfig:
 
 
 # Fill defaults for all presets in place.
-for _name, _cfg in model_configs.items():
-    model_configs[_name] = _enrich_model_config(_cfg)
+for _name, _cfg in MODEL_CONFIGS.items():
+    MODEL_CONFIGS[_name] = _enrich_model_config(_cfg)

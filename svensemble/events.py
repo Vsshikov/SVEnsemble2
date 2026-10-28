@@ -286,11 +286,11 @@ def event_to_bnd(vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.DataFrame:
 def get_insert_seq_len_from_svlen(bp_df: pd.DataFrame):
     """
     Calculates insert sequence length from INFO_SVLEN column
-    Requires INFO_SVLEN and one of the svtype columns (see _caller_params.svtype_cols) to be present in the dataframe
+    Requires INFO_SVLEN and one of the svtype columns (see _caller_params.SVTYPE_COLS) to be present in the dataframe
 
     Insert seq len is nonzero only for INS and DUPs
     """
-    for svtype_col in caller_params.svtype_cols:
+    for svtype_col in caller_params.SVTYPE_COLS:
         if svtype_col not in bp_df.columns:
             continue
         if 'INFO_SVLEN' not in bp_df.columns:
@@ -299,5 +299,5 @@ def get_insert_seq_len_from_svlen(bp_df: pd.DataFrame):
             )
         insert_seq_len = np.where(bp_df[svtype_col].isin(['INS']), bp_df['INFO_SVLEN'], 0)
         return insert_seq_len
-    raise KeyError(f"None of the following columns were found in the dataframe: {caller_params.svtype_cols}, required for get_insert_seq_len_from_svlen")
+    raise KeyError(f"None of the following columns were found in the dataframe: {caller_params.SVTYPE_COLS}, required for get_insert_seq_len_from_svlen")
 

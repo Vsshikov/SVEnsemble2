@@ -78,9 +78,9 @@ class TestModelId:
 
     def test_preset_ids_cover_all_presets(self):
         ids = sv_config.list_preset_ids()
-        assert set(ids) == set(_model_configs.model_configs)
+        assert set(ids) == set(_model_configs.MODEL_CONFIGS)
         for name, mid in ids.items():
-            assert mid.startswith(_model_configs.model_configs[name]["base"] + "-")
+            assert mid.startswith(_model_configs.MODEL_CONFIGS[name]["base"] + "-")
 
 
 # ---------------------------------------------------------------------------
@@ -105,12 +105,12 @@ class TestResolveModelConfig:
         assert cfg["training_params"]["function"] == "unbiased_xgb"  # inherited
 
     def test_branch2_does_not_mutate_registry(self):
-        before = dict(_model_configs.model_configs["unbiased_xgb"]["training_params"])
+        before = dict(_model_configs.MODEL_CONFIGS["unbiased_xgb"]["training_params"])
         sv_config.resolve_model_config(config={
             "base": "unbiased_xgb",
             "training_params": {"model_kwargs": {"max_depth": 99}},
         })
-        assert _model_configs.model_configs["unbiased_xgb"]["training_params"] == before
+        assert _model_configs.MODEL_CONFIGS["unbiased_xgb"]["training_params"] == before
 
     def test_unknown_name_raises(self):
         with pytest.raises(ValueError, match="Unknown model preset"):
@@ -176,18 +176,32 @@ class TestGroundTruthConfig:
             sv_config.build_ground_truth_config("not_a_real_dataset")
 
 
-class TestModelResultDir:
-    def test_accepts_override_dict(self):
-        from svensemble.utils import BASE_DIR
-        frd_name = sv_config.model_result_dir(
-            BASE_DIR, "NA12878", "unbiased_xgb", "default",
-            svtypes=["DEL", "INS"], svlenmin=50, svlenmax=None,
-        )
-        frd_cfg = sv_config.model_result_dir(
-            BASE_DIR, "NA12878", {"base": "unbiased_xgb"}, "default",
-            svtypes=["DEL", "INS"], svlenmin=50, svlenmax=None,
-        )
-        assert frd_name == frd_cfg
+class TestTagConstructor:
+    """_tag_constructor must reproduce benchmarkFilterTag (nf-core-svensemble),
+    which names the published benchmark filter directories."""
+
+    @pytest.mark.parametrize("tag_dict, expected", [
+        ({}, "unfiltered"),
+        ({"svtypes": None, "svlenmin": None, "svlenmax": None}, "unfiltered"),
+        ({"svlenmin": 50}, "svlenmin-50"),
+        ({"svlenmin": 50.0}, "svlenmin-50"),
+        ({"svlenmin": 50, "svlenmax": float("inf")}, "svlenmin-50"),
+        ({"svtypes": "INS+DEL"}, "svtypes-DEL+INS"),
+        ({"svtypes": ["INS", "DEL"]}, "svtypes-DEL+INS"),
+        ({"svtypes": "DEL"}, "svtypes-DEL"),
+        ({"svtypes": []}, "unfiltered"),
+        ({"svtypes": ["DEL", "INS"], "svlenmin": 50, "svlenmax": 1000},
+         "svlenmax-1000.svlenmin-50.svtypes-DEL+INS"),
+    ])
+    def test_matches_pipeline_filter_tag(self, tag_dict, expected):
+        assert sv_config._tag_constructor(tag_dict) == expected
+
+    def test_reproduces_published_dir_names(self):
+        # Directory names present under results/*/svensemble/benchmark/<sample>/<val_set>/.
+        assert sv_config._tag_constructor({"svlenmin": 50}) == "svlenmin-50"
+        assert sv_config._tag_constructor(
+            {"svtypes": "DEL+INS", "svlenmin": 50}
+        ) == "svlenmin-50.svtypes-DEL+INS"
 
 
 # ---------------------------------------------------------------------------

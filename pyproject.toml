@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "svensemble"
-version = "0.5.0"
+dynamic = ["version"]
 description = "A toolkit for structural variant ensemble calling"
 requires-python = ">=3.12"
 dependencies = [
@@ -12,9 +12,9 @@ dependencies = [
     "pandas",
     "scikit-learn",
     "pysam",
+    "cyvcf2",
+    "igraph",
     "xgboost",
-    "matplotlib",
-    "adjustText",
     "pyyaml",
 ]
 
@@ -24,6 +24,9 @@ dev = ["pytest", "shap"]
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.setuptools.dynamic]
+version = {attr = "svensemble.__version__"}
 
 [tool.pytest.ini_options]
 markers = [

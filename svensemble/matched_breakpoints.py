@@ -160,7 +160,7 @@ def matchedbps_to_bps(
 
         # Using callset priorty list from caller_params, assign ALT_bnd1 and ALT_bnd2
         merged_coords_matched_bps.loc[:, f"ALT_bnd{bnd}"] = np.nan
-        for callset_name in caller_params.callset_alt_priority:
+        for callset_name in caller_params.CALLSET_ALT_PRIORITY:
             # Skip if callset not in the data
             if callset_name not in callsets:
                 continue
@@ -186,7 +186,7 @@ def matchedbps_to_bps(
 
 def preprocess_matchedbps_for_pu(
     joint_bp_df: pd.DataFrame,
-    sample_config: dict,
+    workflow_config: dict,
     match_sample_name: str,
     training_set_name: str,
     add_match_ids_to_index: bool = False,
@@ -202,7 +202,8 @@ def preprocess_matchedbps_for_pu(
 
     Args:
         joint_bp_df (pd.DataFrame): DataFrame containing joined breakpoints.
-        sample_config (dict): Sample configuration dictionary (currently unused).
+        workflow_config (dict): Workflow config; supplies the training set's
+            callers, their callset params and the model's training_params.
         verbose (bool): If True, print information about dropped columns.
 
     Returns:
@@ -216,8 +217,8 @@ def preprocess_matchedbps_for_pu(
     cols_to_retain: list[str] = []
 
     # Collect all relevant columns for this training set
-    for callset_name in sample_config['training_sets'][training_set_name]:
-        callset_params = sample_config['callsets'][callset_name]['params']
+    for callset_name in workflow_config['training_sets'][training_set_name]:
+        callset_params = workflow_config['callsets'][callset_name]['params']
         training_cols.append(f'{callset_name}_INFO_EVENT')
         training_cols.extend(
             f'{callset_name}_FILTER_{col}'
@@ -239,7 +240,7 @@ def preprocess_matchedbps_for_pu(
         if (callset_params['qual_metric'] not in training_cols) and (callset_params['qual_metric'] is not None):
             training_cols.append(f'{callset_name}_{callset_params["qual_metric"]}')
 
-    if sample_config['model'].get('training_params', {}).get('add_topology', False):
+    if workflow_config['model'].get('training_params', {}).get('add_topology', False):
         training_cols.extend(col for col in joint_bp_df.columns if col.startswith('svensembletopology_'))
 
 
@@ -256,7 +257,7 @@ def preprocess_matchedbps_for_pu(
     training_df = joint_bp_df.loc[:, cols_to_retain]
 
     # Retain rows where at least one callset's INFO_EVENT index level is not null
-    info_event_cols = [f'{callset}_INFO_EVENT' for callset in sample_config['training_sets'][training_set_name]]
+    info_event_cols = [f'{callset}_INFO_EVENT' for callset in workflow_config['training_sets'][training_set_name]]
     if isinstance(training_df.index, pd.MultiIndex):
         info_event_level_idxs = [
             training_df.index.names.index(col)

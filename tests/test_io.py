@@ -1,4 +1,4 @@
-"""Tests for svensemble.config_io: lossless encode/decode, pure I/O, hashing."""
+"""Tests for svensemble.io config layers: lossless encode/decode, pure I/O, hashing."""
 
 import json
 import math
@@ -7,13 +7,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from svensemble.config_io import (
+from svensemble.io import (
     canonical_json,
     dict_json_decode,
     dict_json_encode,
-    dump_config,
-    load_config,
+    read_config,
     validate_config,
+    write_config,
 )
 
 
@@ -161,36 +161,36 @@ class TestEncodeDetail:
 
 
 # ---------------------------------------------------------------------------
-# dump_config / load_config — pure I/O
+# write_config / read_config — pure I/O
 # ---------------------------------------------------------------------------
 
 class TestDumpLoad:
-    """dump_config and load_config are pure I/O — no encoding applied."""
+    """write_config and read_config are pure I/O — no encoding applied."""
 
     def test_json_round_trip(self, tmp_path):
         config = {"sample_name": "NA12878", "callers": ["gridss", "delly"]}
         path = tmp_path / "config.json"
-        dump_config(config, path)
-        loaded = load_config(path)
+        write_config(config, path)
+        loaded = read_config(path)
         assert loaded == config
 
     def test_yaml_round_trip(self, tmp_path):
         config = {"sample_name": "NA12878", "count": 5}
         path = tmp_path / "config.yaml"
-        dump_config(config, path)
-        loaded = load_config(path)
+        write_config(config, path)
+        loaded = read_config(path)
         assert loaded == config
 
     def test_yml_extension(self, tmp_path):
         config = {"sample_name": "test"}
         path = tmp_path / "config.yml"
-        dump_config(config, path)
-        loaded = load_config(path)
+        write_config(config, path)
+        loaded = read_config(path)
         assert loaded == config
 
     def test_creates_parent_dirs(self, tmp_path):
         path = tmp_path / "sub" / "dir" / "config.json"
-        dump_config({"sample_name": "test"}, path)
+        write_config({"sample_name": "test"}, path)
         assert path.exists()
 
     def test_encoded_then_dumped_round_trips(self, tmp_path):
@@ -201,8 +201,8 @@ class TestDumpLoad:
             "ref": Path("/ref.fa"),
         }
         path = tmp_path / "config.json"
-        dump_config(dict_json_encode(config), path)
-        loaded = dict_json_decode(load_config(path))
+        write_config(dict_json_encode(config), path)
+        loaded = dict_json_decode(read_config(path))
         assert loaded == config
         assert isinstance(loaded["svlens"], tuple)
         assert loaded["svlens"][1] == float("inf")
@@ -211,8 +211,8 @@ class TestDumpLoad:
     def test_accepts_path_string(self, tmp_path):
         config = {"sample_name": "test"}
         path = str(tmp_path / "config.json")
-        dump_config(config, path)
-        loaded = load_config(path)
+        write_config(config, path)
+        loaded = read_config(path)
         assert loaded == config
 
 

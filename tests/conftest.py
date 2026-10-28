@@ -64,42 +64,42 @@ def assert_column_dtypes(df: pd.DataFrame, dtype_map: dict[str, str]) -> None:
 
 @pytest.fixture
 def manta_candidate_params():
-    return _caller_params.manta_candidate_params
+    return _caller_params.MANTA_CANDIDATE_PARAMS
 
 
 @pytest.fixture
 def manta_diploid_params():
-    return _caller_params.manta_diploid_params
+    return _caller_params.MANTA_DIPLOID_PARAMS
 
 
 @pytest.fixture
 def gridss_params():
-    return _caller_params.gridss_params
+    return _caller_params.GRIDSS_PARAMS
 
 
 @pytest.fixture
 def delly_params():
-    return _caller_params.delly_params
+    return _caller_params.DELLY_PARAMS
 
 
 @pytest.fixture
 def sniffles_params():
-    return _caller_params.sniffles_params
+    return _caller_params.SNIFFLES_PARAMS
 
 
 @pytest.fixture
 def survivor_params():
-    return _caller_params.survivor_params
+    return _caller_params.SURVIVOR_PARAMS
 
 
 @pytest.fixture
 def cutesv_params():
-    return _caller_params.cutesv_params
+    return _caller_params.CUTESV_PARAMS
 
 
 @pytest.fixture
 def svaba_params():
-    return _caller_params.svaba_params
+    return _caller_params.SVABA_PARAMS
 
 
 # ---------------------------------------------------------------------------

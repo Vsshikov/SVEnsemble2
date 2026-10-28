@@ -198,14 +198,14 @@ class TestMantaPreprocessBndsOnly:
 
 class TestMantaPreprocessCommon:
     def test_format_splitting_enabled(self):
-        params = _caller_params.manta_diploid_params
+        params = _caller_params.MANTA_DIPLOID_PARAMS
         df = make_manta_evt_df()
         result = cs.manta_preprocess_evts_only(df, caller_params=params)
         assert_has_columns(result, ['SAMPLE_SR_REF', 'SAMPLE_SR_ALT', 'SAMPLE_PR_REF', 'SAMPLE_PR_ALT'])
         assert_missing_columns(result, ['SAMPLE_SR', 'SAMPLE_PR'])
 
     def test_format_splitting_disabled(self):
-        params = _caller_params.manta_candidate_params
+        params = _caller_params.MANTA_CANDIDATE_PARAMS
         df = make_manta_evt_df()
         result = cs.manta_preprocess_evts_only(df, caller_params=params)
         assert_missing_columns(result, ['SAMPLE_SR_REF', 'SAMPLE_SR_ALT'])
