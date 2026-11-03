@@ -14,6 +14,7 @@ import pysam
 
 from . import breakends as bnds
 from . import events as evts
+from . import io as sv_io
 from . import utils as sv_utils
 from . import _caller_params as caller_params
 from . import vcfparse as vcfp
@@ -90,7 +91,7 @@ def truth_event_to_bnd(ref_vcf):
     return ref_vcf_bps
 
 
-def preprocess_hg002_val_set(raw_path, output_path, force_rerun=False, long_val=False):
+def preprocess_hg002_val_set(raw_path, output_path, overwrite=False, long_val=False):
     """
     Preprocess the HG002 validation VCF file for benchmarking by parsing, annotating,
     and converting SV events to breakpoints. Results are stored as a CSV.
@@ -98,11 +99,11 @@ def preprocess_hg002_val_set(raw_path, output_path, force_rerun=False, long_val=
     Args:
         raw_path (str or Path): Path to the input VCF file for HG002.
         output_path (str or Path): Path of the breakpoints CSV to write.
-        force_rerun (bool, optional): If True, forces preprocessing even if the output exists.
+        overwrite (bool, optional): If True, forces preprocessing even if the output exists.
         long_val (bool, optional): Only retain variants with SVLEN > 50 if True.
     """
-    # Only run if the annotated file does not exist, or if force_rerun is True
-    if not Path(output_path).exists() or force_rerun:
+    # Only run if the annotated file does not exist, or if overwrite is True
+    if not Path(output_path).exists() or overwrite:
 
         # Parse the input VCF file using the predefined caller parameters
         hg002_val_vcf = pysam.VariantFile(raw_path)
@@ -140,22 +141,23 @@ def preprocess_hg002_val_set(raw_path, output_path, force_rerun=False, long_val=
             ]
 
         # Save the processed DataFrame as CSV
-        hg002_val_vcf_df_bps.to_csv(output_path, index=False)
+        with sv_utils.atomic_path(output_path) as tmp:
+            hg002_val_vcf_df_bps.to_csv(tmp, index=False)
 
 
-def preprocess_kosugi_val_set(raw_path, output_path, force_rerun=False, long_val=False):
+def preprocess_kosugi_val_set(raw_path, output_path, overwrite=False, long_val=False):
     """
     Preprocess the Kosugi validation set, converting to VCF-like breakpoints and saving as CSV.
 
     Args:
         raw_path (str or Path): Path to the Kosugi BED-like truth file.
         output_path (str or Path): Path of the breakpoints CSV to write.
-        force_rerun (bool, optional): If True, regenerate even if the file already exists.
+        overwrite (bool, optional): If True, regenerate even if the file already exists.
         long_val (bool, optional): Only retain variants with SVLEN > 50 if True.
     """
     out_path = Path(output_path)
 
-    if not out_path.exists() or force_rerun:
+    if not out_path.exists() or overwrite:
         val_df = load_truth_variants(
             raw_path
         )
@@ -167,21 +169,22 @@ def preprocess_kosugi_val_set(raw_path, output_path, force_rerun=False, long_val
         if long_val:
             val_vcf_bps = val_vcf_bps[val_vcf_bps['INFO_SVLEN'] > 50]
 
-        val_vcf_bps.to_csv(out_path, index=False)
+        with sv_utils.atomic_path(out_path) as tmp:
+            val_vcf_bps.to_csv(tmp, index=False)
 
 
-def preprocess_chm13_val_set(raw_path, output_path, force_rerun=False):
+def preprocess_chm13_val_set(raw_path, output_path, overwrite=False):
     """
     Preprocess CHM13 validation set: filter, normalize, convert to breakpoints, save as CSV.
 
     Args:
         raw_path (str or Path): Path to the CHM13 validation annotation CSV.
         output_path (str or Path): Path of the breakpoints CSV to write.
-        force_rerun (bool, optional): If True, regenerate even if the file already exists.
+        overwrite (bool, optional): If True, regenerate even if the file already exists.
     """
     out_path = Path(output_path)
 
-    if not out_path.exists() or force_rerun:
+    if not out_path.exists() or overwrite:
         # Read raw CHM13 validation annotation data
         chm_val_df = pd.read_csv(
             raw_path
@@ -242,10 +245,11 @@ def preprocess_chm13_val_set(raw_path, output_path, force_rerun=False):
             force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
         )
 
-        result_bps.to_csv(out_path, index=False)
+        with sv_utils.atomic_path(out_path) as tmp:
+            result_bps.to_csv(tmp, index=False)
 
 
-def preprocess_hg00514_val_set(raw_path, output_path, force_rerun=False):
+def preprocess_hg00514_val_set(raw_path, output_path, overwrite=False):
     """
     Preprocess the HG00514 validation VCF file for benchmarking by parsing, annotating,
     and converting SV events to breakpoints. Results are stored as a bps CSV.
@@ -253,11 +257,11 @@ def preprocess_hg00514_val_set(raw_path, output_path, force_rerun=False):
     Args:
         raw_path (str or Path): Path to nstd152.GRCh38.variant_call.vcf.gz (or uncompressed).
         output_path (str or Path): Path of the breakpoints CSV to write.
-        force_rerun (bool, optional): If True, regenerate even if the output CSV already exists.
+        overwrite (bool, optional): If True, regenerate even if the output CSV already exists.
     """
     out_path = Path(output_path)
 
-    if not out_path.exists() or force_rerun:
+    if not out_path.exists() or overwrite:
         hg00514_vcf = pysam.VariantFile(raw_path)
         hg00514_vcf_df, _ = vcfp.parse_vcf_to_df(
             hg00514_vcf, caller_params=caller_params.HG00514_PARAMS
@@ -295,10 +299,11 @@ def preprocess_hg00514_val_set(raw_path, output_path, force_rerun=False):
             hg00514_bnd_df,
             force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
         )
-        hg00514_bp_df.to_csv(out_path, index=False)
+        with sv_utils.atomic_path(out_path) as tmp:
+            hg00514_bp_df.to_csv(tmp, index=False)
 
 
-def preprocess_hgsvc2_val_set(raw_path, output_path, force_rerun=False, sample_name='NA12878'):
+def preprocess_hgsvc2_val_set(raw_path, output_path, overwrite=False, sample_name='NA12878'):
     """
     Preprocess the HGSVC2 freeze-4 integrated SV callset for benchmarking.
 
@@ -310,12 +315,12 @@ def preprocess_hgsvc2_val_set(raw_path, output_path, force_rerun=False, sample_n
     Args:
         raw_path (str or Path): Path to variants_freeze4_sv_insdel_alt.vcf.gz.
         output_path (str or Path): Path of the breakpoints CSV to write.
-        force_rerun (bool, optional): If True, regenerate even if the output exists.
+        overwrite (bool, optional): If True, regenerate even if the output exists.
         sample_name (str, optional): Sample to extract from the multi-sample VCF.
     """
     out_path = Path(output_path)
 
-    if not out_path.exists() or force_rerun:
+    if not out_path.exists() or overwrite:
         hgsvc2_vcf = pysam.VariantFile(str(raw_path))
         hgsvc2_df, _ = vcfp.parse_vcf_to_df(
             hgsvc2_vcf,
@@ -355,16 +360,17 @@ def preprocess_hgsvc2_val_set(raw_path, output_path, force_rerun=False, sample_n
             force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
         )
 
-        hgsvc2_bp_df.to_csv(out_path, index=False)
+        with sv_utils.atomic_path(out_path) as tmp:
+            hgsvc2_bp_df.to_csv(tmp, index=False)
 
 
-def preprocess_huddleston_val_set(raw_path, output_path, force_rerun=False):
+def preprocess_huddleston_val_set(raw_path, output_path, overwrite=False):
     """
     Preprocess the Huddleston CHM13 validation set, converting to VCF-like breakpoints and saving as CSV.
     """
     out_path = Path(output_path)
 
-    if not out_path.exists() or force_rerun:
+    if not out_path.exists() or overwrite:
         huddleston_vcf_df, huddleston_vcf_df_meta  = vcfp.parse_vcf_to_df(pysam.VariantFile(raw_path), caller_params=caller_params.HUDDLESTON_PARAMS, sample_name='huddleston')
         huddleston_vcf_df.loc[:, 'INFO_SVLEN'] = huddleston_vcf_df['INFO_SVLEN'].str[0]
         # Replace all strings in INFO_SVTYPE using the mapping dictionary from caller_params.HUDDLESTON_PARAMS
@@ -380,7 +386,8 @@ def preprocess_huddleston_val_set(raw_path, output_path, force_rerun=False):
             force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r']
         )
 
-        huddleston_bp_df.to_csv(out_path, index=False)
+        with sv_utils.atomic_path(out_path) as tmp:
+            huddleston_bp_df.to_csv(tmp, index=False)
 
 
 _val_set_preprocessors = {
@@ -397,34 +404,35 @@ VALIDATION_SET_NAMES = tuple(_val_set_preprocessors)
 
 
 def preprocess_validation_set(
-    name: str,
-    raw_path: str | Path,
-    output_path: str | Path,
-    force_rerun: bool = False,
+    val_set: str,
+    raw: str | Path,
+    output_dir: str | Path,
+    overwrite: bool = False,
 ) -> Path:
     """Preprocess a published validation set into a breakpoints CSV.
 
     Args:
-        name: Validation set name (one of VALIDATION_SET_NAMES).
-        raw_path: Path to the published truth file.
-        output_path: Path of the breakpoints CSV to write.
-        force_rerun: Regenerate even if output_path already exists.
+        val_set: Validation set name (one of VALIDATION_SET_NAMES).
+        raw: Path to the published truth file.
+        output_dir: Output directory; the CSV is written as
+            ``{val_set}.val_bps.csv`` (io.VAL_BPS).
+        overwrite: Regenerate even if the output already exists. Without it
+            an existing output is reused; only its existence is checked.
 
     Returns:
-        output_path.
+        The output CSV path.
 
     Raises:
-        ValueError: If no preprocessor is registered for name.
-        FileNotFoundError: If raw_path does not exist.
+        ValueError: If no preprocessor is registered for val_set.
+        FileNotFoundError: If raw does not exist.
     """
-    if name not in _val_set_preprocessors:
+    if val_set not in _val_set_preprocessors:
         raise ValueError(
-            f"Unknown validation set {name!r}. Available: {list(VALIDATION_SET_NAMES)}"
+            f"Unknown validation set {val_set!r}. Available: {list(VALIDATION_SET_NAMES)}"
         )
-    raw_path = Path(raw_path)
-    if not raw_path.exists():
-        raise FileNotFoundError(f"Raw input for validation set {name!r} not found at {raw_path}")
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    _val_set_preprocessors[name](raw_path, output_path, force_rerun=force_rerun)
+    raw = Path(raw)
+    if not raw.exists():
+        raise FileNotFoundError(f"Raw input for validation set {val_set!r} not found at {raw}")
+    output_path = Path(output_dir) / sv_io.VAL_BPS.format(val_set=val_set)
+    _val_set_preprocessors[val_set](raw, output_path, overwrite=overwrite)
     return output_path

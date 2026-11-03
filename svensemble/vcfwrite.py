@@ -320,20 +320,8 @@ def write_vcf(
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
 
-    write_mode = 'wz' if str(output_path).endswith('.gz') else 'w'
-
-    if len(bps_df) == 0:
-        empty_chrom_df = pd.DataFrame({
-            'CHROM_bnd1': pd.Series(dtype=str),
-            'CHROM_bnd2': pd.Series(dtype=str),
-        })
-        header = _build_header(empty_chrom_df, sample_name=sample_name, source=source)
-        vcf_out = VariantFile(str(output_path), write_mode, header=header)
-        vcf_out.close()
-        return output_path
-
     invalid_pos_mask = (bps_df['POS_bnd1'] <= 0) | (bps_df['POS_bnd2'] <= 0)
-    if invalid_pos_mask.any():
+    if len(bps_df) and invalid_pos_mask.any():
         n_bad = invalid_pos_mask.sum()
         bad_events = bps_df.loc[invalid_pos_mask, 'INFO_EVENT'].tolist()
         logger.warning(
@@ -341,52 +329,55 @@ def write_vcf(
             n_bad, bad_events,
         )
         bps_df = bps_df[~invalid_pos_mask]
+
+    # Written via a temporary sibling and moved into place, so a failure part
+    # way through never leaves a truncated VCF at output_path.
+    write_mode = 'wz' if str(output_path).endswith('.gz') else 'w'
+    with utils.atomic_path(output_path) as tmp_path:
         if len(bps_df) == 0:
             empty_chrom_df = pd.DataFrame({
                 'CHROM_bnd1': pd.Series(dtype=str),
                 'CHROM_bnd2': pd.Series(dtype=str),
             })
             header = _build_header(empty_chrom_df, sample_name=sample_name, source=source)
-            vcf_out = VariantFile(str(output_path), write_mode, header=header)
-            vcf_out.close()
+            with VariantFile(str(tmp_path), write_mode, header=header):
+                pass
             return output_path
 
-    svtypes = _get_svtypes(bps_df, source)
-    has_ci = _has_ci(bps_df)
-    header = _build_header(bps_df, sample_name=sample_name, source=source)
+        svtypes = _get_svtypes(bps_df, source)
+        has_ci = _has_ci(bps_df)
+        header = _build_header(bps_df, sample_name=sample_name, source=source)
 
-    chrom_keys = utils.generate_chrom_key_dict(
-        pd.concat([bps_df['CHROM_bnd1'], bps_df['CHROM_bnd2']])
-    )
-    sorted_idx = bps_df.sort_values(
-        ['CHROM_bnd1', 'POS_bnd1'],
-        key=lambda x: utils.get_chrom_keys(x, chrom_keys=chrom_keys)
-    ).index
+        chrom_keys = utils.generate_chrom_key_dict(
+            pd.concat([bps_df['CHROM_bnd1'], bps_df['CHROM_bnd2']])
+        )
+        sorted_idx = bps_df.sort_values(
+            ['CHROM_bnd1', 'POS_bnd1'],
+            key=lambda x: utils.get_chrom_keys(x, chrom_keys=chrom_keys)
+        ).index
 
-    symbolic_non_inv = _SYMBOLIC_SVTYPES - {'INV'}
-    written_inv_events: set[str] = set()
+        symbolic_non_inv = _SYMBOLIC_SVTYPES - {'INV'}
+        written_inv_events: set[str] = set()
 
-    vcf_out = VariantFile(str(output_path), write_mode, header=header)
+        with VariantFile(str(tmp_path), write_mode, header=header) as vcf_out:
+            for idx in sorted_idx:
+                row = bps_df.loc[idx]
+                svtype = svtypes.loc[idx]
 
-    for idx in sorted_idx:
-        row = bps_df.loc[idx]
-        svtype = svtypes.loc[idx]
+                if svtype == 'INV':
+                    if inv_as_bnd:
+                        _write_bnd_records(vcf_out, row, has_ci)
+                    else:
+                        base_event = _strip_inv_event_suffix(str(row['INFO_EVENT']))
+                        if base_event in written_inv_events:
+                            continue
+                        written_inv_events.add(base_event)
+                        _write_symbolic_record(
+                            vcf_out, row, 'INV', has_ci, record_id=base_event,
+                        )
+                elif svtype in symbolic_non_inv:
+                    _write_symbolic_record(vcf_out, row, svtype, has_ci)
+                else:
+                    _write_bnd_records(vcf_out, row, has_ci)
 
-        if svtype == 'INV':
-            if inv_as_bnd:
-                _write_bnd_records(vcf_out, row, has_ci)
-            else:
-                base_event = _strip_inv_event_suffix(str(row['INFO_EVENT']))
-                if base_event in written_inv_events:
-                    continue
-                written_inv_events.add(base_event)
-                _write_symbolic_record(
-                    vcf_out, row, 'INV', has_ci, record_id=base_event,
-                )
-        elif svtype in symbolic_non_inv:
-            _write_symbolic_record(vcf_out, row, svtype, has_ci)
-        else:
-            _write_bnd_records(vcf_out, row, has_ci)
-
-    vcf_out.close()
     return output_path

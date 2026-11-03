@@ -2,9 +2,42 @@
 Utility functions for SVEnsemble
 """
 import os
-import pandas as pd
-from pathlib import Path
+import secrets
 from collections import abc
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Iterator
+
+import pandas as pd
+
+
+@contextmanager
+def atomic_path(path: Path) -> Iterator[Path]:
+    """Yield a temporary sibling of *path* to write to; move it onto *path* on success.
+
+    The temporary name is ``.partial-<token>-<name>``: in the same directory, so
+    the final ``os.replace`` is atomic (readers see the old file or the complete
+    new one, never a partial one); with the same suffix, so suffix-driven writers
+    (pysam ``wz`` for ``.gz``, pandas compression) behave as for *path*; and
+    hidden, so globs and existence checks on *path* ignore it. The file itself
+    is created by the writer, under the normal umask.
+
+    On any exit other than success -- exceptions, ``SystemExit``,
+    ``KeyboardInterrupt`` -- the temporary file is removed and *path* is left
+    untouched. The parent directory is created if missing.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".partial-{secrets.token_hex(4)}-{path.name}")
+    ok = False
+    try:
+        yield tmp
+        ok = True
+    finally:
+        if ok:
+            os.replace(tmp, path)
+        else:
+            tmp.unlink(missing_ok=True)
 
 def get_base_dir() -> Path:
     base = os.environ.get("SVENSEMBLE_BASE_DIR")
