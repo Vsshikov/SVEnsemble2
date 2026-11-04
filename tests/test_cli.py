@@ -346,3 +346,54 @@ class TestTrainSubcommandPooledValidation:
         gt = captured["workflow_config"]["ground_truth"]
         assert gt["name"] == "gnomad"
         assert "params" in gt
+
+
+class TestTrainingSetDefault:
+    """--training_set is optional on train, predict and run; it defaults to
+    --callers sorted and joined with '+'."""
+
+    def test_train_without_training_set(self, tmp_path, monkeypatch):
+        csv1 = tmp_path / "matched_bps.csv"
+        pd.DataFrame({"a": [1]}).to_csv(csv1, index=False)
+        captured = {}
+
+        def fake_train_model(
+            joint_bp_df, workflow_config, training_set_name,
+            verbose=False, matched_bps_sources=None,
+        ):
+            captured["training_set_name"] = training_set_name
+            return pd.DataFrame({"f": [1]}), None
+
+        monkeypatch.setattr("svensemble.models.train_model", fake_train_model)
+        sys.argv = [
+            "svensemble", "train",
+            "--matched_bps", str(csv1),
+            "--model", "unbiased_xgb",
+            "--callers", "manta_diploid", "delly",
+            "--sample", "s",
+            "--output_dir", str(tmp_path / "out"),
+        ]
+        main()
+        assert captured["training_set_name"] == "delly+manta_diploid"
+
+    def test_predict_passes_callers_for_default(self, tmp_path, monkeypatch):
+        captured = {}
+
+        def fake_predict(*args, **kwargs):
+            captured.update(args=args, kwargs=kwargs)
+            return pd.DataFrame()
+
+        monkeypatch.setattr("svensemble.api.predict", fake_predict)
+        monkeypatch.setattr("svensemble.io.read_model", lambda p: None)
+        monkeypatch.setattr("svensemble.io.read_feature_matrix", lambda p: None)
+        monkeypatch.setattr("svensemble.io.read_bps", lambda p: None)
+        monkeypatch.setattr("svensemble.io.write_calls", lambda df, d, s: (d / "c.csv", d / "c.vcf"))
+        sys.argv = [
+            "svensemble", "predict",
+            "--model_pkl", "m.pkl", "--feature_matrix", "fm.csv", "--matched_bps", "mb.csv",
+            "--sample", "s", "--callers", "manta_diploid", "delly",
+            "--model", "unbiased_xgb", "--output_dir", str(tmp_path),
+        ]
+        main()
+        assert captured["args"][4] is None
+        assert captured["kwargs"]["callers"] == ["manta_diploid", "delly"]

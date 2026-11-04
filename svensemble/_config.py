@@ -192,6 +192,15 @@ def list_preset_ids() -> dict:
     return {name: model_id(resolve_model_config(name=name)) for name in MODEL_CONFIGS}
 
 
+def resolve_training_set(training_set: str | None, callers: list[str] | None) -> str:
+    """Return *training_set*, or by default the callers sorted and joined with '+'."""
+    if training_set:
+        return training_set
+    if not callers:
+        raise ValueError("Provide training_set or a non-empty callers list.")
+    return '+'.join(sorted(callers))
+
+
 def build_ground_truth_config(
     name: str,
     vcf_path: Path | None = None,

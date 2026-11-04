@@ -78,6 +78,16 @@ class TestPredict:
         api.predict(_FakeModel(), X_back, pd.DataFrame(), "unbiased_xgb", "ts")
         pd.testing.assert_frame_equal(captured_preds["pred_df"], from_memory)
 
+    def test_training_set_defaults_to_sorted_callers(self, captured_preds):
+        api.predict(_FakeModel(), _train_shaped_X(), pd.DataFrame(), "unbiased_rf",
+                    callers=["manta_diploid", "delly"])
+        pred_col = f"delly+manta_diploid_{api.model_id(model='unbiased_rf')}_pred"
+        assert pred_col in captured_preds["pred_df"].columns
+
+    def test_needs_training_set_or_callers(self, captured_preds):
+        with pytest.raises(ValueError, match="training_set or a non-empty callers"):
+            api.predict(_FakeModel(), _train_shaped_X(), pd.DataFrame(), "unbiased_rf")
+
 
 class TestMatch:
     def test_does_not_modify_input(self, monkeypatch):
@@ -107,7 +117,7 @@ class TestTrain:
         def fake_train_model(joint_bp_df, workflow_config, training_set_name,
                              verbose=False, matched_bps_sources=None):
             captured.update(joint_bp_df=joint_bp_df, sources=matched_bps_sources,
-                            workflow_config=workflow_config)
+                            workflow_config=workflow_config, training_set_name=training_set_name)
             return pd.DataFrame(), None
 
         monkeypatch.setattr("svensemble.models.train_model", fake_train_model)
@@ -126,6 +136,32 @@ class TestTrain:
         assert captured["joint_bp_df"] is None
         assert list(captured["sources"]) == ["s1", "s2"]
         assert all(captured["sources"][k] is v for k, v in sources.items())
+
+    def test_training_set_defaults_to_sorted_callers(self, captured):
+        api.train(pd.DataFrame({"a": [1]}), ["manta_diploid", "delly"], "unbiased_xgb")
+        assert captured["training_set_name"] == "delly+manta_diploid"
+        assert captured["workflow_config"]["training_sets"] == {
+            "delly+manta_diploid": ["delly", "manta_diploid"],
+        }
+
+    def test_default_sorts_callers_without_a_preset(self, captured):
+        # delly+gridss+svaba is not a TRAINING_SET_PRESETS key.
+        api.train(pd.DataFrame({"a": [1]}), ["svaba", "gridss", "delly"], "unbiased_xgb")
+        assert captured["workflow_config"]["training_sets"] == {
+            "delly+gridss+svaba": ["delly", "gridss", "svaba"],
+        }
+        assert list(captured["workflow_config"]["callsets"]) == ["delly", "gridss", "svaba"]
+
+    def test_explicit_free_form_name_keeps_caller_order(self, captured):
+        api.train(pd.DataFrame({"a": [1]}), ["svaba", "gridss"], "unbiased_xgb", "my_set")
+        assert captured["workflow_config"]["training_sets"] == {"my_set": ["svaba", "gridss"]}
+
+    def test_preset_training_set_selects_its_callers(self, captured):
+        api.train(pd.DataFrame({"a": [1]}), ["gridss", "manta_diploid", "delly"], "unbiased_xgb",
+                  "delly+manta_diploid")
+        assert captured["workflow_config"]["training_sets"] == {
+            "delly+manta_diploid": ["delly", "manta_diploid"],
+        }
 
 
 class TestModelConfigs:

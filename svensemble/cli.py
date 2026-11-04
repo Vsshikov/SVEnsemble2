@@ -192,7 +192,7 @@ def _register_train(subparsers):
     )
     p.add_argument("--matched_bps", type=Path, default=None, help="Matched breakpoints CSV. Required unless --train_samples/--train_matched_bps are given.")
     p.add_argument("--model", type=str, required=True, help="Base preset / model name (e.g. unbiased_rf, unbiased_xgb, consensus). Human label when --model_config is given.")
-    p.add_argument("--training_set", type=str, required=True, help="Training set name.")
+    p.add_argument("--training_set", type=str, default=None, help="Training set name. Defaults to --callers sorted and joined with '+'. Give a TRAINING_SET_PRESETS name to train on that preset's callers, e.g. a subset of --callers.")
     p.add_argument("--callers", type=str, nargs="+", required=True, help="Caller names in the matched_bps.")
     p.add_argument("--ground_truth_name", type=str, default="gnomad", help="Ground truth name.")
     p.add_argument("--sample", type=str, required=True, help="Sample name.")
@@ -260,7 +260,7 @@ def _register_predict(subparsers):
     p.add_argument("--matched_bps", type=Path, required=True, help="Matched breakpoints CSV (for call reconstruction).")
     p.add_argument("--sample", type=str, required=True, help="Sample name.")
     p.add_argument("--callers", type=str, nargs="+", required=True, help="Caller names.")
-    p.add_argument("--training_set", type=str, required=True, help="Training set name.")
+    p.add_argument("--training_set", type=str, default=None, help="Training set name, as given to train. Defaults to --callers sorted and joined with '+'.")
     p.add_argument("--model", type=str, required=True, help="Model name.")
     p.add_argument("--output_dir", type=Path, required=True, help="Output directory.")
     _add_model_config_arg(p)
@@ -276,6 +276,7 @@ def _cmd_predict(args):
         args.model,
         args.training_set,
         model_config=_load_model_config(args),
+        callers=args.callers,
     )
     calls_csv, _ = sv_io.write_calls(svensemble2_calls_df, args.output_dir, args.sample)
 
@@ -490,7 +491,7 @@ def _register_run(subparsers):
     grp.add_argument("--ground_truth_bps", type=Path, default=None, help="Full path to a pre-computed ground truth bps.csv (skip the ground-truth stage).")
     p.add_argument("--ground_truth_name", type=str, default="gnomad", help="Ground truth dataset name.")
     p.add_argument("--model", type=str, required=True, help="Model name.")
-    p.add_argument("--training_set", type=str, required=True, help="Training set name.")
+    p.add_argument("--training_set", type=str, default=None, help="Training set name. Defaults to --callers sorted and joined with '+'. Give a TRAINING_SET_PRESETS name to train on that preset's callers.")
     p.add_argument("--max_dist", type=int, default=100, help="Match: maximum distance for breakpoint matching.")
     p.add_argument("--insert_delta_threshold", type=float, default=0.7, help="Match: insert delta threshold.")
     p.add_argument("--output_dir", type=Path, default=None, help="Final output directory (defaults to WORKDIR/predict).")

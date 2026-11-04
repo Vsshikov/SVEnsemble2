@@ -180,7 +180,7 @@ def train(
     matched_bps: pd.DataFrame | dict[str, pd.DataFrame | Path],
     callers: list[str],
     model: str,
-    training_set: str,
+    training_set: str | None = None,
     model_config: dict | None = None,
     ground_truth_name: str = "gnomad",
     verbose: bool = False,
@@ -193,7 +193,9 @@ def train(
             or CSV path.
         callers: Caller names present in the matched breakpoints.
         model: Preset name; a human label when model_config is given.
-        training_set: Training set name; a preset name selects its callers.
+        training_set: Training set name. Defaults to *callers* sorted and
+            joined with '+', training on all of them. A TRAINING_SET_PRESETS
+            name instead trains on that preset's callers, e.g. a subset.
         model_config: Optional model config override (with 'base').
         ground_truth_name: Ground truth set used as the positive labels.
         verbose: Print training progress.
@@ -202,6 +204,11 @@ def train(
         (X, model_fit): the feature matrix, indexed by ``<callset>_INFO_EVENT``,
         and the fitted model.
     """
+    if training_set is None:
+        # Sorted, like the default name, so the feature column order does not
+        # depend on the order the callers were given in.
+        callers = sorted(callers)
+    training_set = sv_config.resolve_training_set(training_set, callers)
     workflow_config = _workflow_config(
         callers=callers, model_name=model, training_set=training_set,
         model_config=model_config, ground_truth_name=ground_truth_name,
@@ -224,8 +231,9 @@ def predict(
     feature_matrix: pd.DataFrame,
     matched_bps: pd.DataFrame,
     model: str,
-    training_set: str,
+    training_set: str | None = None,
     model_config: dict | None = None,
+    callers: list[str] | None = None,
 ) -> pd.DataFrame:
     """Score a feature matrix and reconstruct the ensemble calls.
 
@@ -238,8 +246,11 @@ def predict(
         matched_bps: The matched breakpoints the features were built from.
         model: Preset name; a human label when model_config is given.
         training_set: Training set name; part of the prediction column name.
+            Defaults to *callers* sorted and joined with '+', as in train.
         model_config: Optional model config override (with 'base').
+        callers: Caller names; required only when training_set is not given.
     """
+    training_set = sv_config.resolve_training_set(training_set, callers)
     resolved = _resolve_model(model, model_config)
     fillna = resolved["training_params"].get("fillna", 0)
     fill_val = fillna if fillna is not None else np.nan
@@ -300,7 +311,7 @@ def run(
     callers: list[str],
     caller_vcfs: list[Path],
     model: str,
-    training_set: str,
+    training_set: str | None = None,
     ground_truth_vcf: Path | None = None,
     ground_truth_bps: Path | None = None,
     ground_truth_name: str = "gnomad",
@@ -325,6 +336,7 @@ def run(
     Args:
         sample: Sample name; used only in the VCF outputs.
         callers, caller_vcfs: Caller names and their VCFs, paired by position.
+        training_set: As in train; defaults to *callers* sorted and joined with '+'.
         ground_truth_vcf, ground_truth_bps: Exactly one. A VCF goes through
             preprocess_ground_truth (with the ground_truth_* filters); a
             preprocessed breakpoints CSV is symlinked into the workdir.
@@ -405,7 +417,7 @@ def run(
 
     calls = predict(
         model_fit, sv_io.read_feature_matrix(fm_path), matched_bps, model, training_set,
-        model_config=model_config,
+        model_config=model_config, callers=callers,
     )
     calls_csv, _ = sv_io.write_calls(calls, output_dir, sample)
     if verbose:
