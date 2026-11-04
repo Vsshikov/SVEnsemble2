@@ -51,7 +51,15 @@ Requires Python >= 3.12 on Linux or macOS.
   (Singularity/Apptainer: https://depot.galaxyproject.org/singularity/<name>:<version>)
 -->
 
-### With conda (recommended)
+## With Nix
+
+This repository is a flake, so SVEnsemble2 can be run with
+
+```bash
+nix run github:Vsshikov/SVEnsemble2
+```
+
+### With conda
 
 The repository includes a conda environment with all dependencies. Any conda-compatible
 tool works (conda, mamba or micromamba):
