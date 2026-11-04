@@ -41,15 +41,40 @@ whether a call is real rather than whether it is in gnomAD.
 
 ## Installation
 
-Requires Python >= 3.12.
-<!-- TODO: tested Python versions and platforms; pick one official install route. -->
+Requires Python >= 3.12 on Linux or macOS.
+<!-- TODO: tested Python versions and platforms. -->
+
+<!-- TODO: once released, put Bioconda first, then PyPI and the BioContainers image:
+  conda install -c conda-forge -c bioconda <name>
+  pip install <name>
+  docker pull quay.io/biocontainers/<name>:<version>
+  (Singularity/Apptainer: https://depot.galaxyproject.org/singularity/<name>:<version>)
+-->
+
+### With conda (recommended)
+
+The repository includes a conda environment with all dependencies. Any conda-compatible
+tool works (conda, mamba or micromamba):
 
 ```bash
 git clone https://github.com/Vsshikov/SVEnsemble2.git
 cd SVEnsemble2
-micromamba create -f environment.yml
-micromamba activate svensemble2-dev
+conda env create -f environment.yml
+conda activate svensemble2-dev
 pip install --no-deps .
+```
+
+### With pip
+
+In an existing Python >= 3.12 environment:
+
+```bash
+pip install git+https://github.com/Vsshikov/SVEnsemble2.git
+```
+
+### Check the installation
+
+```bash
 svensemble --version
 ```
 
