@@ -97,13 +97,21 @@ The scored calls are written to `work/predict/svensemble2_calls.csv` and `.vcf`.
 
 ## Inputs
 
-| Input | Description |
-|---|---|
-| Caller VCFs | One VCF/BCF per caller, unmodified caller output |
-| Reference FASTA | The reference the reads were aligned to |
-| gnomAD-SV sites VCF | Population SV reference used for labelling |
+Inputs to `svensemble run`:
 
-<!-- TODO(you): genome build(s), germline vs somatic, gnomAD-SV version. -->
+| Option | Required | Description |
+|---|---|---|
+| `--sample` | yes | Sample name, written to the output VCFs |
+| `--workdir` | yes | Directory for intermediate and final outputs; created if missing |
+| `--callers` | yes | Caller names, see [Supported callers](#supported-callers) |
+| `--caller_vcfs` | yes | One VCF/BCF per caller, unmodified caller output, in the same order as `--callers` |
+| `--ref` | yes | Reference genome FASTA the reads were aligned to |
+| `--ground_truth_vcf` | one of these two | Ground truth SV sites VCF, used to label calls. Currently only gnomAD-SV is supported |
+| `--ground_truth_bps` | one of these two | Ground truth already processed by `svensemble ground-truth`, to reuse across samples |
+| `--model` | yes | `unbiased_rf`, `unbiased_xgb` or `consensus`, see [Models](#models) |
+| `--output_dir` | no | Where to write the final calls (default `<workdir>/predict`) |
+
+<!-- TODO: genome build(s), germline vs somatic, gnomAD-SV version and download link. -->
 
 ### Supported callers
 
@@ -134,7 +142,14 @@ trained model and feature matrix) are kept under `--workdir`.
 
 `svensemble run` runs every step for one sample. The steps are also available as separate
 subcommands, which the Nextflow pipeline uses: `preprocess-raw`, `preprocess`,
-`ground-truth`, `match`, `train` and `predict`. See `svensemble <subcommand> --help`.
+`ground-truth`, `match`, `train` and `predict`.
+
+Every command prints its options and defaults with `--help` (or `-h`):
+
+```bash
+svensemble --help          # list subcommands
+svensemble run --help      # options for one subcommand
+```
 
 The same steps are available from Python. They take and return pandas DataFrames:
 
