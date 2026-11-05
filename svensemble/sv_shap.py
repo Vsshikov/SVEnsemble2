@@ -144,8 +144,8 @@ def summarise_shap_values(
 def run_shap(
     model_pkl: Path,
     feature_matrix: Path,
-    sample_name: str,
-    model_name: str,
+    sample: str,
+    model: str,
     training_set: str,
     output_dir: Path,
     model_config: dict | None = None,
@@ -158,7 +158,9 @@ def run_shap(
     Pipeline-friendly SHAP entry point.  Accepts file paths directly
     rather than discovering them via sample/model configs.
 
-    Writes {prefix}.shap_summary.csv and {prefix}.shap_values.pkl into output_dir.
+    Writes shap_summary.csv and shap_values.pkl (io.SHAP_SUMMARY,
+    io.SHAP_VALUES) into output_dir; the sample, model and training set are
+    identified by the directory, not the filenames.
     SHAP plots are made in svensemble_analyse (figures.shap_summary).
 
     Args:
@@ -166,6 +168,7 @@ def run_shap(
         max_samples: Subsample the feature matrix to at most this many rows.
         top_n: Number of top features in the summary CSV.
     """
+    model_name = model
     model = sv_io.read_model(model_pkl)
     fm = sv_io.read_feature_matrix(feature_matrix)
     fm = fm.drop(columns=['ref_match'], errors='ignore')
@@ -174,7 +177,6 @@ def run_shap(
         sv_config.resolve_model_config(config=model_config) if model_config
         else sv_config.resolve_model_config(name=model_name)
     )
-    mid = sv_config.model_id(resolved)
     fillna = resolved['training_params'].get('fillna', 0)
     X = pd.get_dummies(fm)
     if fillna is not None:
@@ -183,6 +185,7 @@ def run_shap(
     X = align_features(model, X, verbose=verbose)
 
     if verbose:
+        print(f"SHAP for sample={sample} model={sv_config.model_id(resolved)} training_set={training_set}")
         print(f"Feature matrix shape: {X.shape}")
 
     shap_values = compute_shap_values(
@@ -190,16 +193,15 @@ def run_shap(
     )
 
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    prefix = f'{sample_name}.{mid}.{training_set}'
     summary = summarise_shap_values(shap_values, top_n=top_n)
-    summary_csv_path = output_dir / f'{prefix}.shap_summary.csv'
-    summary.to_csv(summary_csv_path, index=False)
+    summary_csv_path = output_dir / sv_io.SHAP_SUMMARY
+    with sv_io.atomic_path(summary_csv_path) as tmp:
+        summary.to_csv(tmp, index=False)
     print(f"Saved SHAP summary (top {len(summary)}): {summary_csv_path}")
     print(summary.to_string(index=False))
 
-    shap_pkl_path = output_dir / f'{prefix}.shap_values.pkl'
-    with open(shap_pkl_path, 'wb') as f:
+    shap_pkl_path = output_dir / sv_io.SHAP_VALUES
+    with sv_io.atomic_path(shap_pkl_path) as tmp, open(tmp, 'wb') as f:
         pickle.dump(shap_values, f)
     print(f"Saved SHAP values: {shap_pkl_path}")
 

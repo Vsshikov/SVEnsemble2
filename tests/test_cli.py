@@ -1,5 +1,6 @@
 """Tests for svensemble.cli: argument parsing, build_workflow_config, --version."""
 
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -198,23 +199,108 @@ class TestValidationSetSubcommand:
         captured = {}
         monkeypatch.setattr(
             "svensemble.api.preprocess_validation_set",
-            lambda **kw: captured.update(kw) or kw["output_path"],
+            lambda **kw: captured.update(kw) or kw["output_dir"],
         )
         sys.argv = [
-            "svensemble", "validation-set", "--name", "hg002_val",
-            "--raw_path", str(tmp_path / "raw.vcf.gz"), "--output", str(tmp_path / "out.csv"), "--force_rerun",
+            "svensemble", "validation-set", "--val_set", "hg002_val",
+            "--raw", str(tmp_path / "raw.vcf.gz"), "--output_dir", str(tmp_path / "out"), "--overwrite",
         ]
         main()
         assert captured == {
-            "name": "hg002_val", "raw_path": tmp_path / "raw.vcf.gz",
-            "output_path": tmp_path / "out.csv", "force_rerun": True,
+            "val_set": "hg002_val", "raw": tmp_path / "raw.vcf.gz",
+            "output_dir": tmp_path / "out", "overwrite": True,
         }
 
     def test_unknown_name_is_a_usage_error(self, tmp_path):
-        sys.argv = ["svensemble", "validation-set", "--name", "nope", "--raw_path", "x", "--output", "y"]
+        sys.argv = ["svensemble", "validation-set", "--val_set", "nope", "--raw", "x", "--output_dir", "y"]
         with pytest.raises(SystemExit) as exc:
             main()
         assert exc.value.code == 2
+
+
+class TestGroundTruthSubcommand:
+    def test_space_separated_lists_and_renamed_flags(self, tmp_path, monkeypatch):
+        captured = {}
+        monkeypatch.setattr("svensemble.api.preprocess_ground_truth", lambda **kw: captured.update(kw))
+        sys.argv = [
+            "svensemble", "ground-truth", "--vcf", str(tmp_path / "gt.vcf.gz"),
+            "--output_dir", str(tmp_path / "gt"), "--ground_truth_name", "gnomad_pass",
+            "--filters", "PASS", "LowQual", "--evidence", "SR", "PE",
+            "--svtypes", "DEL", "INS", "--algorithms", "manta", "depth",
+            "--svlen_min", "100", "--svlen_max", "5000", "--overwrite",
+        ]
+        main()
+        assert captured["vcf"] == tmp_path / "gt.vcf.gz"
+        assert captured["output_dir"] == tmp_path / "gt"
+        assert captured["filters"] == ["PASS", "LowQual"]
+        assert captured["evidence"] == ["SR", "PE"]
+        assert captured["svtypes"] == ["DEL", "INS"]
+        assert captured["algorithms"] == ["manta", "depth"]
+        assert captured["svlens"] == (100, 5000.0)
+        assert captured["overwrite"] is True
+
+    def test_defaults(self, tmp_path, monkeypatch):
+        captured = {}
+        monkeypatch.setattr("svensemble.api.preprocess_ground_truth", lambda **kw: captured.update(kw))
+        sys.argv = ["svensemble", "ground-truth", "--vcf", "gt.vcf", "--output_dir", str(tmp_path)]
+        main()
+        assert captured["filters"] is None and captured["svtypes"] is None
+        assert captured["svlens"] == (50, math.inf)
+        assert captured["overwrite"] is False
+
+
+class TestRunSubcommand:
+    def _argv(self, tmp_path, *extra):
+        return [
+            "svensemble", "run", "--sample", "S",
+            "--callers", "gridss", "manta_diploid",
+            "--caller_vcfs", str(tmp_path / "g.vcf"), str(tmp_path / "m.vcf"),
+            "--ref", str(tmp_path / "ref.fa"), "--model", "unbiased_xgb",
+            "--training_set", "gridss+manta_diploid",
+            "--ground_truth_bps", str(tmp_path / "gt.csv"),
+            *extra,
+        ]
+
+    @pytest.fixture
+    def captured(self, monkeypatch):
+        captured = {}
+        monkeypatch.setattr("svensemble.api.run", lambda **kw: captured.update(kw))
+        return captured
+
+    def test_workdir_optional(self, tmp_path, captured):
+        sys.argv = self._argv(tmp_path, "--output_dir", str(tmp_path / "out"))
+        main()
+        assert captured["workdir"] is None
+        assert captured["keep_workdir"] is False
+        assert captured["save"] == set()
+        assert captured["caller_vcfs"] == {"gridss": tmp_path / "g.vcf", "manta_diploid": tmp_path / "m.vcf"}
+        assert captured["output_dir"] == tmp_path / "out"
+        assert " run " in captured["command"] and "--output_dir" in captured["command"]
+
+    def test_output_dir_required(self, tmp_path, captured):
+        sys.argv = self._argv(tmp_path)
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 2
+
+    def test_save_flags_map_to_save_set(self, tmp_path, captured):
+        sys.argv = self._argv(
+            tmp_path, "--output_dir", str(tmp_path / "out"), "--workdir", str(tmp_path / "wd"),
+            "--save_model", "--save_feature_matrix", "--save_matched_bps", "--save_callsets",
+            "--keep_workdir", "--force_preprocess_ground_truth",
+        )
+        main()
+        assert captured["save"] == {"model", "feature_matrix", "matched_bps", "callsets"}
+        assert captured["workdir"] == tmp_path / "wd"
+        assert captured["keep_workdir"] is True
+        assert captured["force_preprocess_ground_truth"] is True
+
+    def test_mismatched_callers_and_vcfs(self, tmp_path, captured):
+        argv = self._argv(tmp_path, "--output_dir", str(tmp_path / "out"))
+        argv.remove(str(tmp_path / "m.vcf"))
+        sys.argv = argv
+        with pytest.raises(SystemExit, match="same length"):
+            main()
 
 
 class TestTrainSubcommandPooledValidation:

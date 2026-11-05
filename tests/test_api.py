@@ -1,6 +1,7 @@
 """Tests for svensemble.api steps and the svensemble.io artifact readers/writers."""
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -203,8 +204,204 @@ class TestModelConfigs:
 class TestValidationSet:
     def test_unknown_name_rejected(self, tmp_path):
         with pytest.raises(ValueError, match="Unknown validation set 'nope'"):
-            api.preprocess_validation_set("nope", tmp_path / "raw.vcf", tmp_path / "out.csv")
+            api.preprocess_validation_set("nope", tmp_path / "raw.vcf", tmp_path / "out")
 
     def test_missing_raw_file_rejected(self, tmp_path):
         with pytest.raises(FileNotFoundError):
-            api.preprocess_validation_set("kosugi", tmp_path / "raw.bed", tmp_path / "out.csv")
+            api.preprocess_validation_set("kosugi", tmp_path / "raw.bed", tmp_path / "out")
+
+
+# ---------------------------------------------------------------------------
+# api.run: scratch lifecycle, save routing, provenance
+# ---------------------------------------------------------------------------
+
+class _PicklableModel:
+    """Stand-in fitted model; only needs to survive pickling."""
+
+
+@pytest.fixture
+def fake_pipeline(monkeypatch):
+    """Replace the step functions with cheap fakes so run's file handling can be tested.
+
+    Set ``fake_pipeline["fail_in"]`` to a step name to make that step raise.
+    """
+    from svensemble import vcfwrite
+
+    state = {"fail_in": None, "gt_calls": []}
+
+    def step(name, result):
+        def f(*a, **k):
+            if state["fail_in"] == name:
+                raise RuntimeError(f"injected failure in {name}")
+            return result(*a, **k)
+        return f
+
+    bps = pd.DataFrame({"INFO_EVENT": ["e1", "e2"], "x": [1, 2]})
+    X = pd.DataFrame({"f": [0.1, 0.2]}, index=pd.Index(["e1", "e2"], name="gridss_INFO_EVENT"))
+
+    def fake_gt(**kw):
+        state["gt_calls"].append(kw)
+        out = Path(kw["output_dir"]) / sv_io.CALLSET_BPS.format(caller=kw["ground_truth_name"])
+        sv_io.write_bps(bps, out)
+        return out
+
+    def fake_vcf(df, path, **kw):
+        Path(path).write_text("##fileformat=VCFv4.5\n")
+        return Path(path)
+
+    monkeypatch.setattr(api, "preprocess_raw", step("preprocess_raw", lambda *a, **k: bps))
+    monkeypatch.setattr(api, "preprocess", step("preprocess", lambda *a, **k: bps))
+    monkeypatch.setattr(api, "match", step("match", lambda *a, **k: bps))
+    monkeypatch.setattr(api, "train", step("train", lambda *a, **k: (X, _PicklableModel())))
+    monkeypatch.setattr(api, "predict", step("predict", lambda *a, **k: bps))
+    monkeypatch.setattr(api, "preprocess_ground_truth", fake_gt)
+    monkeypatch.setattr(vcfwrite, "write_vcf", fake_vcf)
+    return state
+
+
+@pytest.fixture
+def tmpdir_root(tmp_path, monkeypatch):
+    """Point $TMPDIR at an empty directory (and drop tempfile's cached choice)."""
+    import tempfile
+
+    root = tmp_path / "TMPDIR"
+    root.mkdir()
+    monkeypatch.setenv("TMPDIR", str(root))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    return root
+
+
+def _run_kwargs(tmp_path, **over):
+    gt = tmp_path / "gt.csv"
+    if not gt.exists():
+        gt.write_text("a\n1\n")
+    kw = dict(
+        sample="S", caller_vcfs={"gridss": tmp_path / "g.vcf"}, ref=tmp_path / "ref.fa",
+        model="unbiased_xgb", training_set="gridss", output_dir=tmp_path / "out",
+        ground_truth_bps=gt,
+    )
+    kw.update(over)
+    return kw
+
+
+def _provenance(path):
+    import json
+    return json.loads((path / sv_io.RUN_PROVENANCE).read_text())
+
+
+class TestRunScratch:
+    def test_tmp_removed_on_success_and_only_calls_published(self, tmp_path, fake_pipeline, tmpdir_root):
+        out = api.run(**_run_kwargs(tmp_path))
+        assert list(tmpdir_root.iterdir()) == []
+        assert sorted(p.name for p in (tmp_path / "out").iterdir()) == sorted(
+            [sv_io.CALLS_CSV, sv_io.CALLS_VCF, sv_io.RUN_PROVENANCE]
+        )
+        assert set(out) == {"calls_csv", "calls_vcf"}
+
+    def test_tmp_kept_on_failure(self, tmp_path, fake_pipeline, tmpdir_root, capsys):
+        fake_pipeline["fail_in"] = "train"
+        with pytest.raises(RuntimeError, match="injected failure in train"):
+            api.run(**_run_kwargs(tmp_path))
+        kept = list(tmpdir_root.iterdir())
+        assert len(kept) == 1 and kept[0].name.startswith("svensemble_run_")
+        assert (kept[0] / "match" / sv_io.MATCHED_BPS).exists()
+        assert f"scratch kept at {kept[0]}" in capsys.readouterr().err
+        rec = _provenance(kept[0])
+        assert rec["status"] == "failed"
+        assert rec["error"] == {"type": "RuntimeError", "message": "injected failure in train"}
+        assert _provenance(tmp_path / "out")["status"] == "failed"
+
+    def test_keep_workdir_keeps_tmp(self, tmp_path, fake_pipeline, tmpdir_root):
+        api.run(**_run_kwargs(tmp_path), keep_workdir=True)
+        kept = list(tmpdir_root.iterdir())
+        assert len(kept) == 1
+        assert _provenance(kept[0])["status"] == "succeeded"
+
+    def test_explicit_workdir_never_deleted(self, tmp_path, fake_pipeline, tmpdir_root):
+        wd = tmp_path / "wd"
+        api.run(**_run_kwargs(tmp_path), workdir=wd)
+        assert list(tmpdir_root.iterdir()) == []
+        assert (wd / "preprocess_raw" / sv_io.RAW_BPS.format(caller="gridss")).exists()
+        assert (wd / "preprocess" / "gridss" / sv_io.CALLSET_BPS.format(caller="gridss")).exists()
+        assert (wd / "train" / sv_io.MODEL).exists()
+        assert _provenance(wd)["parameters"]["workdir_is_tmp"] is False
+
+    def test_explicit_workdir_kept_on_failure(self, tmp_path, fake_pipeline, tmpdir_root, capsys):
+        fake_pipeline["fail_in"] = "predict"
+        wd = tmp_path / "wd"
+        with pytest.raises(RuntimeError):
+            api.run(**_run_kwargs(tmp_path), workdir=wd)
+        assert (wd / "train" / sv_io.MODEL).exists()
+        assert "scratch kept" not in capsys.readouterr().err
+
+    def test_save_routes_artifacts_to_output_dir(self, tmp_path, fake_pipeline, tmpdir_root):
+        out = api.run(
+            **_run_kwargs(tmp_path),
+            save={"model", "feature_matrix", "matched_bps", "callsets"},
+        )
+        o = tmp_path / "out"
+        assert out == {
+            "calls_csv": o / sv_io.CALLS_CSV, "calls_vcf": o / sv_io.CALLS_VCF,
+            "model": o / sv_io.MODEL, "feature_matrix": o / sv_io.FEATURE_MATRIX,
+            "matched_bps": o / sv_io.MATCHED_BPS,
+            "gridss.bps": o / "gridss.bps.csv", "gridss.vcf": o / "gridss.vcf",
+        }
+        assert all(p.exists() for p in out.values())
+
+    def test_ground_truth_vcf_reused_unless_forced(self, tmp_path, fake_pipeline, tmpdir_root):
+        kw = _run_kwargs(tmp_path, ground_truth_bps=None, ground_truth_vcf=tmp_path / "gt.vcf")
+        out = api.run(**kw, save={"ground_truth"})
+        assert out["ground_truth"] == tmp_path / "out" / "gnomad.bps.csv"
+        api.run(**kw, save={"ground_truth"}, force_preprocess_ground_truth=True)
+        calls = fake_pipeline["gt_calls"]
+        assert [c["overwrite"] for c in calls] == [False, True]
+        assert all(c["output_dir"] == tmp_path / "out" for c in calls)
+
+
+class TestRunValidation:
+    @pytest.mark.parametrize("over, match", [
+        ({"save": {"plots"}}, "Unknown save artifacts"),
+        ({"ground_truth_bps": None}, "exactly one"),
+        ({"ground_truth_vcf": "gt.vcf"}, "exactly one"),
+        ({"save": {"ground_truth"}}, "needs ground_truth_vcf"),
+        ({"caller_vcfs": {}}, "caller_vcfs is empty"),
+    ])
+    def test_rejected_before_any_work(self, tmp_path, fake_pipeline, tmpdir_root, over, match):
+        with pytest.raises(ValueError, match=match):
+            api.run(**_run_kwargs(tmp_path, **over))
+        assert list(tmpdir_root.iterdir()) == []
+        assert not (tmp_path / "out").exists()
+
+
+class TestRunProvenance:
+    def test_success_record(self, tmp_path, fake_pipeline, tmpdir_root):
+        import hashlib
+
+        out = api.run(**_run_kwargs(tmp_path), command="svensemble run --sample S")
+        rec = _provenance(tmp_path / "out")
+        assert rec["status"] == "succeeded"
+        assert rec["command"] == "svensemble run --sample S"
+        assert rec["parameters"]["caller_vcfs"] == {"gridss": str((tmp_path / "g.vcf").resolve())}
+        assert rec["parameters"]["workdir_is_tmp"] is True
+        assert rec["model"]["model_id"] == api.model_id(model="unbiased_xgb")
+        assert rec["inputs"]["ground_truth_bps"]["size"] == (tmp_path / "gt.csv").stat().st_size
+        assert rec["inputs"]["caller_vcfs"]["gridss"] == {"path": str((tmp_path / "g.vcf").resolve()), "exists": False}
+        sha = hashlib.sha256(out["calls_csv"].read_bytes()).hexdigest()
+        assert rec["outputs"]["calls_csv"]["sha256"] == sha
+        assert rec["end_time"] is not None and rec["duration_s"] >= 0
+
+    def test_api_call_has_no_command(self, tmp_path, fake_pipeline, tmpdir_root):
+        api.run(**_run_kwargs(tmp_path))
+        rec = _provenance(tmp_path / "out")
+        assert rec["command"] is None and rec["argv"] is None
+
+    def test_record_written_at_start(self, tmp_path, fake_pipeline, tmpdir_root, monkeypatch):
+        seen = {}
+
+        def spy(*a, **k):
+            seen.update(_provenance(tmp_path / "out"))
+            return pd.DataFrame({"INFO_EVENT": ["e1"]})
+
+        monkeypatch.setattr(api, "preprocess_raw", spy)
+        api.run(**_run_kwargs(tmp_path))
+        assert seen["status"] == "running"

@@ -14,6 +14,8 @@ from pathlib import Path
 from . import _caller_params as caller_params
 from . import chunk_match as chunk_match
 from . import breakpoints as bps
+from . import io as sv_io
+from . import utils as sv_utils
 
 
 def get_truth_count(
@@ -161,10 +163,10 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, val_name, trainin
 
 
 def run_single_callset_benchmark(
-    callset_bps_path: Path,
-    callset_name: str,
-    val_bps_path: Path,
-    val_name: str,
+    callset_bps: Path,
+    caller: str,
+    val_bps: Path,
+    val_set: str,
     output_dir: Path | None = None,
     svtypes: list[str] | None = None,
     svlen_min: int | None = None,
@@ -173,11 +175,11 @@ def run_single_callset_benchmark(
 ):
     """Benchmark one callset against a validation set and write a single CSV.
 
-    Dispatch is by callset_name: names prefixed svensemble2 are ensemble
+    Dispatch is by caller: names prefixed svensemble2 are ensemble
     prediction sets (validated via validate_svensemble2_predictions); all
     other names are basic caller callsets (validated via
     validate_basic_callset, with qual_metric resolved from
-    CALLSET_PARAM_DICT[callset_name]). This unifies individual callers
+    CALLSET_PARAM_DICT[caller]). This unifies individual callers
     (gridss, delly, survivor_*, ...) and ensemble predictions behind one entry
     point.
 
@@ -186,14 +188,14 @@ def run_single_callset_benchmark(
     so metrics are computed within the category.
 
     Args:
-        callset_bps_path (Path): Path to the callset breakpoints CSV.
-        callset_name (str): Callset identifier. Names prefixed svensemble2
+        callset_bps (Path): Path to the callset breakpoints CSV.
+        caller (str): Callset identifier. Names prefixed svensemble2
             are treated as ensemble prediction sets; all others are basic
             caller callsets resolved against CALLSET_PARAM_DICT.
-        val_bps_path (Path): Path to the validation set breakpoints CSV.
-        val_name (str): Name of the validation set.
+        val_bps (Path): Path to the validation set breakpoints CSV.
+        val_set (str): Name of the validation set.
         output_dir (Path, optional): Directory to write
-            {callset_name}.benchmark.csv into. If None, the validation
+            {caller}.benchmark.csv (io.BENCHMARK_CSV) into. If None, the validation
             dataframe is returned instead. Default: None.
         svtypes (list[str], optional): INFO_INFERRED_SVTYPE values to keep.
             None keeps all types. Default: None.
@@ -207,10 +209,11 @@ def run_single_callset_benchmark(
     Returns:
         pandas.DataFrame or None:
         - The validation dataframe when output_dir is None;
-        - None after writing {callset_name}.benchmark.csv to output_dir when output_dir is not None.
+        - None after writing {caller}.benchmark.csv to output_dir when output_dir is not None.
     """
-    val_set = pd.read_csv(val_bps_path)
-    callset_bps = pd.read_csv(callset_bps_path, low_memory=False)
+    val_name, callset_name = val_set, caller
+    val_set = pd.read_csv(val_bps)
+    callset_bps = pd.read_csv(callset_bps, low_memory=False)
 
     source = 'svensemble2' if callset_name.startswith('svensemble2') else callset_name
 
@@ -251,5 +254,5 @@ def run_single_callset_benchmark(
     if output_dir is None:
         return val_df
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    val_df.to_csv(output_dir / f'{callset_name}.benchmark.csv', index=False)
+    with sv_utils.atomic_path(Path(output_dir) / sv_io.BENCHMARK_CSV.format(caller=callset_name)) as tmp:
+        val_df.to_csv(tmp, index=False)

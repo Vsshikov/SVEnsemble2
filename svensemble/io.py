@@ -7,7 +7,8 @@ File I/O for SVEnsemble2: every pipeline filename and every read/write.
   Artifacts -- ``read_*`` / ``write_*`` for breakpoint CSVs, the feature
   matrix, the model pickle and the final calls. Writers take the object
   first and the location second, create parent directories and return the
-  path(s) they wrote. Readers take only the location, and exist only for
+  path(s) they wrote. Every write is atomic (``utils.atomic_path``): a
+  failed or killed write never leaves a partial file at the final path. Readers take only the location, and exist only for
   artifacts the pipeline reads back. A one-file artifact takes a file path;
   a CSV-plus-VCF artifact takes a directory and uses the constants.
 
@@ -33,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from . import vcfwrite
+from .utils import atomic_path
 
 
 RAW_BPS = "{caller}.raw_bps.csv"
@@ -43,6 +45,12 @@ MODEL = "model.pkl"
 FEATURE_MATRIX = "feature_matrix.csv"
 CALLS_CSV = "svensemble2_calls.csv"
 CALLS_VCF = "svensemble2_calls.vcf"
+GROUND_TRUTH_MANIFEST = "{ground_truth_name}.manifest.txt"
+VAL_BPS = "{val_set}.val_bps.csv"
+BENCHMARK_CSV = "{caller}.benchmark.csv"
+SHAP_SUMMARY = "shap_summary.csv"
+SHAP_VALUES = "shap_values.pkl"
+RUN_PROVENANCE = "svensemble_run.json"
 
 REQUIRED_KEYS = {"sample_name"}
 
@@ -57,8 +65,8 @@ def read_bps(path: Path) -> pd.DataFrame:
 def write_bps(bp_df: pd.DataFrame, path: Path) -> Path:
     """Write a breakpoint CSV without its index (e.g. RAW_BPS, MATCHED_BPS)."""
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    bp_df.to_csv(path, index=False)
+    with atomic_path(path) as tmp:
+        bp_df.to_csv(tmp, index=False)
     return path
 
 
@@ -68,7 +76,8 @@ def write_callset(bp_df: pd.DataFrame, out_dir: Path, caller: str, sample: str) 
     out_dir.mkdir(parents=True, exist_ok=True)
     bps_path = out_dir / CALLSET_BPS.format(caller=caller)
     vcf_path = out_dir / CALLSET_VCF.format(caller=caller)
-    bp_df.to_csv(bps_path, index=False)
+    with atomic_path(bps_path) as tmp:
+        bp_df.to_csv(tmp, index=False)
     vcfwrite.write_vcf(bp_df, vcf_path, source=caller, sample_name=sample)
     return bps_path, vcf_path
 
@@ -94,8 +103,8 @@ def read_feature_matrix(path: Path) -> pd.DataFrame:
 def write_feature_matrix(X: pd.DataFrame, path: Path) -> Path:
     """Write a feature matrix with its ``<callset>_INFO_EVENT`` index."""
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    X.to_csv(path, index=True)
+    with atomic_path(path) as tmp:
+        X.to_csv(tmp, index=True)
     return path
 
 
@@ -108,8 +117,7 @@ def read_model(path: Path):
 def write_model(model_fit, path: Path) -> Path:
     """Pickle a fitted model."""
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "wb") as f:
+    with atomic_path(path) as tmp, open(tmp, "wb") as f:
         pickle.dump(model_fit, f)
     return path
 
@@ -120,7 +128,8 @@ def write_calls(calls_df: pd.DataFrame, out_dir: Path, sample: str) -> tuple[Pat
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / CALLS_CSV
     vcf_path = out_dir / CALLS_VCF
-    calls_df.to_csv(csv_path, index=True)
+    with atomic_path(csv_path) as tmp:
+        calls_df.to_csv(tmp, index=True)
     vcfwrite.write_vcf(calls_df, vcf_path, source="svensemble2", sample_name=sample)
     return csv_path, vcf_path
 
@@ -257,8 +266,7 @@ def write_config(config: dict, path: Path) -> Path:
     Parent directories are created if missing.
     """
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+    with atomic_path(path) as tmp, open(tmp, "w") as f:
         if path.suffix.lower() in (".yaml", ".yml"):
             import yaml
             yaml.safe_dump(config, f, sort_keys=False, default_flow_style=False)

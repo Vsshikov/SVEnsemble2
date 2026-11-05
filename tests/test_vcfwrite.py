@@ -829,3 +829,34 @@ class TestWriteVcf:
         with pysam.VariantFile(str(tmp_path / 'out.vcf')) as vcf:
             assert '##source=my_caller' in str(vcf.header)
 
+
+
+class TestWriteVcfAtomic:
+    def test_failure_mid_write_leaves_no_file(self, tmp_path, monkeypatch):
+        import svensemble.vcfwrite as vw
+
+        def boom(*a, **k):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(vw, "_write_symbolic_record", boom)
+        with pytest.raises(RuntimeError, match="boom"):
+            write_vcf(_df(_del_row('ev1', 100, 500)), tmp_path / 'out.vcf')
+        assert list(tmp_path.iterdir()) == []
+
+    def test_failure_keeps_previous_file(self, tmp_path, monkeypatch):
+        import svensemble.vcfwrite as vw
+
+        out = tmp_path / 'out.vcf'
+        write_vcf(_df(_del_row('ev1', 100, 500)), out)
+        before = out.read_bytes()
+        monkeypatch.setattr(vw, "_write_symbolic_record", lambda *a, **k: (_ for _ in ()).throw(RuntimeError()))
+        with pytest.raises(RuntimeError):
+            write_vcf(_df(_del_row('ev2', 900, 500)), out)
+        assert out.read_bytes() == before
+        assert [p.name for p in tmp_path.iterdir()] == ['out.vcf']
+
+    def test_gz_suffix_still_bgzipped(self, tmp_path):
+        out = write_vcf(_df(_del_row('ev1', 100, 500)), tmp_path / 'out.vcf.gz')
+        assert out == tmp_path / 'out.vcf.gz'
+        assert out.read_bytes()[:2] == b'\x1f\x8b'
+        assert len(_read_records(out)) == 1

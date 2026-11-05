@@ -1,8 +1,8 @@
 """
 Functions for preprocessing ground truth sets for SVEnsemble2.
 
-The single public entry point, `preprocess_ground_truth`, takes explicit
-`vcf_path` and `output_path` arguments and exposes all filtering options
+The single public entry point, `preprocess_ground_truth`, takes an explicit
+`vcf` and `output_dir` and exposes all filtering options
 (FILTER values, EVIDENCE, ALGORITHMS, allele-frequency bounds, SV length
 range, BOTHSIDES_SUPPORT, canonical-chromosome restriction). It is invoked
 either through `svensemble ground-truth` in the CLI or as a plain Python
@@ -17,6 +17,8 @@ recipe and per-variant differences (CIPOS dictionaries, filter defaults,
 input filenames) live only in the params entry.
 """
 
+import shlex
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -27,13 +29,14 @@ from pysam import VariantFile
 
 from . import _caller_params
 from . import callset_specific
+from . import io as sv_io
 from . import utils as sv_utils
 from . import vcfparse as vcfp
 
 
 def preprocess_ground_truth(
-    vcf_path: Path,
-    output_path: Path,
+    vcf: Path,
+    output_dir: Path,
     ground_truth_name: str = "gnomad",
     filters: List[str] | None = None,
     evidence: List[str] | None = None,
@@ -44,23 +47,22 @@ def preprocess_ground_truth(
     svlens: tuple[float, float] | None = (50, np.inf),
     bothsides_support_only: bool = False,
     canonical_chroms_only: bool = True,
-    force_rerun: bool = False,
+    overwrite: bool = False,
     write_manifest: bool = True,
     verbose: bool = False,
 ) -> Path:
     """
     Preprocess a ground-truth VCF into a filtered breakpoint CSV.
 
-    Reads `vcf_path`, applies the requested filters, dispatches to the
+    Reads `vcf`, applies the requested filters, dispatches to the
     ground-truth-specific preprocessing recipe registered in
     `callset_specific.ground_truth_recipes[ground_truth_name]`, converts to
     breakpoints, applies the SVLEN range filter and writes the result to
-    `output_path`.
+    `output_dir/{ground_truth_name}.bps.csv` (io.CALLSET_BPS).
 
     Args:
-        vcf_path: Full path to the input ground-truth VCF.
-        output_path: Full path to the output bps.csv (parent dir will be
-            created if missing).
+        vcf: Full path to the input ground-truth VCF.
+        output_dir: Output directory (created if missing).
         ground_truth_name: Key into `_caller_params.CALLSET_PARAM_DICT` for
             parsing parameters and into
             `callset_specific.ground_truth_recipes` for the preprocessing
@@ -90,28 +92,35 @@ def preprocess_ground_truth(
         bothsides_support_only: If True, keep only variants with the
             BOTHSIDES_SUPPORT flag set.
         canonical_chroms_only: If True, restrict to chr1-22, X, Y, M.
-        force_rerun: Re-create the output even if it already exists.
-        write_manifest: If True, write a `manifest.txt` next to `output_path`
-            recording the source VCF, timestamp, filter set and a
+        overwrite: Re-create the output even if it already exists. Without
+            it an existing output is reused as is: only its existence is
+            checked, not the inputs or filters that produced it.
+        write_manifest: If True, write `{ground_truth_name}.manifest.txt`
+            (io.GROUND_TRUTH_MANIFEST) next to the output, recording the source VCF, timestamp, filter set and a
             reproduction command.
         verbose: If True, print progress messages.
 
     Returns:
-        The `output_path` that was written (or would have been written on a
-        skipped rerun).
+        The output bps.csv path that was written (or reused when it already
+        existed and `overwrite` is False).
 
     Raises:
-        FileNotFoundError: If `vcf_path` does not exist.
+        FileNotFoundError: If `vcf` does not exist.
         KeyError: If `ground_truth_name` is not registered in
             `callset_specific.ground_truth_recipes` or
             `_caller_params.CALLSET_PARAM_DICT`.
     """
-    vcf_path = Path(vcf_path)
-    output_path = Path(output_path)
+    vcf_path = Path(vcf)
+    output_dir = Path(output_dir)
+    output_path = output_dir / sv_io.CALLSET_BPS.format(caller=ground_truth_name)
+    manifest_path = output_dir / sv_io.GROUND_TRUTH_MANIFEST.format(ground_truth_name=ground_truth_name)
 
-    if output_path.exists() and not force_rerun:
-        if verbose:
-            print(f"Output already exists at {output_path}, skipping (use force_rerun=True to overwrite)")
+    if output_path.exists() and not overwrite:
+        print(
+            f"Ground truth already exists at {output_path}; reusing it "
+            f"(pass overwrite / --overwrite to rebuild).",
+            file=sys.stderr,
+        )
         return output_path
 
     if not vcf_path.exists():
@@ -186,14 +195,13 @@ def preprocess_ground_truth(
             print(f"Filtering breakpoints by SVLEN [{min_len}, {max_len}]")
         gt_bp_df = gt_bp_df[gt_bp_df['INFO_SVLEN'].abs().between(min_len, max_len)]
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    gt_bp_df.to_csv(output_path, index=False)
-    if verbose:
-        print(f"Saved {len(gt_bp_df)} breakpoints to {output_path}")
-
+    # The manifest is written first so the bps CSV -- the file the
+    # skip-if-exists check above looks at -- is always the last one written.
     if write_manifest:
         _write_manifest(
+            manifest_path=manifest_path,
             output_path=output_path,
+            output_dir=output_dir,
             ground_truth_name=ground_truth_name,
             vcf_path=vcf_path,
             n_breakpoints=len(gt_bp_df),
@@ -208,13 +216,20 @@ def preprocess_ground_truth(
             canonical_chroms_only=canonical_chroms_only,
         )
         if verbose:
-            print(f"Wrote manifest to {output_path.parent / 'manifest.txt'}")
+            print(f"Wrote manifest to {manifest_path}")
+
+    with sv_utils.atomic_path(output_path) as tmp:
+        gt_bp_df.to_csv(tmp, index=False)
+    if verbose:
+        print(f"Saved {len(gt_bp_df)} breakpoints to {output_path}")
 
     return output_path
 
 
 def _write_manifest(
+    manifest_path: Path,
     output_path: Path,
+    output_dir: Path,
     ground_truth_name: str,
     vcf_path: Path,
     n_breakpoints: int,
@@ -229,6 +244,7 @@ def _write_manifest(
     canonical_chroms_only: bool,
 ) -> None:
     """Write a human-readable manifest alongside the output bps CSV."""
+    q = shlex.quote
     lines = [
         f"ground_truth_name: {ground_truth_name}",
         f"source_vcf: {vcf_path}",
@@ -250,26 +266,26 @@ def _write_manifest(
 
     cmd_parts = [
         "svensemble ground-truth",
-        f"    --vcf_path {vcf_path}",
-        f"    --output_path {output_path}",
+        f"    --vcf {q(str(vcf_path))}",
+        f"    --output_dir {q(str(output_dir))}",
         f"    --ground_truth_name {ground_truth_name}",
     ]
     if filters:
-        cmd_parts.append(f"    --filters {','.join(filters)}")
+        cmd_parts.append(f"    --filters {' '.join(filters)}")
     if evidence:
-        cmd_parts.append(f"    --evidence {','.join(evidence)}")
+        cmd_parts.append(f"    --evidence {' '.join(evidence)}")
     if svtypes:
-        cmd_parts.append(f"    --svtypes {','.join(svtypes)}")
+        cmd_parts.append(f"    --svtypes {' '.join(svtypes)}")
     if algorithms:
-        cmd_parts.append(f"    --algorithms {','.join(algorithms)}")
+        cmd_parts.append(f"    --algorithms {' '.join(algorithms)}")
     if min_af is not None:
         cmd_parts.append(f"    --min_af {min_af}")
     if max_af is not None:
         cmd_parts.append(f"    --max_af {max_af}")
     if svlens:
-        cmd_parts.append(f"    --svlen_lower {svlens[0]}")
+        cmd_parts.append(f"    --svlen_min {svlens[0]}")
         if svlens[1] != np.inf:
-            cmd_parts.append(f"    --svlen_upper {svlens[1]}")
+            cmd_parts.append(f"    --svlen_max {svlens[1]}")
     if bothsides_support_only:
         cmd_parts.append("    --bothsides_support_only")
     if not canonical_chroms_only:
@@ -280,7 +296,8 @@ def _write_manifest(
     lines.append("# Reproduce with:")
     lines.append(" \\\n".join(cmd_parts))
 
-    (output_path.parent / 'manifest.txt').write_text('\n'.join(lines) + '\n')
+    with sv_utils.atomic_path(manifest_path) as tmp:
+        tmp.write_text('\n'.join(lines) + '\n')
 
 
 def _apply_filters(

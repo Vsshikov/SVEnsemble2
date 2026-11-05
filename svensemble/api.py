@@ -12,18 +12,30 @@ save outputs:
     X, model_fit = api.train(matched, ["manta_diploid"], "unbiased_xgb", "manta_diploid")
     calls = api.predict(model_fit, X, matched, "unbiased_xgb", "manta_diploid")
 
-Ground truth, validation sets, benchmarking and SHAP are file-to-file and
-are exposed here unchanged. ``run`` chains every step through io into a
-workdir, as ``svensemble run`` does.
+Ground truth, validation sets, benchmarking and SHAP are file-to-file:
+they take input paths and an ``output_dir`` and write the fixed filenames
+named in ``svensemble.io``. Argument names match the CLI flags.
+
+``run`` chains every step for one sample, as ``svensemble run`` does. It
+takes input paths, metadata and an ``output_dir``; intermediates go to a
+private scratch directory (a tmpdir under ``$TMPDIR`` unless ``workdir`` is
+given) and only the calls plus the artifacts named in ``save`` are written to
+``output_dir``. A provenance record (io.RUN_PROVENANCE) is written to both.
 """
 
 import copy
+import shutil
+import sys
+import tempfile
+import time
+from collections.abc import Collection, Mapping
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from . import _config as sv_config
+from . import _provenance
 from . import breakpoints as bps_mod
 from . import chunk_match
 from . import io as sv_io
@@ -39,7 +51,7 @@ __all__ = [
     "generate_config", "model_id", "list_preset_ids",
     "preprocess_raw", "preprocess", "match", "train", "predict",
     "preprocess_ground_truth", "preprocess_validation_set", "benchmark_callset", "shap",
-    "run",
+    "run", "SAVE_ARTIFACTS",
 ]
 
 
@@ -269,8 +281,8 @@ def predict(
 def shap(
     model_pkl: Path,
     feature_matrix: Path,
-    sample_name: str,
-    model_name: str,
+    sample: str,
+    model: str,
     training_set: str,
     output_dir: Path,
     model_config: dict | None = None,
@@ -288,8 +300,8 @@ def shap(
     return sv_shap.run_shap(
         model_pkl=model_pkl,
         feature_matrix=feature_matrix,
-        sample_name=sample_name,
-        model_name=model_name,
+        sample=sample,
+        model=model,
         training_set=training_set,
         output_dir=output_dir,
         model_config=model_config,
@@ -304,99 +316,217 @@ def shap(
 # End-to-end run
 # ---------------------------------------------------------------------------
 
+SAVE_ARTIFACTS = frozenset({"model", "feature_matrix", "matched_bps", "ground_truth", "callsets"})
+"""Intermediates ``run`` can publish to output_dir besides the calls."""
+
+
 def run(
     sample: str,
-    workdir: Path,
+    caller_vcfs: Mapping[str, Path],
     ref: Path,
-    callers: list[str],
-    caller_vcfs: list[Path],
     model: str,
+    output_dir: Path,
+    *,
     training_set: str | None = None,
     ground_truth_vcf: Path | None = None,
     ground_truth_bps: Path | None = None,
     ground_truth_name: str = "gnomad",
+    force_preprocess_ground_truth: bool = False,
     model_config: dict | None = None,
     max_dist: int = 100,
     insert_delta_threshold: float = 0.7,
-    output_dir: Path | None = None,
-    ground_truth_filters: list[str] | None = None,
-    ground_truth_svtypes: list[str] | None = None,
-    ground_truth_svlen_lower: int = 50,
-    ground_truth_svlen_upper: float | None = None,
+    save: Collection[str] = (),
+    workdir: Path | None = None,
+    keep_workdir: bool = False,
+    command: str | None = None,
     verbose: bool = False,
-) -> Path:
-    """Run every step for one sample and return the path to the calls CSV.
+) -> dict[str, Path]:
+    """Run every step for one sample; return the paths written to output_dir.
 
-    Intermediate outputs land under ``workdir/{preprocess_raw, preprocess/<caller>,
-    ground_truth, match, train}`` and the calls under *output_dir* (default
-    ``workdir/predict``), with the same filenames the per-stage subcommands
-    write. Each artifact is read back from its file before the next step, so
-    the results equal running the subcommands one by one, as Nextflow does.
+    Inputs are paths, metadata are plain values, and output_dir receives the
+    calls (io.CALLS_CSV, io.CALLS_VCF) plus whatever *save* names, under their
+    io filenames. Everything else is an intermediate written to scratch:
+
+    * ``workdir`` given -- scratch is that directory (created if missing) and
+      is never deleted; intermediates land under
+      ``{preprocess_raw, preprocess/<caller>, ground_truth, match, train}``.
+    * ``workdir`` None -- scratch is a new private directory under ``$TMPDIR``
+      (``tempfile.mkdtemp``), deleted after a successful run unless
+      *keep_workdir*. After a failure it is kept and its path printed to
+      stderr.
+
+    Each artifact is read back from its file before the next step, so the
+    results equal running the stage subcommands one by one, as Nextflow does.
+    A provenance record (io.RUN_PROVENANCE) is written to scratch and to
+    output_dir at the start and rewritten at the end.
 
     Args:
-        sample: Sample name; used only in the VCF outputs.
-        callers, caller_vcfs: Caller names and their VCFs, paired by position.
+        sample: Sample name; used in the VCF outputs.
+        caller_vcfs: Caller name -> caller VCF.
+        ref: Reference FASTA (used by Delly).
+        model, training_set, model_config: As for train/predict.
+        output_dir: Where the calls and saved artifacts go (created if missing).
+            One run per output_dir: filenames are fixed and are overwritten.
         training_set: As in train; defaults to *callers* sorted and joined with '+'.
         ground_truth_vcf, ground_truth_bps: Exactly one. A VCF goes through
-            preprocess_ground_truth (with the ground_truth_* filters); a
-            preprocessed breakpoints CSV is symlinked into the workdir.
-        model_config: Optional decoded model config override (with 'base').
+            preprocess_ground_truth with the registry's filter_defaults (for
+            other filters run ``svensemble ground-truth`` and pass the bps).
+            An existing ground-truth output in its directory is reused unless
+            *force_preprocess_ground_truth*; with a tmpdir and without
+            ``"ground_truth"`` in *save* it is rebuilt every run. A bps CSV
+            is read in place.
+        max_dist, insert_delta_threshold: Passed to match.
+        save: Subset of SAVE_ARTIFACTS to write to output_dir.
+            ``"ground_truth"`` requires ground_truth_vcf.
+        command: The invoking command line, recorded in the provenance record
+            (the CLI passes it; API callers usually leave it None).
+        verbose: Print progress messages.
 
-    Remaining arguments are passed to the step of the same name.
+    Returns:
+        ``calls_csv`` and ``calls_vcf``, plus for each saved artifact
+        ``model``, ``feature_matrix``, ``matched_bps``, ``ground_truth`` and
+        ``<caller>.bps`` / ``<caller>.vcf``.
     """
-    if len(callers) != len(caller_vcfs):
-        raise ValueError(
-            f"callers ({len(callers)}) and caller_vcfs ({len(caller_vcfs)}) must be the same length."
-        )
+    caller_vcfs = {caller: Path(vcf).resolve() for caller, vcf in dict(caller_vcfs).items()}
+    if not caller_vcfs:
+        raise ValueError("caller_vcfs is empty; give at least one caller VCF.")
+    save = frozenset(save)
+    unknown = save - SAVE_ARTIFACTS
+    if unknown:
+        raise ValueError(f"Unknown save artifacts {sorted(unknown)}; choose from {sorted(SAVE_ARTIFACTS)}.")
     if (ground_truth_vcf is None) == (ground_truth_bps is None):
         raise ValueError("Provide exactly one of ground_truth_vcf or ground_truth_bps.")
+    if "ground_truth" in save and ground_truth_bps is not None:
+        raise ValueError("save='ground_truth' needs ground_truth_vcf; ground_truth_bps is already a file you own.")
 
-    workdir = Path(workdir).resolve()
-    output_dir = Path(output_dir or workdir / "predict").resolve()
-    raw_dir = workdir / "preprocess_raw"
-    pre_dir = workdir / "preprocess"
-    gt_dir = workdir / "ground_truth"
-    match_dir = workdir / "match"
-    train_dir = workdir / "train"
-    for d in (raw_dir, pre_dir, gt_dir, match_dir, train_dir, output_dir):
-        d.mkdir(parents=True, exist_ok=True)
+    ref = Path(ref).resolve()
+    output_dir = Path(output_dir).resolve()
+    ground_truth_vcf = Path(ground_truth_vcf).resolve() if ground_truth_vcf is not None else None
+    ground_truth_bps = Path(ground_truth_bps).resolve() if ground_truth_bps is not None else None
+    resolved_model = _resolve_model(model, model_config)
+
+    owned = workdir is None
+    scratch = Path(tempfile.mkdtemp(prefix="svensemble_run_")) if owned else Path(workdir).resolve()
+    record = _provenance.start(
+        command=command,
+        parameters={
+            "sample": sample,
+            "caller_vcfs": caller_vcfs,
+            "ref": ref,
+            "model": model,
+            "training_set": training_set,
+            "output_dir": output_dir,
+            "ground_truth_vcf": ground_truth_vcf,
+            "ground_truth_bps": ground_truth_bps,
+            "ground_truth_name": ground_truth_name,
+            "force_preprocess_ground_truth": force_preprocess_ground_truth,
+            "max_dist": max_dist,
+            "insert_delta_threshold": insert_delta_threshold,
+            "save": sorted(save),
+            "workdir": scratch,
+            "workdir_is_tmp": owned,
+            "keep_workdir": keep_workdir,
+        },
+        inputs={
+            "caller_vcfs": {c: _provenance.file_info(v) for c, v in caller_vcfs.items()},
+            "ref": _provenance.file_info(ref),
+            "ground_truth_vcf": _provenance.file_info(ground_truth_vcf),
+            "ground_truth_bps": _provenance.file_info(ground_truth_bps),
+        },
+        model={"model_id": sv_config.model_id(resolved_model), "config": resolved_model},
+    )
     if verbose:
-        print(f"[run] workdir: {workdir}")
+        print(f"[run] scratch: {scratch}{' (tmpdir)' if owned else ''}")
         print(f"[run] output_dir: {output_dir}")
 
+    t0 = time.monotonic()
+    error, outputs = None, None
+    try:
+        _provenance.write(record, [scratch, output_dir])
+        outputs = _run_in(
+            scratch, output_dir,
+            sample=sample, caller_vcfs=caller_vcfs, ref=ref, model=model,
+            training_set=training_set, ground_truth_vcf=ground_truth_vcf,
+            ground_truth_bps=ground_truth_bps, ground_truth_name=ground_truth_name,
+            force_preprocess_ground_truth=force_preprocess_ground_truth,
+            model_config=model_config, max_dist=max_dist,
+            insert_delta_threshold=insert_delta_threshold, save=save, verbose=verbose,
+        )
+        return outputs
+    except BaseException as e:
+        error = e
+        raise
+    finally:
+        delete = owned and error is None and not keep_workdir
+        _provenance.finish(record, error=error, outputs=outputs,
+                           start_monotonic=t0, end_monotonic=time.monotonic())
+        try:
+            _provenance.write(record, [output_dir] if delete else [scratch, output_dir])
+        except OSError as e:
+            print(f"[run] could not write provenance record: {e}", file=sys.stderr)
+        if delete:
+            shutil.rmtree(scratch, ignore_errors=True)
+        elif owned:
+            print(f"[run] scratch kept at {scratch}", file=sys.stderr)
+
+
+def _run_in(
+    scratch: Path,
+    output_dir: Path,
+    *,
+    sample: str,
+    caller_vcfs: dict[str, Path],
+    ref: Path,
+    model: str,
+    training_set: str,
+    ground_truth_vcf: Path | None,
+    ground_truth_bps: Path | None,
+    ground_truth_name: str,
+    force_preprocess_ground_truth: bool,
+    model_config: dict | None,
+    max_dist: int,
+    insert_delta_threshold: float,
+    save: frozenset[str],
+    verbose: bool,
+) -> dict[str, Path]:
+    """The body of run: every step, reading each artifact back from its file.
+
+    An artifact named in *save* is written straight to output_dir; the rest go
+    to their scratch subdirectory. The calls always go to output_dir.
+    """
+    def artifact_dir(artifact: str, subdir: str) -> Path:
+        return output_dir if artifact in save else scratch / subdir
+
+    published = {}
     caller_bps = {}
-    for caller, vcf in zip(callers, caller_vcfs):
+    for caller, vcf in caller_vcfs.items():
         raw_path = sv_io.write_bps(
-            preprocess_raw(Path(vcf).resolve(), caller, Path(ref).resolve(), verbose=verbose),
-            raw_dir / sv_io.RAW_BPS.format(caller=caller),
+            preprocess_raw(vcf, caller, ref, verbose=verbose),
+            scratch / "preprocess_raw" / sv_io.RAW_BPS.format(caller=caller),
         )
-        bps_path, _ = sv_io.write_callset(
+        bps_path, vcf_path = sv_io.write_callset(
             preprocess(sv_io.read_bps(raw_path), caller, model=model, model_config=model_config),
-            pre_dir / caller, caller, sample,
+            artifact_dir("callsets", f"preprocess/{caller}"), caller, sample,
         )
+        if "callsets" in save:
+            published[f"{caller}.bps"] = bps_path
+            published[f"{caller}.vcf"] = vcf_path
         caller_bps[caller] = sv_io.read_bps(bps_path)
         if verbose:
             print(f"[run] {caller}: {len(caller_bps[caller])} breakpoints -> {bps_path}")
 
-    gt_path = gt_dir / sv_io.CALLSET_BPS.format(caller=ground_truth_name)
     if ground_truth_vcf is not None:
-        preprocess_ground_truth(
-            vcf_path=Path(ground_truth_vcf).resolve(),
-            output_path=gt_path,
+        gt_path = preprocess_ground_truth(
+            vcf=ground_truth_vcf,
+            output_dir=artifact_dir("ground_truth", "ground_truth"),
             ground_truth_name=ground_truth_name,
-            filters=ground_truth_filters,
-            svtypes=ground_truth_svtypes,
-            svlens=(ground_truth_svlen_lower,
-                    ground_truth_svlen_upper if ground_truth_svlen_upper is not None else np.inf),
+            overwrite=force_preprocess_ground_truth,
             verbose=verbose,
         )
+        if "ground_truth" in save:
+            published["ground_truth"] = gt_path
     else:
-        src = Path(ground_truth_bps).resolve()
-        if gt_path.exists() or gt_path.is_symlink():
-            gt_path.unlink()
-        gt_path.symlink_to(src)
-        if verbose:
-            print(f"[run] symlinked ground truth bps: {gt_path} -> {src}")
+        gt_path = ground_truth_bps
 
     matched_path = sv_io.write_bps(
         match(
@@ -404,22 +534,28 @@ def run(
             model=model, model_config=model_config, max_dist=max_dist,
             insert_delta_threshold=insert_delta_threshold, verbose=verbose,
         ),
-        match_dir / sv_io.MATCHED_BPS,
+        artifact_dir("matched_bps", "match") / sv_io.MATCHED_BPS,
     )
     matched_bps = sv_io.read_bps(matched_path)
 
     X, model_fit = train(
-        matched_bps, callers, model, training_set, model_config=model_config,
+        matched_bps, list(caller_vcfs), model, training_set, model_config=model_config,
         ground_truth_name=ground_truth_name, verbose=verbose,
     )
-    sv_io.write_model(model_fit, train_dir / sv_io.MODEL)
-    fm_path = sv_io.write_feature_matrix(X, train_dir / sv_io.FEATURE_MATRIX)
+    model_path = sv_io.write_model(model_fit, artifact_dir("model", "train") / sv_io.MODEL)
+    fm_path = sv_io.write_feature_matrix(X, artifact_dir("feature_matrix", "train") / sv_io.FEATURE_MATRIX)
 
     calls = predict(
         model_fit, sv_io.read_feature_matrix(fm_path), matched_bps, model, training_set,
         model_config=model_config, callers=callers,
     )
-    calls_csv, _ = sv_io.write_calls(calls, output_dir, sample)
+    calls_csv, calls_vcf = sv_io.write_calls(calls, output_dir, sample)
     if verbose:
         print(f"[run] done. calls -> {calls_csv}")
-    return calls_csv
+
+    outputs = {"calls_csv": calls_csv, "calls_vcf": calls_vcf, **published}
+    for artifact, path in (("matched_bps", matched_path), ("model", model_path),
+                           ("feature_matrix", fm_path)):
+        if artifact in save:
+            outputs[artifact] = path
+    return outputs

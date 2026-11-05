@@ -3,7 +3,8 @@
 Enable with SVENSEMBLE_E2E=<spec.json> and `-m slow`. The spec holds the
 `run` inputs (sample, ref, callers, caller_vcfs, ground_truth_bps,
 ground_truth_name, model, training_set) and golden_dir, a workdir produced by
-`svensemble run` on the same inputs.
+`svensemble run` on the same inputs. The run uses an explicit workdir with
+output_dir=workdir/predict, so the golden layout predates the tmpdir change.
 """
 
 import json
@@ -55,9 +56,9 @@ def run_workdir(spec, tmp_path_factory):
         api.run(
             sample=spec["sample"],
             workdir=workdir,
+            output_dir=workdir / "predict",
             ref=Path(spec["ref"]),
-            callers=spec["callers"],
-            caller_vcfs=[Path(p) for p in spec["caller_vcfs"]],
+            caller_vcfs=dict(zip(spec["callers"], (Path(p) for p in spec["caller_vcfs"]))),
             ground_truth_bps=Path(spec["ground_truth_bps"]),
             ground_truth_name=spec["ground_truth_name"],
             model=spec["model"],

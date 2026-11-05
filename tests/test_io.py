@@ -265,3 +265,48 @@ class TestValidation:
     def test_empty_config_fails(self):
         with pytest.raises(ValueError):
             validate_config({})
+
+
+class TestAtomicPath:
+    def test_replaces_on_success(self, tmp_path):
+        from svensemble.utils import atomic_path
+
+        target = tmp_path / "sub" / "out.csv"
+        with atomic_path(target) as tmp:
+            assert tmp.parent == target.parent and tmp.name.startswith(".partial-")
+            assert tmp.name.endswith("out.csv")
+            tmp.write_text("new")
+        assert target.read_text() == "new"
+        assert [p.name for p in target.parent.iterdir()] == ["out.csv"]
+
+    @pytest.mark.parametrize("exc", [RuntimeError, SystemExit, KeyboardInterrupt])
+    def test_failure_leaves_original_and_no_partial(self, tmp_path, exc):
+        from svensemble.utils import atomic_path
+
+        target = tmp_path / "out.csv"
+        target.write_text("old")
+        with pytest.raises(exc):
+            with atomic_path(target) as tmp:
+                tmp.write_text("half")
+                raise exc()
+        assert target.read_text() == "old"
+        assert [p.name for p in tmp_path.iterdir()] == ["out.csv"]
+
+    def test_failure_before_creating_tmp(self, tmp_path):
+        from svensemble.utils import atomic_path
+
+        with pytest.raises(RuntimeError):
+            with atomic_path(tmp_path / "out.csv"):
+                raise RuntimeError()
+        assert list(tmp_path.iterdir()) == []
+
+    def test_io_writer_failure_leaves_nothing(self, tmp_path):
+        from svensemble import io as sv_io
+
+        class Unpicklable:
+            def __reduce__(self):
+                raise TypeError("nope")
+
+        with pytest.raises(TypeError):
+            sv_io.write_model(Unpicklable(), tmp_path / sv_io.MODEL)
+        assert list(tmp_path.iterdir()) == []
