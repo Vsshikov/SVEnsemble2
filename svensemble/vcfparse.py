@@ -136,6 +136,7 @@ def parse_vcf_to_df_with_format(
         f'INFO_{name}': []
         for name in info_col_names
     }
+    sample_field = []
 
     if sample_name is None:
         sample_name = vcf_file.header.samples[0]
@@ -154,16 +155,18 @@ def parse_vcf_to_df_with_format(
     _remove_unused_format_header_fields(vcf_file, caller_params, keep=annot_format_names)
 
     for record in vcf_file:
-        _fetch_base_fields(record, base_fields)
-        _fetch_filter_fields(record, filter_fields, caller_params)
-        _fetch_info_fields(record, info_fields, info_col_names)
-        _fetch_sample_fields(record, sample_fields, caller_params, sample_name)
-        _fetch_annotator_fields(record, annot_fields, annot_format_names, annot_info_names, sample_name)
+        for sample_name, single_sample_record in _gen_single_sample_records(record):
+            _fetch_base_fields(single_sample_record, base_fields)
+            _fetch_filter_fields(single_sample_record, filter_fields, caller_params)
+            _fetch_info_fields(single_sample_record, info_fields, info_col_names)
+            _fetch_sample_fields(single_sample_record, sample_fields, caller_params, sample_name)
+            _fetch_annotator_fields(single_sample_record, annot_fields, annot_format_names, annot_info_names, sample_name)
+            sample_field.append(sample_name)
 
     df = pd.DataFrame(base_fields | filter_fields | info_fields | sample_fields | annot_fields)
     logger.debug(
-        "parse_vcf_to_df_with_format: parsed %d records (sample='%s')",
-        len(df), sample_name,
+        "parse_vcf_to_df_with_format: parsed %d records (samples=%s)",
+        len(df), sample_field,
     )
     return df, vcf_file.header
 
@@ -348,3 +351,10 @@ def _fetch_annotator_fields(
             annot_fields[f'ANNOT_{name}'].append(record.info[name])
         except KeyError:
             annot_fields[f'ANNOT_{name}'].append(None)
+
+def _gen_single_sample_records(record: VariantRecord) -> tuple[str, VariantRecord.samples]:
+    """
+    Yield a tuple of (sample name, single sample record) for each sample in record.
+    """
+    for sample_name in record.samples:
+        yield sample_name, record.samples[sample_name]
