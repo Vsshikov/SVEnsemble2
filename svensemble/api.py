@@ -547,7 +547,7 @@ def _run_in(
 
     calls = predict(
         model_fit, sv_io.read_feature_matrix(fm_path), matched_bps, model, training_set,
-        model_config=model_config, callers=callers,
+        model_config=model_config, callers=list(caller_vcfs),
     )
     calls_csv, calls_vcf = sv_io.write_calls(calls, output_dir, sample)
     if verbose:
