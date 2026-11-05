@@ -217,16 +217,27 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         },
         'description': 'Unbiased XGBoost model trained on a pooled (concat/cross) training set from one or more samples, supplied via --train_samples/--train_matched_bps.'
     },
-    'unbiased_rf_duphold': {
-        'name': 'unbiased_rf_duphold',
+    'unbiased_d31_duphold': {
+        'name': 'unbiased_d31_duphold',
         'base': 'unbiased_rf',
         'training_params': {
             'function': 'unbiased',
             'custom_cols': ['DHFC', 'DHBFC', 'DHFFC'],
-            'model_kwargs': {},
+            'model_kwargs': {'max_depth': 31},
         },
-        'description': 'Unbiased random forest model for SV call probability estimation.'
+        'description': 'Unbiased random forest model for SV call probability estimation. Model with max depth 31 so GPUTreeExplainer can be used. Integrates Duphold annotations.'
     },
+    'unbiased_xgb_duphold': {
+        'name': 'unbiased_xgb_duphold',
+        'base': 'unbiased_xgb',
+        'training_params': {
+            'function': 'unbiased_xgb',
+            'custom_cols': ['DHFC', 'DHBFC', 'DHFFC'],
+            'model_kwargs': {},
+            'fillna': None,
+        },
+        'description': 'Unbiased XGBoost model for SV call probability estimation with native NaN handling. Integrates Duphold annotations.'
+    }
 }
 
 
