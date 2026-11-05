@@ -102,14 +102,13 @@ def _register_preprocess_raw(subparsers):
     )
     p.add_argument("--vcf", type=Path, required=True, help="Input VCF file path.")
     p.add_argument("--caller", type=str, required=True, help="Caller name (e.g. gridss, manta_diploid, delly).")
-    p.add_argument("--ref", type=Path, required=True, help="Reference FASTA path.")
     p.add_argument("--output_dir", type=Path, required=True, help="Output directory for {caller}.raw_bps.csv.")
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_preprocess_raw)
 
 
 def _cmd_preprocess_raw(args):
-    bp_df = api.preprocess_raw(args.vcf, args.caller, args.ref, verbose=args.verbose)
+    bp_df = api.preprocess_raw(sv_io.read_vcf(args.vcf, args.caller), args.caller, verbose=args.verbose)
     out = sv_io.write_bps(bp_df, args.output_dir / sv_io.RAW_BPS.format(caller=args.caller))
 
     if args.verbose:
@@ -498,7 +497,7 @@ def _register_run(subparsers):
     p.add_argument("--sample", type=str, required=True, help="Sample name (used as identifier only).")
     p.add_argument("--callers", type=str, nargs="+", required=True, help="Caller names (same order as --caller_vcfs).")
     p.add_argument("--caller_vcfs", type=Path, nargs="+", required=True, help="Caller VCFs (same order as --callers).")
-    p.add_argument("--ref", type=Path, required=True, help="Reference FASTA path.")
+    p.add_argument("--ref", type=Path, required=True, help="Reference FASTA path. Reserved for VCF writing; currently only recorded in provenance.")
     p.add_argument("--model", type=str, required=True, help="Model name.")
     p.add_argument("--training_set", type=str, default=None, help="Training set name. Defaults to --callers sorted and joined with '+'. Give a TRAINING_SET_PRESETS name to train on that preset's callers.")
     p.add_argument("--output_dir", type=Path, required=True, help="Directory for the calls and any --save_* artifacts (created if missing; one run per directory).")

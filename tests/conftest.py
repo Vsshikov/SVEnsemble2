@@ -185,23 +185,107 @@ def make_delly_evt_df(n: int = 2) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def make_delly_bnd_df(n: int = 4) -> pd.DataFrame:
-    """Synthetic Delly BND DataFrame."""
+DELLY_CTS = ['3to5', '5to3', '3to3', '5to5']
+
+
+def delly_bnd_alt(ct: str, base: str, chrom: str, pos: int) -> str:
+    """The BND ALT Delly v1.7.3 writes for connection type *ct*."""
+    return {
+        '3to5': f'{base}[{chrom}:{pos}[',
+        '5to3': f']{chrom}:{pos}]{base}',
+        '3to3': f'{base}]{chrom}:{pos}]',
+        '5to5': f'[{chrom}:{pos}[{base}',
+    }[ct]
+
+
+def make_delly_bnd_df(n: int = 4, svtype: str = 'BND') -> pd.DataFrame:
+    """Synthetic raw Delly BND (or old-style TRA) DataFrame, one record per
+    translocation as Delly writes it, cycling through the four CT values.
+
+    BND: partner in INFO_CHR2/INFO_POS2, INFO_END = POS + 1.
+    TRA: partner position in INFO_END, no INFO_POS2, symbolic ALT.
+    """
     rows = []
     for i in range(n):
+        ct = DELLY_CTS[i % 4]
+        pos, pos2 = 7000 + i * 100, 8000 + i * 100
+        tra = svtype == 'TRA'
         rows.append({
-            'CHROM': 'chr1', 'POS': 7000 + i * 100,
-            'ID': f'BND00001_bp{i}', 'REF': 'N',
-            'ALT': f'N[chr2:{8000 + i * 100}[',
-            'QUAL': 150.0, 'INFO_END': 0,
+            'CHROM': 'chr1', 'POS': pos,
+            'ID': f'BND0000{i}', 'REF': 'A',
+            'ALT': '<TRA>' if tra else delly_bnd_alt(ct, 'A', 'chr2', pos2),
+            'QUAL': 150.0, 'INFO_END': pos2 if tra else pos + 1,
             'FILTER_PASS': 1,
-            'INFO_SVTYPE': 'BND', 'INFO_SVLEN': 0,
-            'INFO_CIPOS': (-5, 5),
-            'INFO_POS2': 8000 + i * 100,
+            'INFO_SVTYPE': svtype, 'INFO_SVLEN': None,
+            'INFO_CIPOS': (-5, 5), 'INFO_CIEND': (-7, 7),
+            'INFO_POS2': None if tra else pos2,
             'INFO_CHR2': 'chr2',
-            'INFO_EVENT': f'BND00001_bp{i}',
+            'INFO_CT': ct,
         })
     return pd.DataFrame(rows)
+
+
+_DELLY_VCF_HEADER = """\
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##FILTER=<ID=LowQual,Description="Poor quality">
+##INFO=<ID=CIEND,Number=2,Type=Integer,Description="CI around END">
+##INFO=<ID=CIPOS,Number=2,Type=Integer,Description="CI around POS">
+##INFO=<ID=CHR2,Number=1,Type=String,Description="Chromosome for POS2">
+##INFO=<ID=POS2,Number=1,Type=Integer,Description="Position for CHR2">
+##INFO=<ID=END,Number=1,Type=Integer,Description="End position">
+##INFO=<ID=PE,Number=1,Type=Integer,Description="Paired-end support">
+##INFO=<ID=MAPQ,Number=1,Type=Integer,Description="Median PE MAPQ">
+##INFO=<ID=SRMAPQ,Number=1,Type=Integer,Description="Median SR MAPQ">
+##INFO=<ID=SR,Number=1,Type=Integer,Description="Split-read support">
+##INFO=<ID=SRQ,Number=1,Type=Float,Description="SR consensus quality">
+##INFO=<ID=CE,Number=1,Type=Float,Description="Consensus entropy">
+##INFO=<ID=CT,Number=1,Type=String,Description="Connection type">
+##INFO=<ID=SVLEN,Number=1,Type=Integer,Description="Insertion length">
+##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description="Imprecise">
+##INFO=<ID=PRECISE,Number=0,Type=Flag,Description="Precise">
+##INFO=<ID=SVTYPE,Number=1,Type=String,Description="SV type">
+##INFO=<ID=SVMETHOD,Number=1,Type=String,Description="Method">
+##INFO=<ID=HOMLEN,Number=1,Type=Integer,Description="Microhomology length">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+##FORMAT=<ID=RC,Number=1,Type=Integer,Description="Raw read counts">
+##FORMAT=<ID=RCL,Number=1,Type=Integer,Description="Raw read counts left">
+##FORMAT=<ID=RCR,Number=1,Type=Integer,Description="Raw read counts right">
+##FORMAT=<ID=RDCN,Number=1,Type=Integer,Description="Read-depth CN">
+##FORMAT=<ID=DR,Number=1,Type=Integer,Description="Reference pairs">
+##FORMAT=<ID=DV,Number=1,Type=Integer,Description="Variant pairs">
+##FORMAT=<ID=RR,Number=1,Type=Integer,Description="Reference junction reads">
+##FORMAT=<ID=RV,Number=1,Type=Integer,Description="Variant junction reads">
+##contig=<ID=chr1,length=248956422>
+##contig=<ID=chr2,length=242193529>
+#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1
+"""
+
+
+def write_delly_vcf(path) -> list[tuple[str, int, int]]:
+    """Write a small Delly v1.7.3-style VCF: one DEL plus one BND per CT.
+
+    Returns (CT, POS, POS2) for each BND record, in file order.
+    """
+    fmt = "GT:GQ:RC:RCL:RCR:RDCN:DR:DV:RR:RV\t0/1:50:10:10:10:2:5:5:5:5"
+    lines = [
+        "chr1\t1000\tDEL00000001\tA\t<DEL>\t100\tPASS\t"
+        "PRECISE;SVTYPE=DEL;SVMETHOD=EMBL.DELLYv1.7.3;END=2000;PE=5;MAPQ=60;"
+        f"CT=3to5;CIPOS=-5,5;CIEND=-5,5\t{fmt}"
+    ]
+    bnds = []
+    for i, ct in enumerate(DELLY_CTS):
+        pos, pos2 = 5000 + i * 100, 9000 + i * 100
+        bnds.append((ct, pos, pos2))
+        lines.append(
+            f"chr1\t{pos}\tBND0000{i}\tA\t{delly_bnd_alt(ct, 'A', 'chr2', pos2)}\t150\tPASS\t"
+            f"IMPRECISE;SVTYPE=BND;SVMETHOD=EMBL.DELLYv1.7.3;END={pos + 1};CHR2=chr2;"
+            f"POS2={pos2};PE=8;MAPQ=23;CT={ct};CIPOS=-20,20;CIEND=-20,20\t{fmt}"
+        )
+    with open(path, 'w') as fh:
+        fh.write(_DELLY_VCF_HEADER + "\n".join(lines) + "\n")
+    return bnds
 
 
 def make_sniffles_evt_df(n: int = 2) -> pd.DataFrame:

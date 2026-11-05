@@ -14,7 +14,6 @@ dependencies:
   - scikit-learn
   - py-xgboost=*=cpu_*
   - pysam
-  - cyvcf2
   - python-igraph
   - pyyaml
   - frozendict  # built in from Python 3.15 (PEP 814)

@@ -113,7 +113,7 @@ Inputs to `svensemble run`:
 | `--workdir` | yes | Directory for intermediate and final outputs; created if missing |
 | `--callers` | yes | Caller names, see [Supported callers](#supported-callers) |
 | `--caller_vcfs` | yes | One VCF/BCF per caller, unmodified caller output, in the same order as `--callers` |
-| `--ref` | yes | Reference genome FASTA the reads were aligned to |
+| `--ref` | yes | Reference genome FASTA the reads were aligned to (currently only recorded in the run's provenance) |
 | `--ground_truth_vcf` | one of these two | Ground truth SV sites VCF, used to label calls. Currently only gnomAD-SV is supported |
 | `--ground_truth_bps` | one of these two | Ground truth already processed by `svensemble ground-truth`, to reuse across samples |
 | `--model` | yes | `unbiased_rf`, `unbiased_xgb` or `consensus`, see [Models](#models) |
@@ -164,7 +164,7 @@ The same steps are available from Python. They take and return pandas DataFrames
 ```python
 from svensemble import api, io
 
-raw = api.preprocess_raw("manta.diploidSV.vcf.gz", "manta_diploid", "GRCh38.fa")
+raw = api.preprocess_raw(io.read_vcf("manta.diploidSV.vcf.gz", "manta_diploid"), "manta_diploid")
 bps = api.preprocess(raw, "manta_diploid", model="unbiased_rf")
 matched = api.match({"manta_diploid": bps}, io.read_bps("gnomad.bps.csv"))
 X, model_fit = api.train(matched, ["manta_diploid"], "unbiased_rf")

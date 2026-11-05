@@ -19,7 +19,7 @@ from pathlib import Path
 from . import __version__
 from . import io as sv_io
 
-_PACKAGES = ("pandas", "numpy", "scikit-learn", "xgboost", "pysam", "cyvcf2")
+_PACKAGES = ("pandas", "numpy", "scikit-learn", "xgboost", "pysam")
 
 
 def _plain(obj):

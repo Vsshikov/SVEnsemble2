@@ -8,7 +8,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from svensemble import breakends as bnds
 from svensemble import callset_specific as cs
+from svensemble import io as sv_io
 from svensemble import _caller_params
 
 from .conftest import (
@@ -20,6 +22,8 @@ from .conftest import (
     make_manta_bnd_df,
     make_delly_evt_df,
     make_delly_bnd_df,
+    delly_bnd_alt,
+    write_delly_vcf,
     make_sniffles_evt_df,
     make_sniffles_bnd_df,
     make_survivor_evt_df,
@@ -243,11 +247,85 @@ class TestDellyPreprocessEvtsOnly:
         assert_column_dtypes(result, EVENT_TO_BND_REQUIRED_DTYPES)
 
 
+class TestDellySplitBnds:
+    # Mate ALT per CT for a chr1:pos record whose partner is the mate.
+    MATE_ALT = {
+        '3to5': ']chr1:{pos}]N',
+        '5to3': 'N[chr1:{pos}[',
+        '3to3': 'N]chr1:{pos}]',
+        '5to5': '[chr1:{pos}[N',
+    }
+    MATE_CT = {'3to5': '5to3', '5to3': '3to5', '3to3': '3to3', '5to5': '5to5'}
+
+    def _split(self, df):
+        out = cs.delly_split_bnds(df)
+        own = out[out['ID'].str.endswith('_2nd')].reset_index(drop=True)
+        mate = out[out['ID'].str.endswith('_1st')].reset_index(drop=True)
+        return out, own, mate
+
+    def test_two_rows_per_record(self):
+        df = make_delly_bnd_df()
+        out, own, mate = self._split(df)
+        assert len(out) == 2 * len(df)
+        assert list(own['ID']) == [f'{i}_2nd' for i in df['ID']]
+        assert list(mate['ID']) == [f'{i}_1st' for i in df['ID']]
+
+    def test_original_alt_matches_delly(self):
+        df = make_delly_bnd_df()
+        _, own, _ = self._split(df)
+        assert list(own['ALT']) == list(df['ALT'])
+        assert list(own['CHROM']) == list(df['CHROM'])
+        assert list(own['POS']) == list(df['POS'])
+        assert list(own['REF']) == list(df['REF'])
+
+    @pytest.mark.parametrize('i', range(4))
+    def test_mate_fields(self, i):
+        df = make_delly_bnd_df()
+        _, _, mate = self._split(df)
+        src, m = df.iloc[i], mate.iloc[i]
+        ct = src['INFO_CT']
+        assert m['CHROM'] == 'chr2' and m['POS'] == src['INFO_POS2']
+        assert m['REF'] == 'N'
+        assert m['ALT'] == self.MATE_ALT[ct].format(pos=src['POS'])
+        assert m['INFO_CHR2'] == 'chr1' and m['INFO_POS2'] == src['POS']
+        assert m['INFO_END'] == src['INFO_POS2'] + 1
+        assert m['INFO_CT'] == self.MATE_CT[ct]
+        assert m['INFO_CIPOS'] == src['INFO_CIEND'] and m['INFO_CIEND'] == src['INFO_CIPOS']
+        assert m['QUAL'] == src['QUAL']
+
+    def test_alts_point_at_each_other(self):
+        _, own, mate = self._split(make_delly_bnd_df())
+        own_alt = bnds.process_breakend_alt(own['ALT'])
+        mate_alt = bnds.process_breakend_alt(mate['ALT'])
+        assert list(own_alt['mate_chr']) == list(mate['CHROM'])
+        assert list(own_alt['mate_pos'].astype(int)) == list(mate['POS'])
+        assert list(mate_alt['mate_chr']) == list(own['CHROM'])
+        assert list(mate_alt['mate_pos'].astype(int)) == list(own['POS'])
+        assert own_alt['relative_pos'].notna().all() and mate_alt['relative_pos'].notna().all()
+
+    def test_tra_uses_end_for_partner(self):
+        df = make_delly_bnd_df(svtype='TRA')
+        _, own, mate = self._split(df)
+        assert list(mate['POS']) == list(df['INFO_END'])
+        assert list(own['INFO_POS2']) == list(df['INFO_END'])
+        assert list(own['ALT']) == [
+            delly_bnd_alt(ct, 'A', 'chr2', p) for ct, p in zip(df['INFO_CT'], df['INFO_END'])
+        ]
+
+    @pytest.mark.parametrize('bad', ['NtoN', None])
+    def test_unknown_ct_raises(self, bad):
+        df = make_delly_bnd_df()
+        df.loc[1, 'INFO_CT'] = bad
+        with pytest.raises(ValueError, match='INFO_CT'):
+            cs.delly_split_bnds(df)
+
+
 class TestDellyPreprocessBndsOnly:
-    def test_info_event_trimmed(self):
-        result = cs.delly_preprocess_bnds_only(make_delly_bnd_df())
-        for val in result['INFO_EVENT']:
-            assert not val.endswith('_bp')
+    def test_info_event_is_original_id(self):
+        df = make_delly_bnd_df()
+        result = cs.delly_preprocess_bnds_only(df)
+        assert len(result) == 2 * len(df)
+        assert sorted(result['INFO_EVENT']) == sorted(list(df['ID']) * 2)
 
     def test_cipos_split(self):
         result = cs.delly_preprocess_bnds_only(make_delly_bnd_df())
@@ -255,9 +333,8 @@ class TestDellyPreprocessBndsOnly:
         assert_missing_columns(result, ['INFO_CIPOS'])
 
     def test_info_end_from_pos2(self):
-        df = make_delly_bnd_df()
-        result = cs.delly_preprocess_bnds_only(df)
-        assert (result['INFO_END'] == df['INFO_POS2'].astype(int)).all()
+        result = cs.delly_preprocess_bnds_only(make_delly_bnd_df())
+        assert (result['INFO_END'] == result['INFO_POS2'].astype(int)).all()
 
     def test_schema_bnd_to_bp_contract(self):
         result = cs.delly_preprocess_bnds_only(make_delly_bnd_df())
@@ -523,3 +600,46 @@ class TestBndToBpContract:
     def test_raw_cipos_dropped(self, name, func, builder):
         result = func(builder())
         assert_missing_columns(result, ['INFO_CIPOS'])
+
+
+# =====================================================================
+# Recipe dispatcher
+# =====================================================================
+
+class TestParseRecipes:
+    def test_keys_are_sources(self):
+        for key in cs.parse_recipes:
+            assert _caller_params.CALLSET_PARAM_DICT[key]['source'] == key
+
+    def test_svaba_h_uses_svaba_recipe(self):
+        assert _caller_params.CALLSET_PARAM_DICT['svaba_H']['source'] in cs.parse_recipes
+
+    def test_unknown_source_raises(self):
+        params = dict(_caller_params.DELLY_PARAMS, source='no_such_caller')
+        with pytest.raises(KeyError, match='no_such_caller'):
+            cs.vcf_df_to_raw_bps(pd.DataFrame(), params)
+
+
+class TestVcfDfToRawBpsDelly:
+    @pytest.fixture
+    def parsed(self, tmp_path):
+        path = tmp_path / 'delly.vcf'
+        bnd_records = write_delly_vcf(path)
+        return sv_io.read_vcf(path, 'delly'), bnd_records
+
+    def test_one_breakpoint_per_record(self, parsed):
+        vcf_df, bnd_records = parsed
+        bp_df = cs.vcf_df_to_raw_bps(vcf_df, _caller_params.DELLY_PARAMS)
+        assert len(bp_df) == 1 + len(bnd_records)
+        bnd_bps = bp_df[bp_df['INFO_EVENT'].str.startswith('BND')].set_index('INFO_EVENT')
+        for i, (ct, pos, pos2) in enumerate(bnd_records):
+            row = bnd_bps.loc[f'BND0000{i}']
+            assert (row['CHROM_bnd1'], row['POS_bnd1']) == ('chr1', pos)
+            assert (row['CHROM_bnd2'], row['POS_bnd2']) == ('chr2', pos2)
+            assert row['INFO_CT_bnd1'] == ct
+
+    def test_input_not_mutated(self, parsed):
+        vcf_df, _ = parsed
+        original = vcf_df.copy()
+        cs.vcf_df_to_raw_bps(vcf_df, _caller_params.DELLY_PARAMS)
+        pd.testing.assert_frame_equal(vcf_df, original)

@@ -1,6 +1,9 @@
+from collections.abc import Callable
+from datetime import datetime
+from typing import Union, List, Literal, Dict, NotRequired, TypedDict
+
 import pandas as pd
 import numpy as np
-from typing import Union, List, Literal, Dict
 
 from . import breakends as bnds
 from . import events as evts
@@ -446,14 +449,90 @@ def delly_preprocess_evts_only(delly_df: pd.DataFrame, caller_params: dict|None 
 
     return delly_preprocess_common(delly_df_, caller_params)
 
+
+# CT -> (ALT of the record's own breakend, ALT of its mate), in VCF breakend
+# notation: b = anchor base, c:p = the partner breakend.
+_DELLY_BND_ALTS = {
+    '3to5': ('{b}[{c}:{p}[', ']{c}:{p}]{b}'),
+    '5to3': (']{c}:{p}]{b}', '{b}[{c}:{p}['),
+    '3to3': ('{b}]{c}:{p}]', '{b}]{c}:{p}]'),
+    '5to5': ('[{c}:{p}[{b}', '[{c}:{p}[{b}'),
+}
+# CT as seen from the mate breakend.
+_DELLY_MATE_CT = {'3to5': '5to3', '5to3': '3to5', '3to3': '3to3', '5to5': '5to5'}
+
+
+def delly_split_bnds(delly_df: pd.DataFrame) -> pd.DataFrame:
+    """Give each Delly BND/TRA record its mate breakend record.
+
+    Delly writes a translocation as one record; the partner breakend exists
+    only as INFO CHR2/POS2 (END for TRA) and the connection type CT. This
+    returns two rows per record, ID-suffixed '_2nd' (the original) and '_1st'
+    (the mate), so that stripping the 4-character suffix yields a shared
+    event ID. Same layout as the former delly2bnd script, without a reference:
+
+    - Original: ALT rebuilt from CT, anchored on its REF base; INFO_POS2 set
+      (from END for TRA).
+    - Mate: CHROM/POS = the partner; CHR2/POS2 = the original's CHROM/POS;
+      END = POS + 1; CT seen from the mate (3to5 <-> 5to3); CIPOS and CIEND
+      swapped; REF and ALT anchor 'N', since no reference base is fetched.
+      Every other column is copied.
+
+    Raises:
+        ValueError: If any record's INFO_CT is missing or not one of
+            3to5, 5to3, 3to3, 5to5.
+    """
+    ct = delly_df['INFO_CT']
+    bad_ct = ct[~ct.isin(list(_DELLY_BND_ALTS))]
+    if len(bad_ct) > 0:
+        raise ValueError(
+            f"Unexpected Delly INFO_CT for {len(bad_ct)} BND/TRA records: "
+            f"{sorted(map(str, bad_ct.unique()))}; expected {list(_DELLY_BND_ALTS)}"
+        )
+
+    chrom = delly_df['CHROM'].astype(str)
+    pos = delly_df['POS'].astype(int)
+    chrom2 = delly_df['INFO_CHR2'].astype(str)
+    is_tra = delly_df['INFO_SVTYPE'] == 'TRA'
+    pos2 = delly_df['INFO_END'].where(is_tra, delly_df['INFO_POS2']).astype(int)
+    anchor = delly_df['REF'].astype(str).str[0].str.upper()
+
+    own = delly_df.copy()
+    own['ID'] = delly_df['ID'].astype(str) + '_2nd'
+    own['ALT'] = [
+        _DELLY_BND_ALTS[t][0].format(b=b, c=c, p=p)
+        for t, b, c, p in zip(ct, anchor, chrom2, pos2)
+    ]
+    own['INFO_POS2'] = pos2
+
+    mate = delly_df.copy()
+    mate['ID'] = delly_df['ID'].astype(str) + '_1st'
+    mate['CHROM'] = chrom2
+    mate['POS'] = pos2
+    mate['REF'] = 'N'
+    mate['ALT'] = [
+        _DELLY_BND_ALTS[t][1].format(b='N', c=c, p=p)
+        for t, c, p in zip(ct, chrom, pos)
+    ]
+    mate['INFO_CHR2'] = chrom
+    mate['INFO_POS2'] = pos
+    mate['INFO_END'] = pos2 + 1
+    mate['INFO_CT'] = ct.map(_DELLY_MATE_CT)
+    mate['INFO_CIPOS'] = delly_df['INFO_CIEND']
+    mate['INFO_CIEND'] = delly_df['INFO_CIPOS']
+
+    return pd.concat([own, mate], axis=0, ignore_index=True)
+
+
 def delly_preprocess_bnds_only(delly_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
     """
-    Preprocessing for Delly BND entries only.
+    Preprocessing for Delly BND/TRA entries only: adds each record's mate
+    (delly_split_bnds), then derives INFO_EVENT, CIPOS bounds and INFO_END.
     """
     if delly_df.empty:
         return delly_df
 
-    delly_df_ = delly_df.copy()
+    delly_df_ = delly_split_bnds(delly_df)
     delly_df_.loc[:, 'INFO_EVENT'] = delly_df_.loc[:, 'ID'].astype(str).str[:-4]
 
     delly_df_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = sv_utils.split_cipos(delly_df_['INFO_CIPOS'])
@@ -1132,127 +1211,198 @@ def smoove_preprocess_bnds_only(
 
 
 # ---------------------------------------------------------------------------
-# Recipe registry for the generic parse_preprocess_vcf dispatcher.
+# Recipe registry for vcf_df_to_raw_bps.
 #
-# Each entry maps a callset name to its preprocessing recipe:
-#   bnd_svtypes   - SV types treated as BNDs for the split.
-#                   None  => entire VCF is BND (no split, no event_to_bnd).
-#                   []    => entire VCF is events (all go through event_to_bnd).
-#                   list  => rows whose INFO_SVTYPE is in the list are BND;
-#                            the rest are events.
-#   preprocess_all  - applied to entire VCF before the BND/event split.
-#   preprocess_bnds - applied to the BND half after the split.
-#   preprocess_evts - applied to the event half after the split.
-#   force_diff_cols - passed to bnd_to_bp (columns that may differ per breakend).
-#   post_bps        - applied to the breakpoint DataFrame after bnd_to_bp.
+# Keyed by the `source` field of the caller's CALLSET_PARAM_DICT entry, so
+# variants of a caller that share a source (e.g. svaba and svaba_H) share one
+# recipe. Per-variant differences live in the CALLSET_PARAM_DICT entries.
 # ---------------------------------------------------------------------------
 
-parse_recipes: dict[str, dict] = {
-    'gridss': {
-        'bnd_svtypes': None,
-        'preprocess_all': gridss_preprocess,
-        'preprocess_bnds': None,
-        'preprocess_evts': None,
-        'force_diff_cols': None,
-        'post_bps': gridss_post_bps,
-    },
-    'manta_candidate': {
-        'bnd_svtypes': ['BND', 'INV'],
-        'preprocess_all': None,
-        'preprocess_bnds': manta_preprocess_bnds_only,
-        'preprocess_evts': manta_preprocess_evts_only,
-        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
-        'post_bps': manta_post_bps,
-    },
-    'manta_diploid': {
-        'bnd_svtypes': ['BND', 'INV'],
-        'preprocess_all': None,
-        'preprocess_bnds': manta_preprocess_bnds_only,
-        'preprocess_evts': manta_preprocess_evts_only,
-        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
-        'post_bps': manta_post_bps,
-    },
-    'sniffles': {
-        'bnd_svtypes': ['BND'],
-        'preprocess_all': None,
-        'preprocess_bnds': sniffles_preprocess_bnds_only,
-        'preprocess_evts': sniffles_preprocess_evts_only,
-        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
-        'post_bps': None,
-    },
-    'sniffles_207': {
-        'bnd_svtypes': ['BND'],
-        'preprocess_all': None,
-        'preprocess_bnds': sniffles_preprocess_bnds_only,
-        'preprocess_evts': sniffles_preprocess_evts_only,
-        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
-        'post_bps': None,
-    },
-    'survivor_short': {
-        'bnd_svtypes': [],
-        'preprocess_all': None,
-        'preprocess_bnds': None,
-        'preprocess_evts': survivor_preprocess_evts,
-        'force_diff_cols': None,
-        'post_bps': None,
-    },
-    'survivor_long': {
-        'bnd_svtypes': [],
-        'preprocess_all': None,
-        'preprocess_bnds': None,
-        'preprocess_evts': survivor_preprocess_evts,
-        'force_diff_cols': None,
-        'post_bps': None,
-    },
-    'survivor_all': {
-        'bnd_svtypes': [],
-        'preprocess_all': None,
-        'preprocess_bnds': None,
-        'preprocess_evts': survivor_preprocess_evts,
-        'force_diff_cols': None,
-        'post_bps': None,
-    },
-    'severus': {
-        'bnd_svtypes': ['BND'],
-        'preprocess_all': None,
-        'preprocess_bnds': severus_preprocess_bnds_only,
-        'preprocess_evts': severus_preprocess_evts_only,
-        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
-        'post_bps': None,
-    },
-    'cutesv': {
-        'bnd_svtypes': ['BND'],
-        'preprocess_all': None,
-        'preprocess_bnds': cutesv_preprocess_bnds_only,
-        'preprocess_evts': cutesv_preprocess_evts_only,
-        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
-        'post_bps': None,
-    },
-    'svaba': {
-        'bnd_svtypes': None,
-        'preprocess_all': svaba_preprocess,
-        'preprocess_bnds': None,
-        'preprocess_evts': None,
-        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
-        'post_bps': svaba_post_bps,
-    },
-    'svaba_H': {
-        'bnd_svtypes': None,
-        'preprocess_all': svaba_preprocess,
-        'preprocess_bnds': None,
-        'preprocess_evts': None,
-        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
-        'post_bps': svaba_post_bps,
-    },
-    'smoove': {
-        'bnd_svtypes': ['BND'],
-        'preprocess_all': None,
-        'preprocess_bnds': smoove_preprocess_bnds_only,
-        'preprocess_evts': smoove_preprocess_evts_only,
-        'force_diff_cols': ['INFO_CIPOS_l', 'INFO_CIPOS_r'],
-        'post_bps': None,
-    },
+class ParseRecipe(TypedDict):
+    """How vcf_df_to_raw_bps turns one caller's parsed VCF into raw breakpoints.
+
+    Steps run in this order; an omitted step is skipped.
+      preprocess_all  - whole DataFrame, before the BND/event split.
+      bnd_svtypes     - split rule: None = all rows are BNDs (no event_to_bnd);
+                        [] = all rows are events; list = rows whose
+                        INFO_SVTYPE is listed are BNDs, the rest are events.
+      preprocess_bnds - the BND rows (Delly's mate-record split happens here).
+      preprocess_evts - the event rows, before event_to_bnd.
+      force_diff_cols - passed to bnd_to_bp: columns always suffixed _bnd1/_bnd2.
+      post_bps        - the breakpoint DataFrame after bnd_to_bp.
+
+    The preprocess_* steps are called as f(df, caller_params=...);
+    post_bps as f(bp_df).
+    """
+    bnd_svtypes: list[str] | None
+    preprocess_all: NotRequired[Callable[..., pd.DataFrame]]
+    preprocess_bnds: NotRequired[Callable[..., pd.DataFrame]]
+    preprocess_evts: NotRequired[Callable[..., pd.DataFrame]]
+    force_diff_cols: NotRequired[list[str]]
+    post_bps: NotRequired[Callable[[pd.DataFrame], pd.DataFrame]]
+
+
+_CIPOS_LR = ['INFO_CIPOS_l', 'INFO_CIPOS_r']
+
+parse_recipes: dict[str, ParseRecipe] = {
+    'gridss': ParseRecipe(
+        bnd_svtypes=None,
+        preprocess_all=gridss_preprocess,
+        post_bps=gridss_post_bps,
+    ),
+    'manta_candidate': ParseRecipe(
+        bnd_svtypes=['BND', 'INV'],
+        preprocess_bnds=manta_preprocess_bnds_only,
+        preprocess_evts=manta_preprocess_evts_only,
+        force_diff_cols=_CIPOS_LR,
+        post_bps=manta_post_bps,
+    ),
+    'manta_diploid': ParseRecipe(
+        bnd_svtypes=['BND', 'INV'],
+        preprocess_bnds=manta_preprocess_bnds_only,
+        preprocess_evts=manta_preprocess_evts_only,
+        force_diff_cols=_CIPOS_LR,
+        post_bps=manta_post_bps,
+    ),
+    'delly': ParseRecipe(
+        bnd_svtypes=['BND', 'TRA'],
+        preprocess_bnds=delly_preprocess_bnds_only,
+        preprocess_evts=delly_preprocess_evts_only,
+        force_diff_cols=_CIPOS_LR,
+    ),
+    'sniffles': ParseRecipe(
+        bnd_svtypes=['BND'],
+        preprocess_bnds=sniffles_preprocess_bnds_only,
+        preprocess_evts=sniffles_preprocess_evts_only,
+        force_diff_cols=_CIPOS_LR,
+    ),
+    'sniffles_207': ParseRecipe(
+        bnd_svtypes=['BND'],
+        preprocess_bnds=sniffles_preprocess_bnds_only,
+        preprocess_evts=sniffles_preprocess_evts_only,
+        force_diff_cols=_CIPOS_LR,
+    ),
+    'survivor_short': ParseRecipe(
+        bnd_svtypes=[],
+        preprocess_evts=survivor_preprocess_evts,
+    ),
+    'survivor_long': ParseRecipe(
+        bnd_svtypes=[],
+        preprocess_evts=survivor_preprocess_evts,
+    ),
+    'survivor_all': ParseRecipe(
+        bnd_svtypes=[],
+        preprocess_evts=survivor_preprocess_evts,
+    ),
+    'severus': ParseRecipe(
+        bnd_svtypes=['BND'],
+        preprocess_bnds=severus_preprocess_bnds_only,
+        preprocess_evts=severus_preprocess_evts_only,
+        force_diff_cols=_CIPOS_LR,
+    ),
+    'cutesv': ParseRecipe(
+        bnd_svtypes=['BND'],
+        preprocess_bnds=cutesv_preprocess_bnds_only,
+        preprocess_evts=cutesv_preprocess_evts_only,
+        force_diff_cols=_CIPOS_LR,
+    ),
+    'svaba': ParseRecipe(
+        bnd_svtypes=None,
+        preprocess_all=svaba_preprocess,
+        force_diff_cols=_CIPOS_LR,
+        post_bps=svaba_post_bps,
+    ),
+    'smoove': ParseRecipe(
+        bnd_svtypes=['BND'],
+        preprocess_bnds=smoove_preprocess_bnds_only,
+        preprocess_evts=smoove_preprocess_evts_only,
+        force_diff_cols=_CIPOS_LR,
+    ),
 }
+
+
+def _log(msg: str) -> None:
+    """Print a message with an ISO 8601 timestamp prefix."""
+    print(f"{datetime.now().astimezone().isoformat()} {msg}")
+
+
+def vcf_df_to_raw_bps(
+    vcf_df: pd.DataFrame,
+    caller_params: dict,
+    verbose: bool = False,
+) -> pd.DataFrame:
+    """Turn one caller's parsed VCF DataFrame into raw breakpoints.
+
+    The recipe is parse_recipes[caller_params['source']]; see ParseRecipe for
+    the steps. *vcf_df* is not modified.
+
+    Args:
+        vcf_df: The caller's VCF as parsed by vcfparse.parse_vcf_to_df.
+        caller_params: The caller's CALLSET_PARAM_DICT entry.
+        verbose: If True, print progress messages.
+
+    Returns:
+        DataFrame of breakpoints.
+
+    Raises:
+        KeyError: If no recipe exists for caller_params['source'].
+    """
+    source = caller_params['source']
+    try:
+        recipe = parse_recipes[source]
+    except KeyError:
+        raise KeyError(
+            f"No parse recipe for source {source!r}; known: {sorted(parse_recipes)}"
+        ) from None
+
+    df = vcf_df.copy()
+
+    if preprocess_all := recipe.get('preprocess_all'):
+        if verbose:
+            _log(f"Preprocessing all {source} variants")
+        df = preprocess_all(df, caller_params=caller_params)
+
+    bnd_svtypes = recipe['bnd_svtypes']
+
+    if bnd_svtypes is None:
+        # Entire VCF is BND -- go straight to bnd_to_bp
+        bnd_df = df
+    else:
+        if bnd_svtypes:
+            bnd_mask = df['INFO_SVTYPE'].isin(bnd_svtypes)
+            bnd_df = df[bnd_mask]
+            evt_df = df[~bnd_mask]
+        else:
+            bnd_df = pd.DataFrame(columns=df.columns)
+            evt_df = df
+
+        preprocess_bnds = recipe.get('preprocess_bnds')
+        if preprocess_bnds and len(bnd_df) > 0:
+            if verbose:
+                _log(f"Preprocessing {source} BND variants")
+            bnd_df = preprocess_bnds(bnd_df, caller_params=caller_params)
+
+        preprocess_evts = recipe.get('preprocess_evts')
+        if preprocess_evts and len(evt_df) > 0:
+            if verbose:
+                _log(f"Preprocessing {source} event variants")
+            evt_df = preprocess_evts(evt_df, caller_params=caller_params)
+
+        if len(evt_df) > 0:
+            if verbose:
+                _log(f"Converting {source} events to breakends")
+            evt_bnd_df = evts.event_to_bnd(evt_df, bnd2_pos=caller_params['bnd2_pos'])
+            bnd_df = pd.concat([bnd_df, evt_bnd_df], axis=0) if len(bnd_df) > 0 else evt_bnd_df
+
+    if verbose:
+        _log(f"Converting {source} breakends to breakpoints")
+    force_diff = recipe.get('force_diff_cols')
+    bp_df = bnds.bnd_to_bp(bnd_df, force_diff_cols=force_diff) if force_diff else bnds.bnd_to_bp(bnd_df)
+
+    if post_bps := recipe.get('post_bps'):
+        bp_df = post_bps(bp_df)
+
+    return bp_df
 
 
 def gnomad_process(

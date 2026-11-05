@@ -79,7 +79,6 @@ class TestBuildCliWorkflowConfig:
         config = build_workflow_config(
             sample_name="test",
             callers=["gridss"],
-            ref_path=Path("/some/ref.fa"),
         )
         assert config["workflow_dir"] == Path(".")
         assert config["callset_bps_dir"] == Path(".")
@@ -142,6 +141,16 @@ class TestSubcommandParsing:
         with pytest.raises(SystemExit) as exc:
             main()
         assert exc.value.code == 2
+
+    def test_preprocess_raw_needs_no_ref(self, tmp_path):
+        from .conftest import write_delly_vcf
+        vcf = tmp_path / "delly.vcf"
+        write_delly_vcf(vcf)
+        sys.argv = ["svensemble", "preprocess-raw", "--vcf", str(vcf), "--caller", "delly",
+                    "--output_dir", str(tmp_path)]
+        main()
+        out = pd.read_csv(tmp_path / "delly.raw_bps.csv")
+        assert len(out) == 5
 
 
 class TestModelIdSubcommand:

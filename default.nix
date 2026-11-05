@@ -8,7 +8,6 @@
   igraph,
   xgboost,
   pyyaml,
-  cyvcf2,
 }:
 
 buildPythonApplication (_: {
@@ -25,7 +24,6 @@ buildPythonApplication (_: {
     igraph
     xgboost
     pyyaml
-    cyvcf2
   ];
 
   meta = {
