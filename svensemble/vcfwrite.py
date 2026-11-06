@@ -42,6 +42,7 @@ def _build_header(
     source: str | None = None,
     samples: Sequence[str] = (),
     score: bool = False,
+    extra_lines: Sequence[str] = (),
 ) -> VariantHeader:
     """
     Build a VCF 4.5 header with SV-related INFO/ALT/FILTER definitions.
@@ -56,6 +57,7 @@ def _build_header(
         source: Optional source program identifier for the header.
         samples: Sample columns of the header, in order.
         score: Also define the per-sample FORMAT field SCORE_FIELD.
+        extra_lines: Meta lines ('##key=value') added after ##source.
 
     Returns:
         Configured pysam VariantHeader.
@@ -64,6 +66,8 @@ def _build_header(
 
     if source:
         header.add_line(f'##source={source}')
+    for line in extra_lines:
+        header.add_line(line)
 
     all_chroms = set(bps_df['CHROM_bnd1'].unique()) | set(bps_df['CHROM_bnd2'].unique())
     all_chroms.discard(np.nan)
@@ -337,6 +341,7 @@ def write_vcf(
     sample_name: str | None = None,
     inv_as_bnd: bool = False,
     score_col: str | None = None,
+    header_lines: Sequence[str] = (),
 ) -> Path:
     """
     Write a VCF 4.5 file from a breakpoint DataFrame.
@@ -370,6 +375,7 @@ def write_vcf(
         sample_name: Sample name to include in the VCF header.
         inv_as_bnd: If True, write inversions as BND pairs instead of
             symbolic <INV> records.
+        header_lines: Extra '##key=value' meta lines for the header.
         score_col: Column holding the SVEnsemble2 score. When given, each
             SV is written once (rows of one INFO_EVENT across samples share
             the record) with the score as FORMAT SCORE_FIELD per sample;
@@ -399,7 +405,10 @@ def write_vcf(
         bps_df = bps_df[~invalid_pos_mask]
 
     bps_df, samples, scores = _one_row_per_event(bps_df, score_col, sample_name)
-    header_kwargs = dict(sample_name=sample_name, source=source, samples=samples, score=bool(score_col))
+    header_kwargs = dict(
+        sample_name=sample_name, source=source, samples=samples, score=bool(score_col),
+        extra_lines=header_lines,
+    )
 
     # Written via a temporary sibling and moved into place, so a failure part
     # way through never leaves a truncated VCF at output_path.

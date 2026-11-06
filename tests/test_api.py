@@ -483,3 +483,51 @@ class TestRunAnnotate:
         with pytest.raises(ValueError, match="share one sample set"):
             api.run(**_run_kwargs(tmp_path, caller_vcfs={"gridss": tmp_path / "g.vcf", "manta_diploid": tmp_path / "m.vcf"}))
         assert not (tmp_path / "out").exists()
+
+
+class TestRunOutputVcf:
+    def _fake_write_vcf(self, monkeypatch):
+        from svensemble import vcfwrite
+        seen = {}
+
+        def fake(df, path, **kw):
+            seen.update(kw)
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text("##fileformat=VCFv4.5\n")
+            return Path(path)
+
+        monkeypatch.setattr(vcfwrite, "write_vcf", fake)
+        return seen
+
+    def test_only_the_vcf_is_written(self, tmp_path, fake_pipeline, tmpdir_root, monkeypatch):
+        seen = self._fake_write_vcf(monkeypatch)
+        vcf = tmp_path / "x" / "calls.vcf"
+        out = api.run(**_run_kwargs(tmp_path, output_dir=None, output_vcf=vcf), command="svensemble run")
+        assert out == {"calls_vcf": vcf.resolve()}
+        assert vcf.exists() and sorted(p.name for p in vcf.parent.iterdir()) == ["calls.vcf"]
+        assert not (tmp_path / "out").exists()
+        assert list(tmpdir_root.iterdir()) == []
+        assert seen["header_lines"] == [
+            f"##svensemble_version={__import__('svensemble').__version__}",
+            f"##svensemble_model_id={api.model_id(model='unbiased_xgb')}",
+            "##svensemble_command=svensemble run",
+        ]
+
+    def test_with_output_dir_vcf_goes_to_path(self, tmp_path, fake_pipeline, tmpdir_root, monkeypatch):
+        self._fake_write_vcf(monkeypatch)
+        vcf = tmp_path / "calls.vcf.gz"
+        out = api.run(**_run_kwargs(tmp_path, output_vcf=vcf))
+        assert out["calls_vcf"] == vcf.resolve() and vcf.exists()
+        names = sorted(p.name for p in (tmp_path / "out").iterdir())
+        assert names == [sv_io.CALLS_CSV, sv_io.RUN_PROVENANCE]
+
+    @pytest.mark.parametrize("over, match", [
+        ({"output_dir": None}, "output_dir, output_vcf"),
+        ({"output_dir": None, "output_vcf": "c.vcf", "save": {"model"}}, "provide it"),
+        ({"output_dir": None, "output_vcf": "c.vcf", "annotate_vcfs": True}, "provide it"),
+        ({"output_vcf": "c.bcf"}, ".vcf or .vcf.gz"),
+    ])
+    def test_invalid_outputs(self, tmp_path, fake_pipeline, tmpdir_root, over, match):
+        with pytest.raises(ValueError, match=match):
+            api.run(**_run_kwargs(tmp_path, **over))
+        assert list(tmpdir_root.iterdir()) == []
