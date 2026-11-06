@@ -295,7 +295,7 @@ def fake_pipeline(monkeypatch):
     monkeypatch.setattr(api, "preprocess", step("preprocess", lambda *a, **k: bps))
     monkeypatch.setattr(api, "match", step("match", lambda *a, **k: bps))
     monkeypatch.setattr(api, "train", step("train", lambda *a, **k: (X, _PicklableModel())))
-    monkeypatch.setattr(api, "predict", step("predict", lambda *a, **k: bps))
+    monkeypatch.setattr(api, "predict", step("predict", lambda *a, **k: bps.assign(gridss_m_pred=[0.1, 0.2])))
     monkeypatch.setattr(api, "preprocess_ground_truth", fake_gt)
     monkeypatch.setattr(vcfwrite, "write_vcf", fake_vcf)
     return state

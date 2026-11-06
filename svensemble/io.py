@@ -165,14 +165,21 @@ def write_model(model_fit, path: Path) -> Path:
 
 
 def write_calls(calls_df: pd.DataFrame, out_dir: Path, sample: str) -> tuple[Path, Path]:
-    """Write ensemble calls as CALLS_CSV (with index) plus CALLS_VCF in *out_dir*."""
+    """Write ensemble calls as CALLS_CSV (with index) plus CALLS_VCF in *out_dir*.
+
+    The VCF has one record per SV and the score as FORMAT SVENSSC for each
+    sample in FORMAT_SAMPLE_ID (*sample* names the column of calls without one).
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / CALLS_CSV
     vcf_path = out_dir / CALLS_VCF
     with atomic_path(csv_path) as tmp:
         calls_df.to_csv(tmp, index=True)
-    vcfwrite.write_vcf(calls_df, vcf_path, source="svensemble2", sample_name=sample)
+    vcfwrite.write_vcf(
+        calls_df, vcf_path, source="svensemble2", sample_name=sample,
+        score_col=sv_annotate.pred_column(calls_df),
+    )
     return csv_path, vcf_path
 
 

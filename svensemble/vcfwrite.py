@@ -7,6 +7,7 @@ allele records; remaining unclassified SVs are written as BND pairs.
 """
 
 import logging
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +17,7 @@ from pysam import VariantFile, VariantHeader
 from . import breakpoints as bps_mod
 from . import breakends as bnds
 from . import utils
-from ._constants import BND1, BND2, INV_EVENT_SUFFIXES
+from ._constants import BND1, BND2, INV_EVENT_SUFFIXES, SAMPLE_ID_COL, SCORE_FIELD
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,9 @@ _CI_COLS = [
 def _build_header(
     bps_df: pd.DataFrame,
     sample_name: str | None = None,
-    source: str | None = None
+    source: str | None = None,
+    samples: Sequence[str] = (),
+    score: bool = False,
 ) -> VariantHeader:
     """
     Build a VCF 4.5 header with SV-related INFO/ALT/FILTER definitions.
@@ -48,8 +51,11 @@ def _build_header(
 
     Args:
         bps_df: Breakpoint DataFrame used to determine the contig set.
-        sample_name: Optional sample name to include in the header.
+        sample_name: Optional sample name to include in the header (used
+            when *samples* is empty).
         source: Optional source program identifier for the header.
+        samples: Sample columns of the header, in order.
+        score: Also define the per-sample FORMAT field SCORE_FIELD.
 
     Returns:
         Configured pysam VariantHeader.
@@ -107,8 +113,14 @@ def _build_header(
 
     header.add_line('##FILTER=<ID=PASS,Description="All filters passed">')
 
-    if sample_name:
-        header.add_sample(sample_name)
+    if score:
+        header.add_line(
+            f'##FORMAT=<ID={SCORE_FIELD},Number=1,Type=Float,'
+            'Description="SVEnsemble2 score of the SV in this sample">'
+        )
+
+    for name in samples or ([sample_name] if sample_name else []):
+        header.add_sample(name)
 
     return header
 
@@ -185,12 +197,20 @@ def _strip_inv_event_suffix(event_id: str) -> str:
     return event_id
 
 
+def _set_scores(record, scores: Mapping[str, float] | None) -> None:
+    """Set SCORE_FIELD for each sample that has a score (others stay missing)."""
+    for sample, score in (scores or {}).items():
+        if pd.notna(score):
+            record.samples[sample][SCORE_FIELD] = float(score)
+
+
 def _write_symbolic_record(
     vcf_out: VariantFile,
     row: pd.Series,
     svtype: str,
     has_ci: bool,
     record_id: str | None = None,
+    scores: Mapping[str, float] | None = None,
 ) -> None:
     """
     Write a symbolic allele VCF record for a classified SV (DEL/DUP/INS/INV).
@@ -226,13 +246,15 @@ def _write_symbolic_record(
         _set_ci(rec, row, BND1, 'CIPOS')
         _set_ci(rec, row, BND2, 'CIEND')
 
+    _set_scores(rec, scores)
     vcf_out.write(rec)
 
 
 def _write_bnd_records(
     vcf_out: VariantFile,
     row: pd.Series,
-    has_ci: bool
+    has_ci: bool,
+    scores: Mapping[str, float] | None = None,
 ) -> None:
     """
     Write a pair of BND records for an unclassified structural variant.
@@ -266,7 +288,46 @@ def _write_bnd_records(
         if has_ci:
             _set_ci(rec, row, bnd_label, 'CIPOS')
 
+        _set_scores(rec, scores)
         vcf_out.write(rec)
+
+
+def _one_row_per_event(
+    bps_df: pd.DataFrame,
+    score_col: str | None,
+    sample_name: str | None,
+) -> tuple[pd.DataFrame, list[str], dict[str, dict[str, float]]]:
+    """(one row per INFO_EVENT, header samples, {event: {sample: score}}).
+
+    Per-sample rows of one SV share their record (shared INFO); only the
+    score is per sample (FORMAT). Rows of one event that disagree on a
+    record-defining column raise. Without SAMPLE_ID_COL every row is its own
+    record and scores go to *sample_name*.
+    """
+    if SAMPLE_ID_COL not in bps_df.columns:
+        samples = [sample_name] if (score_col and sample_name) else []
+        scores = (
+            {str(e): {sample_name: v} for e, v in zip(bps_df['INFO_EVENT'], bps_df[score_col])}
+            if samples else {}
+        )
+        return bps_df, samples, scores
+
+    record_cols = [
+        c for c in _REQUIRED_COLS + _CI_COLS + ['INFO_INFERRED_SVTYPE', 'INFO_SVLEN']
+        if c in bps_df.columns
+    ]
+    per_event = bps_df.groupby('INFO_EVENT', sort=False)[record_cols].nunique(dropna=False)
+    conflicting = per_event.index[(per_event > 1).any(axis=1)].tolist()
+    if conflicting:
+        raise ValueError(f"Samples disagree on the record of SV(s) {conflicting[:10]}")
+    record_df = bps_df.drop_duplicates('INFO_EVENT', keep='first').drop(columns=[SAMPLE_ID_COL])
+    if not score_col:
+        return record_df, [], {}
+    samples = sorted(bps_df[SAMPLE_ID_COL].astype(str).unique())
+    scores: dict[str, dict[str, float]] = {}
+    for event, sample, score in zip(bps_df['INFO_EVENT'], bps_df[SAMPLE_ID_COL].astype(str), bps_df[score_col]):
+        scores.setdefault(str(event), {})[sample] = score
+    return record_df, samples, scores
 
 
 def write_vcf(
@@ -275,6 +336,7 @@ def write_vcf(
     source: str | None = None,
     sample_name: str | None = None,
     inv_as_bnd: bool = False,
+    score_col: str | None = None,
 ) -> Path:
     """
     Write a VCF 4.5 file from a breakpoint DataFrame.
@@ -308,6 +370,10 @@ def write_vcf(
         sample_name: Sample name to include in the VCF header.
         inv_as_bnd: If True, write inversions as BND pairs instead of
             symbolic <INV> records.
+        score_col: Column holding the SVEnsemble2 score. When given, each
+            SV is written once (rows of one INFO_EVENT across samples share
+            the record) with the score as FORMAT SCORE_FIELD per sample;
+            the header lists the samples in FORMAT_SAMPLE_ID.
 
     Returns:
         Path to the written VCF file.
@@ -332,6 +398,9 @@ def write_vcf(
         )
         bps_df = bps_df[~invalid_pos_mask]
 
+    bps_df, samples, scores = _one_row_per_event(bps_df, score_col, sample_name)
+    header_kwargs = dict(sample_name=sample_name, source=source, samples=samples, score=bool(score_col))
+
     # Written via a temporary sibling and moved into place, so a failure part
     # way through never leaves a truncated VCF at output_path.
     write_mode = 'wz' if str(output_path).endswith('.gz') else 'w'
@@ -341,14 +410,14 @@ def write_vcf(
                 'CHROM_bnd1': pd.Series(dtype=str),
                 'CHROM_bnd2': pd.Series(dtype=str),
             })
-            header = _build_header(empty_chrom_df, sample_name=sample_name, source=source)
+            header = _build_header(empty_chrom_df, **header_kwargs)
             with VariantFile(str(tmp_path), write_mode, header=header):
                 pass
             return output_path
 
         svtypes = _get_svtypes(bps_df, source)
         has_ci = _has_ci(bps_df)
-        header = _build_header(bps_df, sample_name=sample_name, source=source)
+        header = _build_header(bps_df, **header_kwargs)
 
         chrom_keys = utils.generate_chrom_key_dict(
             pd.concat([bps_df['CHROM_bnd1'], bps_df['CHROM_bnd2']])
@@ -365,21 +434,22 @@ def write_vcf(
             for idx in sorted_idx:
                 row = bps_df.loc[idx]
                 svtype = svtypes.loc[idx]
+                row_scores = scores.get(str(row['INFO_EVENT']))
 
                 if svtype == 'INV':
                     if inv_as_bnd:
-                        _write_bnd_records(vcf_out, row, has_ci)
+                        _write_bnd_records(vcf_out, row, has_ci, row_scores)
                     else:
                         base_event = _strip_inv_event_suffix(str(row['INFO_EVENT']))
                         if base_event in written_inv_events:
                             continue
                         written_inv_events.add(base_event)
                         _write_symbolic_record(
-                            vcf_out, row, 'INV', has_ci, record_id=base_event,
+                            vcf_out, row, 'INV', has_ci, record_id=base_event, scores=row_scores,
                         )
                 elif svtype in symbolic_non_inv:
-                    _write_symbolic_record(vcf_out, row, svtype, has_ci)
+                    _write_symbolic_record(vcf_out, row, svtype, has_ci, scores=row_scores)
                 else:
-                    _write_bnd_records(vcf_out, row, has_ci)
+                    _write_bnd_records(vcf_out, row, has_ci, row_scores)
 
     return output_path
