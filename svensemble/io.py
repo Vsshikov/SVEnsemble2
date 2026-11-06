@@ -93,8 +93,13 @@ def read_vcf(path: Path, caller: str, sample_names: str | list[str] | None = Non
 
 
 def read_bps(path: Path) -> pd.DataFrame:
-    """Read any breakpoint CSV: raw, processed, matched or ground truth."""
-    return pd.read_csv(path, low_memory=False)
+    """Read any breakpoint CSV: raw, processed, matched or ground truth.
+
+    Sample columns are read as text, so digit-only sample names stay names.
+    """
+    cols = pd.read_csv(path, nrows=0).columns
+    sample_cols = {c: str for c in cols if c.endswith(SAMPLE_ID_COL)}
+    return pd.read_csv(path, low_memory=False, dtype=sample_cols)
 
 
 def write_bps(bp_df: pd.DataFrame, path: Path) -> Path:
@@ -118,12 +123,12 @@ def write_callset(bp_df: pd.DataFrame, out_dir: Path, caller: str, sample: str) 
 
 
 def read_feature_matrix(path: Path) -> pd.DataFrame:
-    """Read a feature matrix and restore its ``<callset>_INFO_EVENT`` index.
+    """Read a feature matrix and restore its ``<callset>_INFO_EVENT`` (+ sample) index.
 
     The index columns map each row back to its matched breakpoints, so a
     matrix without them is rejected rather than silently re-indexed.
     """
-    X = pd.read_csv(path, low_memory=False)
+    X = pd.read_csv(path, low_memory=False, dtype={SAMPLE_ID_COL: str})
     index_cols = [c for c in X.columns if c.endswith("_INFO_EVENT")]
     if not index_cols:
         raise ValueError(
@@ -132,6 +137,8 @@ def read_feature_matrix(path: Path) -> pd.DataFrame:
             f"written by the training step; their absence indicates a broken or truncated "
             f"feature matrix. Found columns: {list(X.columns)[:20]}{'...' if len(X.columns) > 20 else ''}"
         )
+    if SAMPLE_ID_COL in X.columns:
+        index_cols.append(SAMPLE_ID_COL)
     return X.set_index(index_cols)
 
 
