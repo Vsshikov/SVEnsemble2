@@ -13,7 +13,9 @@ record's ID and INFO (see EVENT_KEY and callset_specific).
 """
 
 import re
+import struct
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import BinaryIO
 
 import numpy as np
 import pandas as pd
@@ -256,3 +258,239 @@ def annotate_text(
             yield annotate_record(line, key_fn, samples, table)
         else:
             yield line
+
+
+# -- BCF ----------------------------------------------------------------------
+#
+# BCF 2.2 (VCF spec, section "BCF specification"), on the decompressed stream:
+#   magic 'BCF\2\2', uint32 l_text, header text (NUL-terminated), then records.
+#   Record: uint32 l_shared, uint32 l_indiv, shared block, per-sample block.
+#   Shared: int32 CHROM, int32 POS, int32 rlen, float QUAL,
+#           uint32 n_allele<<16 | n_info, uint32 n_fmt<<24 | n_sample,
+#           typed ID, n_allele typed alleles, typed FILTER vector,
+#           n_info x (typed key, typed value).
+#   Per-sample: n_fmt x (typed key, type descriptor, n_sample x values).
+# Typed values start with a descriptor byte: low nibble type, high nibble
+# count; count 15 means the real count follows as a typed integer.
+# The shared block is copied verbatim; only ID and three INFO keys are decoded.
+
+BCF_MAGIC = b'BCF\x02\x02'
+_BCF_TYPE_SIZE = {0: 0, 1: 1, 2: 2, 3: 4, 5: 4, 7: 1}
+_BCF_INT_FMT = {1: '<b', 2: '<h', 3: '<i'}
+_BCF_FLOAT = 5
+_BCF_FLOAT_MISSING = struct.pack('<I', 0x7F800001)
+_BCF_KEY_INFO = ('EVENT', 'MATEID', 'SVTYPE')
+_IDX_RE = re.compile(r'[<,]IDX=(\d+)[,>]')
+_DICT_LINE_RE = re.compile(r'##(FILTER|INFO|FORMAT)=<ID=([^,>]+)')
+
+
+def _read_exact(stream: BinaryIO, n: int) -> bytes:
+    data = stream.read(n)
+    if len(data) != n:
+        raise ValueError(f"Truncated BCF: wanted {n} bytes, got {len(data)}")
+    return data
+
+
+def read_bcf_header(stream: BinaryIO) -> list[str]:
+    """Header text lines (with endings) from a decompressed BCF stream positioned at the start."""
+    magic = stream.read(len(BCF_MAGIC))
+    if magic != BCF_MAGIC:
+        raise ValueError(f"Not a BCF 2.2 stream (magic {magic!r})")
+    (l_text,) = struct.unpack('<I', _read_exact(stream, 4))
+    text = _read_exact(stream, l_text).split(b'\0', 1)[0].decode()
+    return text.splitlines(keepends=True)
+
+
+def iter_bcf_records(stream: BinaryIO) -> Iterator[tuple[bytes, bytes]]:
+    """(shared, per-sample) blocks of each record, read after read_bcf_header."""
+    while True:
+        lengths = stream.read(8)
+        if not lengths:
+            return
+        if len(lengths) != 8:
+            raise ValueError("Truncated BCF record header")
+        l_shared, l_indiv = struct.unpack('<II', lengths)
+        yield _read_exact(stream, l_shared), _read_exact(stream, l_indiv)
+
+
+def bcf_string_dict(header_lines: Sequence[str]) -> dict[str, int]:
+    """FILTER/INFO/FORMAT ID -> BCF dictionary index.
+
+    Uses IDX= attributes when the header carries them; otherwise the implicit
+    order: PASS first, then each new ID in order of appearance.
+    """
+    out: dict[str, int] = {}
+    implicit: dict[str, int] = {'PASS': 0}
+    for line in header_lines:
+        match = _DICT_LINE_RE.match(line)
+        if not match:
+            continue
+        name = match.group(2)
+        idx = _IDX_RE.search(line)
+        if idx:
+            out.setdefault(name, int(idx.group(1)))
+        implicit.setdefault(name, len(implicit))
+    return out if out else implicit
+
+
+def _bcf_uses_idx(header_lines: Sequence[str]) -> bool:
+    return any(_DICT_LINE_RE.match(line) and _IDX_RE.search(line) for line in header_lines)
+
+
+def annotate_bcf_header(header_lines: Sequence[str], pred_col: str) -> tuple[bytes, int]:
+    """(encoded BCF header, dictionary index of SCORE_FIELD).
+
+    The text edit is annotate_header's. When the header carries IDX=
+    attributes the SCORE_FIELD line gets one too: its existing index on a
+    rerun, else one past the largest index in use.
+    """
+    before = bcf_string_dict(header_lines)
+    lines = annotate_header(header_lines, pred_col)
+    if SCORE_FIELD in before:
+        idx = before[SCORE_FIELD]
+    elif _bcf_uses_idx(header_lines):
+        idx = max(before.values()) + 1
+    else:
+        idx = len(before)
+    if _bcf_uses_idx(header_lines):
+        lines = [
+            _with_idx(line, idx) if line.startswith(_SCORE_HEADER_PREFIX) else line
+            for line in lines
+        ]
+    after = bcf_string_dict(lines)
+    if after.get(SCORE_FIELD) != idx:
+        raise AssertionError(f"{SCORE_FIELD} dictionary index {after.get(SCORE_FIELD)} != {idx}")
+    text = ''.join(lines).encode() + b'\0'
+    return BCF_MAGIC + struct.pack('<I', len(text)) + text, idx
+
+
+def _with_idx(line: str, idx: int) -> str:
+    """The freshly written SCORE_FIELD header line with an IDX= attribute."""
+    content, ending = split_line_ending(line)
+    return f'{content[:-1]},IDX={idx}>{ending}'
+
+
+def _typed_header(buf: bytes, off: int) -> tuple[int, int, int]:
+    """(type, count, offset after the descriptor and any overflow count)."""
+    desc = buf[off]
+    typ, count = desc & 0x0F, desc >> 4
+    off += 1
+    if count == 15:
+        ctyp, _, off = _typed_header(buf, off)
+        (count,) = struct.unpack_from(_BCF_INT_FMT[ctyp], buf, off)
+        off += _BCF_TYPE_SIZE[ctyp]
+    return typ, count, off
+
+
+def _read_typed_int(buf: bytes, off: int) -> tuple[int, int]:
+    typ, count, off = _typed_header(buf, off)
+    if count != 1 or typ not in _BCF_INT_FMT:
+        raise ValueError(f"Expected a single typed integer (type {typ}, count {count})")
+    (value,) = struct.unpack_from(_BCF_INT_FMT[typ], buf, off)
+    return value, off + _BCF_TYPE_SIZE[typ]
+
+
+def _skip_typed(buf: bytes, off: int) -> int:
+    typ, count, off = _typed_header(buf, off)
+    return off + count * _BCF_TYPE_SIZE[typ]
+
+
+def _typed_text(buf: bytes, off: int) -> tuple[str, int]:
+    """A typed value as VCF text (chars as a string, numbers comma-joined)."""
+    typ, count, off = _typed_header(buf, off)
+    end = off + count * _BCF_TYPE_SIZE[typ]
+    if typ == 7:
+        return buf[off:end].split(b'\0', 1)[0].decode(), end
+    if typ == 0 or count == 0:
+        return '', end
+    fmt = '<f' if typ == _BCF_FLOAT else _BCF_INT_FMT[typ]
+    values = struct.unpack_from(f'<{count}{fmt[1]}', buf, off)
+    return ','.join(str(v) for v in values), end
+
+
+def bcf_record_key_fields(shared: bytes, names: Mapping[int, str]) -> tuple[str, dict[str, str]]:
+    """(ID, {INFO key: text}) of one record, decoding only EVENT, MATEID and SVTYPE."""
+    (n_allele_info,) = struct.unpack_from('<I', shared, 16)
+    n_allele, n_info = n_allele_info >> 16, n_allele_info & 0xFFFF
+    id_, off = _typed_text(shared, 24)
+    for _ in range(n_allele):
+        off = _skip_typed(shared, off)
+    off = _skip_typed(shared, off)  # FILTER
+    info: dict[str, str] = {}
+    for _ in range(n_info):
+        key, off = _read_typed_int(shared, off)
+        name = names.get(key)
+        if name in _BCF_KEY_INFO:
+            info[name], off = _typed_text(shared, off)
+        else:
+            off = _skip_typed(shared, off)
+    return (id_ or '.'), info
+
+
+def _typed_int_bytes(value: int) -> bytes:
+    if value <= 127:
+        return b'\x11' + struct.pack('<b', value)
+    if value <= 32767:
+        return b'\x12' + struct.pack('<h', value)
+    return b'\x13' + struct.pack('<i', value)
+
+
+def _float_bytes(score: float | None) -> bytes:
+    if score is None or np.isnan(score):
+        return _BCF_FLOAT_MISSING
+    return struct.pack('<f', score)
+
+
+def bcf_set_format_float(
+    shared: bytes,
+    indiv: bytes,
+    key_idx: int,
+    values: Sequence[float | None],
+) -> tuple[bytes, bytes]:
+    """(shared, per-sample) blocks with a one-float FORMAT field set per sample.
+
+    An existing entry for *key_idx* (from an earlier run) is overwritten in
+    place; otherwise one entry is appended and n_fmt in the shared block goes
+    up by one. Nothing else in either block changes.
+    """
+    (n_fmt_sample,) = struct.unpack_from('<I', shared, 20)
+    n_fmt, n_sample = n_fmt_sample >> 24, n_fmt_sample & 0xFFFFFF
+    if len(values) != n_sample:
+        raise ValueError(f"{len(values)} values for {n_sample} samples")
+    payload = b''.join(_float_bytes(v) for v in values)
+    off = 0
+    for _ in range(n_fmt):
+        key, off = _read_typed_int(indiv, off)
+        typ, count, data_off = _typed_header(indiv, off)
+        end = data_off + count * _BCF_TYPE_SIZE[typ] * n_sample
+        if key == key_idx:
+            if (typ, count) != (_BCF_FLOAT, 1):
+                raise ValueError(f"Existing {SCORE_FIELD} entry is type {typ} x{count}, not one float")
+            return shared, indiv[:data_off] + payload + indiv[end:]
+        off = end
+    if n_fmt == 255:
+        raise ValueError("Record already has 255 FORMAT fields; BCF cannot hold another")
+    new_shared = shared[:20] + struct.pack('<I', ((n_fmt + 1) << 24) | n_sample) + shared[24:]
+    entry = _typed_int_bytes(key_idx) + bytes([0x10 | _BCF_FLOAT]) + payload
+    return new_shared, indiv + entry
+
+
+def annotate_bcf(
+    header_lines: Sequence[str],
+    records: Iterable[tuple[bytes, bytes]],
+    caller: str,
+    calls: pd.DataFrame,
+) -> Iterator[bytes]:
+    """Annotated BCF stream (uncompressed): the header, then each record."""
+    samples = header_samples(header_lines)
+    table = score_table(calls, caller)
+    key_fn = event_key_fn(caller)
+    header, key_idx = annotate_bcf_header(header_lines, pred_column(calls))
+    names = {idx: name for name, idx in bcf_string_dict(header_lines).items()}
+    yield header
+    for shared, indiv in records:
+        id_, info = bcf_record_key_fields(shared, names)
+        key = key_fn(id_, info)
+        scores = [lookup_score(key, sample, table) for sample in samples]
+        new_shared, new_indiv = bcf_set_format_float(shared, indiv, key_idx, scores)
+        yield struct.pack('<II', len(new_shared), len(new_indiv)) + new_shared + new_indiv

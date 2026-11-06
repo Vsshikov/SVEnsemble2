@@ -1,6 +1,13 @@
-"""Unit tests for svensemble.annotate (pure text annotation, no file I/O)."""
+"""Unit tests for svensemble.annotate (pure text and BCF annotation, no file I/O)."""
+
+import gzip
+import io
+import os
+import struct
+from pathlib import Path
 
 import pandas as pd
+import pysam
 import pytest
 
 from svensemble import annotate as ann
@@ -197,3 +204,135 @@ class TestAnnotateText:
         assert records[0][8:] == ['GT:DV:SVENSSC', '0/1:5:0.9', '0/0:0:0.1']
         assert records[1][8:] == ['GT:SVENSSC', '0/1:0.3', '1/1:.']
         assert records[2][8:] == ['GT:SVENSSC', '0/1:.', '0/1:.']
+
+
+# -- BCF codec ----------------------------------------------------------------
+
+
+BCF_VCF_TEXT = (
+    '##fileformat=VCFv4.2\n'
+    '##contig=<ID=chr1,length=10000>\n'
+    '##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type">\n'
+    '##INFO=<ID=END,Number=1,Type=Integer,Description="End">\n'
+    '##INFO=<ID=MATEID,Number=.,Type=String,Description="Mate">\n'
+    '##INFO=<ID=AF,Number=A,Type=Float,Description="AF">\n'
+    '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n'
+    '##FORMAT=<ID=DV,Number=1,Type=Integer,Description="Variant reads">\n'
+    '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\tS2\n'
+    'chr1\t100\tDEL1\tN\t<DEL>\t12.5\tPASS\tSVTYPE=DEL;END=200;AF=0.33333334\tGT:DV\t0/1:5\t0/0:0\n'
+    'chr1\t500\tINV1\tN\t<INV>\t.\t.\tSVTYPE=INV;END=900\tGT\t0/1\t1/1\n'
+    'chr1\t950\tDEL9\tN\t<DEL>\t.\tPASS\tSVTYPE=DEL;END=990\tGT:DV\t./.:.\t0/1:3\n'
+)
+
+
+def _make_bcf(tmp_path, text=BCF_VCF_TEXT):
+    vcf = tmp_path / 'in.vcf'
+    vcf.write_text(text)
+    bcf = tmp_path / 'in.bcf'
+    with pysam.VariantFile(str(vcf)) as vin, pysam.VariantFile(str(bcf), 'wb', header=vin.header) as vout:
+        for rec in vin:
+            vout.write(rec)
+    return bcf
+
+
+def _bcf_parts(path_or_bytes):
+    data = gzip.decompress(path_or_bytes.read_bytes()) if hasattr(path_or_bytes, 'read_bytes') else path_or_bytes
+    stream = io.BytesIO(data)
+    return ann.read_bcf_header(stream), list(ann.iter_bcf_records(stream))
+
+
+def _annotated_bcf(tmp_path, bcf, calls, caller='delly'):
+    header, records = _bcf_parts(bcf)
+    out = b''.join(ann.annotate_bcf(header, records, caller, calls))
+    path = tmp_path / 'out.bcf'
+    with pysam.BGZFile(str(path), 'wb') as fh:
+        fh.write(out)
+    return path
+
+
+BCF_CALLS = [['DEL1', 'S1', 0.9], ['DEL1', 'S2', 0.25], ['INV1_e1', 'S2', 0.2], ['INV1_e2', 'S2', 0.4]]
+
+
+class TestBcf:
+    def test_shared_block_verbatim_and_indiv_extended(self, tmp_path):
+        bcf = _make_bcf(tmp_path)
+        out = _annotated_bcf(tmp_path, bcf, _calls(BCF_CALLS))
+        _, before = _bcf_parts(bcf)
+        _, after = _bcf_parts(out)
+        assert len(before) == len(after)
+        for (s0, i0), (s1, i1) in zip(before, after):
+            assert s1[:20] == s0[:20] and s1[24:] == s0[24:]
+            n0, n1 = struct.unpack_from('<I', s0, 20)[0], struct.unpack_from('<I', s1, 20)[0]
+            assert n1 >> 24 == (n0 >> 24) + 1 and n1 & 0xFFFFFF == n0 & 0xFFFFFF
+            assert i1.startswith(i0)
+
+    def test_pysam_reads_same_records_plus_score(self, tmp_path):
+        bcf = _make_bcf(tmp_path)
+        out = _annotated_bcf(tmp_path, bcf, _calls(BCF_CALLS))
+        with pysam.VariantFile(str(bcf)) as a, pysam.VariantFile(str(out)) as b:
+            assert list(b.header.samples) == ['S1', 'S2']
+            for ra, rb in zip(a, b):
+                assert str(ra).split('\t')[:8] == str(rb).split('\t')[:8]
+                for s in ('S1', 'S2'):
+                    for key in ra.samples[s].keys():
+                        assert ra.samples[s][key] == rb.samples[s][key]
+            got = [[rec.samples[s][SCORE_FIELD] for s in ('S1', 'S2')] for rec in pysam.VariantFile(str(out))]
+        assert got[0] == [pytest.approx(0.9), pytest.approx(0.25)]
+        assert got[1] == [None, pytest.approx(0.3)]
+        assert got[2] == [None, None]
+
+    def test_rerun_overwrites_in_place(self, tmp_path):
+        bcf = _make_bcf(tmp_path)
+        first = _annotated_bcf(tmp_path, bcf, _calls([['DEL1', 'S1', 0.1]]))
+        header, records = _bcf_parts(first)
+        second = b''.join(ann.annotate_bcf(header, records, 'delly', _calls(BCF_CALLS)))
+        h2, r2 = _bcf_parts(second)
+        assert sum(line.startswith(f'##FORMAT=<ID={SCORE_FIELD},') for line in h2) == 1
+        assert [len(s) for s, _ in r2] == [len(s) for s, _ in records]
+        assert [len(i) for _, i in r2] == [len(i) for _, i in records]
+        assert struct.unpack_from('<f', r2[0][1], len(r2[0][1]) - 8)[0] == pytest.approx(0.9)
+
+    def test_idx_header(self, tmp_path):
+        bcf = _make_bcf(tmp_path)
+        header, _ = _bcf_parts(bcf)
+        names = ann.bcf_string_dict(header)
+        new_header, idx = ann.annotate_bcf_header(header, PRED)
+        if ann._bcf_uses_idx(header):
+            assert idx == max(names.values()) + 1
+            assert f',IDX={idx}>' in new_header.decode(errors='ignore')
+        assert ann.bcf_string_dict(new_header[9:].split(b'\0', 1)[0].decode().splitlines(True))[SCORE_FIELD] == idx
+
+    def test_record_key_fields(self, tmp_path):
+        bcf = _make_bcf(tmp_path)
+        header, records = _bcf_parts(bcf)
+        names = {i: n for n, i in ann.bcf_string_dict(header).items()}
+        assert ann.bcf_record_key_fields(records[0][0], names) == ('DEL1', {'SVTYPE': 'DEL'})
+
+    def test_not_bcf_raises(self):
+        with pytest.raises(ValueError, match='BCF'):
+            ann.read_bcf_header(io.BytesIO(b'##fileformat=VCFv4.2\n'))
+
+
+E2E_DELLY_BCF = '/vast/ai_projects/Papenfuss_SVEnsemble2/svensemble2/cache/e2e/inputs/delly.chr1.bcf'
+
+
+@pytest.mark.skipif(not os.path.exists(E2E_DELLY_BCF), reason='e2e Delly BCF not present')
+def test_e2e_delly_bcf_round_trip(tmp_path):
+    bcf = Path(E2E_DELLY_BCF)
+    header, records = _bcf_parts(bcf)
+    sample = ann.header_samples(header)[0]
+    names = {i: n for n, i in ann.bcf_string_dict(header).items()}
+    ids = [ann.bcf_record_key_fields(s, names)[0] for s, _ in records]
+    calls = _calls([[ids[0], sample, 0.75], [ids[-1], sample, 0.5]])
+    out = _annotated_bcf(tmp_path, bcf, calls)
+    with pysam.VariantFile(str(bcf)) as a, pysam.VariantFile(str(out)) as b:
+        n = 0
+        for ra, rb in zip(a, b):
+            assert str(ra).split('\t')[:8] == str(rb).split('\t')[:8]
+            assert {k: ra.samples[sample][k] for k in ra.samples[sample].keys()} == \
+                {k: rb.samples[sample][k] for k in ra.samples[sample].keys()}
+            n += 1
+    assert n == len(records)
+    scores = [rec.samples[sample][SCORE_FIELD] for rec in pysam.VariantFile(str(out))]
+    assert scores[0] == pytest.approx(0.75) and scores[-1] == pytest.approx(0.5)
+    assert sum(s is not None for s in scores) == 2
