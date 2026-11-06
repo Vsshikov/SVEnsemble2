@@ -22,6 +22,8 @@ takes input paths, metadata and an ``output_dir``; intermediates go to a
 private scratch directory (a tmpdir under ``$TMPDIR`` unless ``workdir`` is
 given) and only the calls plus the artifacts named in ``save`` are written to
 ``output_dir``. A provenance record (io.RUN_PROVENANCE) is written to both.
+With ``output_vcf`` (and no ``output_dir``) ``run`` writes just the calls VCF
+to that exact path, its provenance in the VCF header.
 """
 
 import copy
@@ -36,6 +38,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from . import __version__
 from . import _config as sv_config
 from . import _provenance
 from . import annotate as sv_annotate
@@ -474,7 +477,7 @@ def run(
     caller_vcfs: CallerVcfs,
     ref: Path,
     model: str,
-    output_dir: Path,
+    output_dir: Path | None = None,
     *,
     training_set: str | None = None,
     ground_truth_vcf: Path | None = None,
@@ -488,6 +491,7 @@ def run(
     workdir: Path | None = None,
     keep_workdir: bool = False,
     annotate_vcfs: bool = False,
+    output_vcf: Path | None = None,
     command: str | None = None,
     verbose: bool = False,
 ) -> dict[str, Path]:
@@ -520,6 +524,11 @@ def run(
         model, training_set, model_config: As for train/predict.
         output_dir: Where the calls and saved artifacts go (created if missing).
             One run per output_dir: filenames are fixed and are overwritten.
+            Optional with *output_vcf*; required for *save* and *annotate_vcfs*.
+        output_vcf: Write the calls VCF to exactly this path (.vcf or
+            .vcf.gz) instead of output_dir. Its header carries the version,
+            model_id and command; the provenance JSON is written only to
+            output_dir and a kept scratch.
         training_set: As in train; defaults to *callers* sorted and joined with '+'.
         ground_truth_vcf, ground_truth_bps: Exactly one. A VCF goes through
             preprocess_ground_truth with the registry's filter_defaults (for
@@ -539,7 +548,7 @@ def run(
         verbose: Print progress messages.
 
     Returns:
-        ``calls_csv`` and ``calls_vcf``, plus for each saved artifact
+        ``calls_vcf``, ``calls_csv`` (with output_dir), plus for each saved artifact
         ``model``, ``feature_matrix``, ``matched_bps``, ``ground_truth`` and
         ``<caller>.bps`` / ``<caller>.vcf``; with *annotate_vcfs*,
         ``<caller>.annotated_vcf`` (``<caller>.annotated_vcf.<k>`` when the
@@ -557,11 +566,19 @@ def run(
         raise ValueError(f"Unknown save artifacts {sorted(unknown)}; choose from {sorted(SAVE_ARTIFACTS)}.")
     if (ground_truth_vcf is None) == (ground_truth_bps is None):
         raise ValueError("Provide exactly one of ground_truth_vcf or ground_truth_bps.")
+    if output_dir is None and output_vcf is None:
+        raise ValueError("Provide output_dir, output_vcf or both.")
+    if output_vcf is not None and not str(output_vcf).endswith((".vcf", ".vcf.gz")):
+        raise ValueError(f"output_vcf must end in .vcf or .vcf.gz: {output_vcf}")
+    if output_dir is None and (save or annotate_vcfs):
+        raise ValueError("save and annotate_vcfs write to output_dir; provide it.")
     if "ground_truth" in save and ground_truth_bps is not None:
         raise ValueError("save='ground_truth' needs ground_truth_vcf; ground_truth_bps is already a file you own.")
 
     ref = Path(ref).resolve()
-    output_dir = Path(output_dir).resolve()
+    output_dir = Path(output_dir).resolve() if output_dir is not None else None
+    output_vcf = Path(output_vcf).resolve() if output_vcf is not None else None
+    out = [output_dir] if output_dir is not None else []
     if annotate_vcfs:
         samples, _ = _check_annotatable(caller_vcfs, output_dir)
     else:
@@ -581,6 +598,7 @@ def run(
             "model": model,
             "training_set": training_set,
             "output_dir": output_dir,
+            "output_vcf": output_vcf,
             "ground_truth_vcf": ground_truth_vcf,
             "ground_truth_bps": ground_truth_bps,
             "ground_truth_name": ground_truth_name,
@@ -604,12 +622,16 @@ def run(
     )
     if verbose:
         print(f"[run] scratch: {scratch}{' (tmpdir)' if owned else ''}")
-        print(f"[run] output_dir: {output_dir}")
+        print(f"[run] output_dir: {output_dir}  output_vcf: {output_vcf}")
+    vcf_header_lines = [
+        f"##svensemble_version={__version__}",
+        f"##svensemble_model_id={record['model']['model_id']}",
+    ] + ([f"##svensemble_command={command}"] if command is not None else [])
 
     t0 = time.monotonic()
     error, outputs = None, None
     try:
-        _provenance.write(record, [scratch, output_dir])
+        _provenance.write(record, [scratch] + out)
         outputs = _run_in(
             scratch, output_dir,
             sample=sample, caller_vcfs=caller_vcfs, ref=ref, model=model,
@@ -618,7 +640,8 @@ def run(
             force_preprocess_ground_truth=force_preprocess_ground_truth,
             model_config=model_config, max_dist=max_dist,
             insert_delta_threshold=insert_delta_threshold, save=save,
-            annotate_vcfs=annotate_vcfs, verbose=verbose,
+            annotate_vcfs=annotate_vcfs, output_vcf=output_vcf,
+            vcf_header_lines=vcf_header_lines, verbose=verbose,
         )
         return outputs
     except BaseException as e:
@@ -629,7 +652,7 @@ def run(
         _provenance.finish(record, error=error, outputs=outputs,
                            start_monotonic=t0, end_monotonic=time.monotonic())
         try:
-            _provenance.write(record, [output_dir] if delete else [scratch, output_dir])
+            _provenance.write(record, out if delete else [scratch] + out)
         except OSError as e:
             print(f"[run] could not write provenance record: {e}", file=sys.stderr)
         if delete:
@@ -640,7 +663,7 @@ def run(
 
 def _run_in(
     scratch: Path,
-    output_dir: Path,
+    output_dir: Path | None,
     *,
     sample: str,
     caller_vcfs: dict[str, tuple[Path, ...]],
@@ -656,6 +679,8 @@ def _run_in(
     insert_delta_threshold: float,
     save: frozenset[str],
     annotate_vcfs: bool,
+    output_vcf: Path | None,
+    vcf_header_lines: list[str],
     verbose: bool,
 ) -> dict[str, Path]:
     """The body of run: every step, reading each artifact back from its file.
@@ -719,11 +744,15 @@ def _run_in(
         model_fit, sv_io.read_feature_matrix(fm_path), matched_bps, model, training_set,
         model_config=model_config, callers=list(caller_vcfs),
     )
-    calls_csv, calls_vcf = sv_io.write_calls(calls, output_dir, sample)
+    calls_csv, calls_vcf = sv_io.write_calls(
+        calls, output_dir, sample, vcf_header_lines, vcf_path=output_vcf,
+    )
     if verbose:
-        print(f"[run] done. calls -> {calls_csv}")
+        print(f"[run] done. calls -> {calls_vcf}")
 
-    outputs = {"calls_csv": calls_csv, "calls_vcf": calls_vcf, **published}
+    outputs = {"calls_vcf": calls_vcf, **published}
+    if calls_csv is not None:
+        outputs["calls_csv"] = calls_csv
     if annotate_vcfs:
         for caller, paths in annotate(calls, caller_vcfs, output_dir).items():
             if len(paths) == 1:

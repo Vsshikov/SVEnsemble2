@@ -906,3 +906,11 @@ class TestWriteScores:
         df = pd.DataFrame([_del_row('sv1', 100, 500) | {SAMPLE_ID_COL: s} for s in ('S1', 'S2')])
         write_vcf(df, tmp_path / 'out.vcf', sample_name='S')
         assert len(_read_records(tmp_path / 'out.vcf')) == 1
+
+
+def test_header_lines_written(tmp_path):
+    df = _df(_del_row('ev1', 100, 500))
+    write_vcf(df, tmp_path / 'out.vcf', header_lines=['##svensemble_version=9.9', '##svensemble_model_id=m-1'])
+    with pysam.VariantFile(str(tmp_path / 'out.vcf')) as vcf:
+        header = str(vcf.header)
+    assert '##svensemble_version=9.9' in header and '##svensemble_model_id=m-1' in header

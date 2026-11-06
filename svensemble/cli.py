@@ -15,7 +15,8 @@ The single command-line entry point for the package. Provides:
 
 Conventions shared by every subcommand (and the matching api kwargs):
   * input files are named after the artifact (--vcf, --raw_bps, --matched_bps, ...);
-  * outputs always go to --output_dir, under the fixed filenames in svensemble.io;
+  * outputs always go to --output_dir, under the fixed filenames in svensemble.io
+    (run can instead write the calls VCF to --output_vcf);
   * list-valued flags take space-separated values; '+' only joins a group
     that acts as one name (benchmark-callset --svtypes DEL+INS).
 """
@@ -544,7 +545,8 @@ def _register_run(subparsers):
     p.add_argument("--ref", type=Path, required=True, help="Reference FASTA path. Reserved for VCF writing; currently only recorded in provenance.")
     p.add_argument("--model", type=str, required=True, help="Model name.")
     p.add_argument("--training_set", type=str, default=None, help="Training set name. Defaults to --callers sorted and joined with '+'. Give a TRAINING_SET_PRESETS name to train on that preset's callers.")
-    p.add_argument("--output_dir", type=Path, required=True, help="Directory for the calls and any --save_* artifacts (created if missing; one run per directory).")
+    p.add_argument("--output_dir", type=Path, default=None, help="Directory for the calls and any --save_* / --annotate_vcfs outputs (created if missing; one run per directory). Optional with --output_vcf.")
+    p.add_argument("--output_vcf", type=Path, default=None, help="Write the calls VCF to exactly this path (.vcf or .vcf.gz).")
     grp = p.add_mutually_exclusive_group(required=True)
     grp.add_argument("--ground_truth_vcf", type=Path, default=None, help="Ground truth VCF, preprocessed with the registry's filter_defaults. For other filters run `svensemble ground-truth` and pass --ground_truth_bps.")
     grp.add_argument("--ground_truth_bps", type=Path, default=None, help="Pre-computed ground truth bps.csv (skips the ground-truth stage).")
@@ -571,6 +573,8 @@ def _raise_on_sigterm(signum, frame):
 
 
 def _cmd_run(args):
+    if args.output_dir is None and args.output_vcf is None:
+        raise SystemExit("Give --output_dir and/or --output_vcf.")
     caller_vcfs = _caller_vcfs_from_args(args.callers, args.caller_vcfs)
     previous = signal.signal(signal.SIGTERM, _raise_on_sigterm)
     try:
@@ -592,6 +596,7 @@ def _cmd_run(args):
             workdir=args.workdir,
             keep_workdir=args.keep_workdir,
             annotate_vcfs=args.annotate_vcfs,
+            output_vcf=args.output_vcf,
             command=shlex.join([sys.executable, "-m", "svensemble", *sys.argv[1:]]),
             verbose=args.verbose,
         )

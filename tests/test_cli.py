@@ -300,11 +300,17 @@ class TestRunSubcommand:
         assert captured["caller_vcfs"] == {"delly": (tmp_path / "a.vcf", tmp_path / "b.vcf")}
         assert captured["annotate_vcfs"] is True
 
-    def test_output_dir_required(self, tmp_path, captured):
+    def test_an_output_required(self, tmp_path, captured):
         sys.argv = self._argv(tmp_path)
-        with pytest.raises(SystemExit) as exc:
+        with pytest.raises(SystemExit, match="--output_vcf"):
             main()
-        assert exc.value.code == 2
+        assert captured == {}
+
+    def test_output_vcf_alone(self, tmp_path, captured):
+        sys.argv = self._argv(tmp_path, "--output_vcf", str(tmp_path / "x" / "calls.vcf.gz"))
+        main()
+        assert captured["output_vcf"] == tmp_path / "x" / "calls.vcf.gz"
+        assert captured["output_dir"] is None
 
     def test_save_flags_map_to_save_set(self, tmp_path, captured):
         sys.argv = self._argv(

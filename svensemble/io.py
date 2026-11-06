@@ -33,7 +33,7 @@ import copy
 import gzip
 import json
 import pickle
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from io import TextIOWrapper
 from pathlib import Path
@@ -164,21 +164,34 @@ def write_model(model_fit, path: Path) -> Path:
     return path
 
 
-def write_calls(calls_df: pd.DataFrame, out_dir: Path, sample: str) -> tuple[Path, Path]:
-    """Write ensemble calls as CALLS_CSV (with index) plus CALLS_VCF in *out_dir*.
+def write_calls(
+    calls_df: pd.DataFrame,
+    out_dir: Path | None,
+    sample: str,
+    header_lines: Sequence[str] = (),
+    vcf_path: Path | None = None,
+) -> tuple[Path | None, Path]:
+    """Write ensemble calls as CALLS_CSV (with index) plus a calls VCF.
 
-    The VCF has one record per SV and the score as FORMAT SVENSSC for each
-    sample in FORMAT_SAMPLE_ID (*sample* names the column of calls without one).
+    The CSV goes to *out_dir* (skipped when it is None). The VCF goes to
+    *vcf_path*, or to CALLS_VCF in *out_dir*; it has one record per SV, the
+    score as FORMAT SVENSSC for each sample in FORMAT_SAMPLE_ID (*sample*
+    names the column of calls without one) and *header_lines* as extra meta
+    lines. Returns (CSV path or None, VCF path).
     """
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = out_dir / CALLS_CSV
-    vcf_path = out_dir / CALLS_VCF
-    with atomic_path(csv_path) as tmp:
-        calls_df.to_csv(tmp, index=True)
+    if out_dir is None and vcf_path is None:
+        raise ValueError("write_calls needs out_dir or vcf_path")
+    csv_path = None
+    if out_dir is not None:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = out_dir / CALLS_CSV
+        with atomic_path(csv_path) as tmp:
+            calls_df.to_csv(tmp, index=True)
+    vcf_path = Path(vcf_path) if vcf_path is not None else out_dir / CALLS_VCF
     vcfwrite.write_vcf(
         calls_df, vcf_path, source="svensemble2", sample_name=sample,
-        score_col=sv_annotate.pred_column(calls_df),
+        score_col=sv_annotate.pred_column(calls_df), header_lines=header_lines,
     )
     return csv_path, vcf_path
 
