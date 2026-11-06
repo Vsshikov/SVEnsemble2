@@ -16,6 +16,7 @@ from . import chunk_match as chunk_match
 from . import breakpoints as bps
 from . import io as sv_io
 from . import utils as sv_utils
+from ._constants import PRED_SUFFIX
 
 
 def get_truth_count(
@@ -111,12 +112,12 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, val_name, trainin
     # auto-detection of the unique '*_pred' column written by get_svensemble2_calls.
     if pred_col is None:
         if training_set_name is not None and model_name is not None:
-            pred_col = f'{training_set_name}_{model_name}_pred'
+            pred_col = f'{training_set_name}_{model_name}{PRED_SUFFIX}'
         else:
-            pred_candidates = [c for c in svens_calls_.columns if c.endswith('_pred')]
+            pred_candidates = [c for c in svens_calls_.columns if c.endswith(PRED_SUFFIX)]
             if len(pred_candidates) != 1:
                 raise ValueError(
-                    f"Expected exactly one '*_pred' column in svensemble2 calls, found {pred_candidates}"
+                    f"Expected exactly one '*{PRED_SUFFIX}' column in svensemble2 calls, found {pred_candidates}"
                 )
             pred_col = pred_candidates[0]
 

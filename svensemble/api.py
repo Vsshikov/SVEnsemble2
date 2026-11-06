@@ -2,11 +2,10 @@
 SVEnsemble2 Python API.
 
 Each pipeline step takes DataFrames and plain values and returns DataFrames
-or a fitted model; apart from preprocess_raw parsing its VCF, none of them
-read or write files. Pair them with ``svensemble.io`` to load inputs and
-save outputs:
+or a fitted model; none of them read or write files. Pair them with
+``svensemble.io`` to load inputs and save outputs:
 
-    raw = api.preprocess_raw(vcf, "manta_diploid", ref)
+    raw = api.preprocess_raw(io.read_vcf(vcf, "manta_diploid"), "manta_diploid")
     bps = api.preprocess(raw, "manta_diploid", model="unbiased_xgb")
     matched = api.match({"manta_diploid": bps}, io.read_bps(gt_csv))
     X, model_fit = api.train(matched, ["manta_diploid"], "unbiased_xgb", "manta_diploid")
@@ -37,12 +36,14 @@ import pandas as pd
 from . import _config as sv_config
 from . import _provenance
 from . import breakpoints as bps_mod
+from . import callset_specific
 from . import chunk_match
 from . import io as sv_io
 from . import matched_breakpoints as mbps
 from . import models
-from . import pipeline
+from ._caller_params import CALLSET_PARAM_DICT
 from ._config import list_preset_ids
+from ._constants import PRED_SUFFIX
 from .benchmark import run_single_callset_benchmark as benchmark_callset
 from .ground_truth import preprocess_ground_truth
 from .validation_sets import preprocess_validation_set
@@ -55,7 +56,7 @@ __all__ = [
 ]
 
 
-def _workflow_config(**kwargs) -> dict:
+def _workflow_config_anonymous_sample(**kwargs) -> dict:
     """build_workflow_config for steps that never use the sample name."""
     return sv_config.build_workflow_config(sample_name="sample", **kwargs)
 
@@ -117,23 +118,24 @@ def model_id(model: str | None = None, model_config: dict | None = None) -> str:
 # Pipeline steps
 # ---------------------------------------------------------------------------
 
-def preprocess_raw(vcf: Path, caller: str, ref: Path, verbose: bool = False) -> pd.DataFrame:
-    """Parse one caller's VCF into raw breakpoints.
+def preprocess_raw(vcf_df: pd.DataFrame, caller: str, verbose: bool = False) -> pd.DataFrame:
+    """Turn one caller's parsed VCF into raw breakpoints.
 
     Args:
-        vcf: Caller VCF/BCF path.
-        caller: Caller name (a key of callset_specific.parse_recipes, or 'delly').
-        ref: Reference FASTA; only Delly uses it, to resolve BND records.
+        vcf_df: The caller's VCF as parsed by io.read_vcf; not modified.
+        caller: Caller name (a key of _caller_params.CALLSET_PARAM_DICT whose
+            source has a callset_specific.parse_recipes entry).
         verbose: Print progress messages.
     """
-    workflow_config = _workflow_config(callers=[caller], ref_path=ref)
-    callset = workflow_config["callsets"][caller]
-    callset["path"] = vcf
-    if caller == "delly":
-        return pipeline.parse_preprocess_delly(
-            sample_name="sample", workflow_config=workflow_config, verbose=verbose,
+    if caller not in CALLSET_PARAM_DICT:
+        raise ValueError(f"Unknown caller {caller!r}: no CALLSET_PARAM_DICT entry.")
+    params = copy.deepcopy(CALLSET_PARAM_DICT[caller])
+    if params.get("source") not in callset_specific.parse_recipes:
+        raise ValueError(
+            f"Caller {caller!r} (source {params.get('source')!r}) has no parse recipe; "
+            f"known sources: {sorted(callset_specific.parse_recipes)}."
         )
-    return pipeline.parse_preprocess_vcf(callset_name=caller, callset=callset, verbose=verbose)
+    return callset_specific.vcf_df_to_raw_bps(vcf_df, params, verbose=verbose)
 
 
 def preprocess(
@@ -147,7 +149,7 @@ def preprocess(
     The model only matters through its ``custom_cols`` training param, which
     adds caller columns to keep.
     """
-    workflow_config = _workflow_config(callers=[caller], model_name=model, model_config=model_config)
+    workflow_config = _workflow_config_anonymous_sample(callers=[caller], model_name=model, model_config=model_config)
     return bps_mod.common_bps_preprocess(raw_bps, workflow_config["callsets"][caller]["params"])
 
 
@@ -172,7 +174,7 @@ def match(
         insert_delta_threshold: Insert-size similarity threshold for a match.
         verbose: Print the callsets being matched.
     """
-    workflow_config = _workflow_config(
+    workflow_config = _workflow_config_anonymous_sample(
         callers=list(caller_bps), model_name=model, model_config=model_config,
         ground_truth_name=ground_truth_name,
     )
@@ -221,7 +223,7 @@ def train(
         # depend on the order the callers were given in.
         callers = sorted(callers)
     training_set = sv_config.resolve_training_set(training_set, callers)
-    workflow_config = _workflow_config(
+    workflow_config = _workflow_config_anonymous_sample(
         callers=callers, model_name=model, training_set=training_set,
         model_config=model_config, ground_truth_name=ground_truth_name,
     )
@@ -269,7 +271,7 @@ def predict(
     X = feature_matrix.reindex(columns=model_fit.feature_names_in_, fill_value=fill_val)
 
     y_pred = model_fit.predict_proba(X)[:, 1]
-    pred_col = f"{training_set}_{sv_config.model_id(resolved)}_pred"
+    pred_col = f"{training_set}_{sv_config.model_id(resolved)}{PRED_SUFFIX}"
     y_pred_df = pd.DataFrame(y_pred, columns=[pred_col], index=X.index).reset_index(drop=False)
     return mbps.get_svensemble2_calls(matched_bps, y_pred_df)
 
@@ -363,7 +365,8 @@ def run(
     Args:
         sample: Sample name; used in the VCF outputs.
         caller_vcfs: Caller name -> caller VCF.
-        ref: Reference FASTA (used by Delly).
+        ref: Reference FASTA. Reserved for VCF writing; currently unused
+            apart from the provenance record.
         model, training_set, model_config: As for train/predict.
         output_dir: Where the calls and saved artifacts go (created if missing).
             One run per output_dir: filenames are fixed and are overwritten.
@@ -501,7 +504,7 @@ def _run_in(
     caller_bps = {}
     for caller, vcf in caller_vcfs.items():
         raw_path = sv_io.write_bps(
-            preprocess_raw(vcf, caller, ref, verbose=verbose),
+            preprocess_raw(sv_io.read_vcf(vcf, caller), caller, verbose=verbose),
             scratch / "preprocess_raw" / sv_io.RAW_BPS.format(caller=caller),
         )
         bps_path, vcf_path = sv_io.write_callset(

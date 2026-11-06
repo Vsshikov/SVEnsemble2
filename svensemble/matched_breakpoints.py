@@ -7,6 +7,18 @@ import numpy as np
 
 from . import _caller_params as caller_params
 from . import breakpoints as bps
+from ._constants import (
+    BNDS,
+    CI_LEFT,
+    CI_RIGHT,
+    CI_SIDES,
+    CUSTOM_PREFIX,
+    FILTER_PREFIX,
+    INFO_PREFIX,
+    PRED_SUFFIX,
+    SAMPLE_PREFIX,
+    TOPOLOGY_PREFIX,
+)
 
 def generate_svensemble2_ids(matchedbps_df: pd.DataFrame, callsets: list[str], prefix: str = 'svensemble2_') -> pd.Series:
     """
@@ -87,16 +99,15 @@ def matchedbps_to_bps(
         - Chromosome is taken from the first non-null value among callsets for each breakpoint end.
     """
     callsets = matched_bps_callsets
-    bnds = ["1", "2"]
 
     # Collect relevant columns for merging
     relevant_cols = (
         [f"{callset}_INFO_EVENT" for callset in callsets] +
-        [f"{callset}_POS_bnd{bnd}" for callset in callsets for bnd in bnds] +
-        [f"{callset}_CHROM_bnd{bnd}" for callset in callsets for bnd in bnds] +
-        [f"{callset}_INFO_CIPOS_l_bnd{bnd}" for callset in callsets for bnd in bnds] +
-        [f"{callset}_INFO_CIPOS_r_bnd{bnd}" for callset in callsets for bnd in bnds] +
-        [f"{callset}_ALT_bnd{bnd}" for callset in callsets for bnd in bnds]
+        [f"{callset}_POS_{bnd_label}" for callset in callsets for bnd_label in BNDS] +
+        [f"{callset}_CHROM_{bnd_label}" for callset in callsets for bnd_label in BNDS] +
+        [f"{callset}_INFO_CIPOS_l_{bnd_label}" for callset in callsets for bnd_label in BNDS] +
+        [f"{callset}_INFO_CIPOS_r_{bnd_label}" for callset in callsets for bnd_label in BNDS] +
+        [f"{callset}_ALT_{bnd_label}" for callset in callsets for bnd_label in BNDS]
     )
     if extra_cols:
         relevant_cols.extend(extra_cols)
@@ -106,24 +117,24 @@ def matchedbps_to_bps(
     coords_with_cipos = pd.DataFrame(index=merged_coords_matched_bps.index)
 
     # Dictionaries for direction handling
-    dir_dict = {"l": "leftmost", "r": "rightmost"}
-    dir_np_funcs = {"l": np.nanmin, "r": np.nanmax}
+    dir_dict = {CI_LEFT: "leftmost", CI_RIGHT: "rightmost"}
+    dir_np_funcs = {CI_LEFT: np.nanmin, CI_RIGHT: np.nanmax}
 
-    for bnd in bnds:
+    for bnd_label in BNDS:
         pos_cols = []
         # Compute leftmost/rightmost positions for each direction and callset
-        for direction in ["l", "r"]:
+        for direction in CI_SIDES:
             for callset in callsets:
-                col_pos = f"{callset}_POS_bnd{bnd}"
+                col_pos = f"{callset}_POS_{bnd_label}"
                 pos_cols.append(col_pos)
-                col_cipos = f"{callset}_INFO_CIPOS_{direction}_bnd{bnd}"
-                coords_with_cipos[f"{callset}_POS_{direction}_bnd{bnd}"] = (
+                col_cipos = f"{callset}_INFO_CIPOS_{direction}_{bnd_label}"
+                coords_with_cipos[f"{callset}_POS_{direction}_{bnd_label}"] = (
                     merged_coords_matched_bps[col_pos] +
                     merged_coords_matched_bps[col_cipos]
                 )
             # Aggregate leftmost/rightmost positions across callsets
-            cipos_cols = coords_with_cipos.columns.str.contains(f"POS_{direction}_bnd{bnd}")
-            coords_with_cipos.loc[:, f"POS_{direction}_bnd{bnd}_{dir_dict[direction]}"] = (
+            cipos_cols = coords_with_cipos.columns.str.contains(f"POS_{direction}_{bnd_label}")
+            coords_with_cipos.loc[:, f"POS_{direction}_{bnd_label}_{dir_dict[direction]}"] = (
                 np.round(
                     dir_np_funcs[direction](
                         coords_with_cipos.loc[:, cipos_cols], axis=1
@@ -132,50 +143,50 @@ def matchedbps_to_bps(
             )
 
         # Compute consensus position as mean of all callset positions
-        merged_coords_matched_bps.loc[:, f"POS_bnd{bnd}"] = np.round(
+        merged_coords_matched_bps.loc[:, f"POS_{bnd_label}"] = np.round(
             np.nanmean(merged_coords_matched_bps.loc[:, pos_cols], axis=1)
         ).astype(int)
 
         # Compute confidence intervals relative to consensus position
-        for direction in ["l", "r"]:
-            merged_coords_matched_bps.loc[:, f"INFO_CIPOS_{direction}_bnd{bnd}"] = (
-                coords_with_cipos.loc[:, f"POS_{direction}_bnd{bnd}_{dir_dict[direction]}"]
-                - merged_coords_matched_bps.loc[:, f"POS_bnd{bnd}"]
+        for direction in CI_SIDES:
+            merged_coords_matched_bps.loc[:, f"INFO_CIPOS_{direction}_{bnd_label}"] = (
+                coords_with_cipos.loc[:, f"POS_{direction}_{bnd_label}_{dir_dict[direction]}"]
+                - merged_coords_matched_bps.loc[:, f"POS_{bnd_label}"]
             )
 
         # Assign chromosome from the first non-null value among callsets
-        chrom_cols = [f"{callset}_CHROM_bnd{bnd}" for callset in callsets]
+        chrom_cols = [f"{callset}_CHROM_{bnd_label}" for callset in callsets]
         def _first_chrom(row):
             vals = row.dropna()
             if vals.empty:
                 raise ValueError(
-                    f"All callsets have NaN for CHROM_bnd{bnd} "
+                    f"All callsets have NaN for CHROM_{bnd_label} "
                     f"at index {row.name!r}; cannot determine chromosome"
                 )
             return vals.iloc[0]
-        merged_coords_matched_bps.loc[:, f"CHROM_bnd{bnd}"] = (
+        merged_coords_matched_bps.loc[:, f"CHROM_{bnd_label}"] = (
             merged_coords_matched_bps.loc[:, chrom_cols]
             .apply(_first_chrom, axis=1)
         )
 
         # Using callset priorty list from caller_params, assign ALT_bnd1 and ALT_bnd2
-        merged_coords_matched_bps.loc[:, f"ALT_bnd{bnd}"] = np.nan
+        merged_coords_matched_bps.loc[:, f"ALT_{bnd_label}"] = np.nan
         for callset_name in caller_params.CALLSET_ALT_PRIORITY:
             # Skip if callset not in the data
             if callset_name not in callsets:
                 continue
-            missing_alts = merged_coords_matched_bps.loc[:, f"ALT_bnd{bnd}"].isna()
+            missing_alts = merged_coords_matched_bps.loc[:, f"ALT_{bnd_label}"].isna()
             if missing_alts.any():
-                merged_coords_matched_bps[f"ALT_bnd{bnd}"] = merged_coords_matched_bps[f"ALT_bnd{bnd}"].astype(object)
-                merged_coords_matched_bps.loc[missing_alts, f"ALT_bnd{bnd}"] = merged_coords_matched_bps.loc[missing_alts, f"{callset_name}_ALT_bnd{bnd}"]
+                merged_coords_matched_bps[f"ALT_{bnd_label}"] = merged_coords_matched_bps[f"ALT_{bnd_label}"].astype(object)
+                merged_coords_matched_bps.loc[missing_alts, f"ALT_{bnd_label}"] = merged_coords_matched_bps.loc[missing_alts, f"{callset_name}_ALT_{bnd_label}"]
 
 
     # Define columns to return in the final DataFrame
     return_cols = (
-        [f"CHROM_bnd{bnd}" for bnd in bnds] +
-        [f"POS_bnd{bnd}" for bnd in bnds] +
-        [f"INFO_CIPOS_{direction}_bnd{bnd}" for bnd in bnds for direction in ["l", "r"]] +
-        [f"ALT_bnd{bnd}" for bnd in bnds] +
+        [f"CHROM_{bnd_label}" for bnd_label in BNDS] +
+        [f"POS_{bnd_label}" for bnd_label in BNDS] +
+        [f"INFO_CIPOS_{direction}_{bnd_label}" for bnd_label in BNDS for direction in CI_SIDES] +
+        [f"ALT_{bnd_label}" for bnd_label in BNDS] +
         [f"{callset}_INFO_EVENT" for callset in callsets]
     )
     if extra_cols:
@@ -221,19 +232,19 @@ def preprocess_matchedbps_for_pu(
         callset_params = workflow_config['callsets'][callset_name]['params']
         training_cols.append(f'{callset_name}_INFO_EVENT')
         training_cols.extend(
-            f'{callset_name}_FILTER_{col}'
+            f'{callset_name}_{FILTER_PREFIX}{col}'
             for col in callset_params['filter_cols']
         )
         training_cols.extend(
-            f'{callset_name}_INFO_{col}'
+            f'{callset_name}_{INFO_PREFIX}{col}'
             for col in callset_params['info_cols_pred']
         )
         training_cols.extend(
-            f'{callset_name}_SAMPLE_{col}'
+            f'{callset_name}_{SAMPLE_PREFIX}{col}'
             for col in callset_params['format_cols']
         )
         training_cols.extend(
-            f'{callset_name}_CUSTOM_{col}'
+            f'{callset_name}_{CUSTOM_PREFIX}{col}'
             for col in callset_params['custom_cols_pred']
         )
         # Quality metric column may not be included in the training_cols list, so add it if it exists and is not already in training_cols
@@ -241,7 +252,7 @@ def preprocess_matchedbps_for_pu(
             training_cols.append(f'{callset_name}_{callset_params["qual_metric"]}')
 
     if workflow_config['model'].get('training_params', {}).get('add_topology', False):
-        training_cols.extend(col for col in joint_bp_df.columns if col.startswith('svensembletopology_'))
+        training_cols.extend(col for col in joint_bp_df.columns if col.startswith(TOPOLOGY_PREFIX))
 
 
     # Find all columns in joint_bp_df that start with any of the training_col names
@@ -410,9 +421,9 @@ def get_svensemble2_calls(
 
     # Infer the training_set_name and model_name from the single prediction column in pred_df
     # Expect column like "{training_set_name}_{model_name}_pred"
-    prediction_cols = [col for col in pred_df.columns if col.endswith('_pred')]
+    prediction_cols = [col for col in pred_df.columns if col.endswith(PRED_SUFFIX)]
     if len(prediction_cols) != 1:
-        raise ValueError("There should be exactly one prediction column in pred_df ending with '_pred'")
+        raise ValueError(f"There should be exactly one prediction column in pred_df ending with '{PRED_SUFFIX}'")
     pred_col = prediction_cols[0]
     # Split out training_set_name and model_name
     name_parts = pred_col.rsplit('_', 2)
@@ -429,6 +440,6 @@ def get_svensemble2_calls(
         extra_cols=[
             'svensemble2_insert_size',
             'INFO_EVENT',
-            f"{training_set_name}_{model_name}_pred"
+            f"{training_set_name}_{model_name}{PRED_SUFFIX}"
         ]
     )

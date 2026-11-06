@@ -4,6 +4,9 @@ File I/O for SVEnsemble2: every pipeline filename and every read/write.
   Filenames -- the constants below name each artifact a pipeline stage
   writes. ``{caller}`` placeholders are filled with ``str.format``.
 
+  Caller VCFs -- ``read_vcf`` parses a caller's VCF into the DataFrame
+  that ``api.preprocess_raw`` takes.
+
   Artifacts -- ``read_*`` / ``write_*`` for breakpoint CSVs, the feature
   matrix, the model pickle and the final calls. Writers take the object
   first and the location second, create parent directories and return the
@@ -26,15 +29,19 @@ File I/O for SVEnsemble2: every pipeline filename and every read/write.
   for content-addressable hashing (used by ``_config.model_config_hash``).
 """
 
+import copy
 import json
 import pickle
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from pysam import VariantFile
 
 from . import vcfwrite
+from ._caller_params import CALLSET_PARAM_DICT
 from .utils import atomic_path
+from .vcfparse import parse_vcf_to_df
 
 
 RAW_BPS = "{caller}.raw_bps.csv"
@@ -56,6 +63,26 @@ REQUIRED_KEYS = {"sample_name"}
 
 
 # -- Pipeline artifacts -----------------------------------------------------
+
+def read_vcf(path: Path, caller: str, sample_name: str | None = None) -> pd.DataFrame:
+    """Parse a caller's VCF/BCF into a DataFrame (the input to api.preprocess_raw).
+
+    Columns are chosen by the caller's CALLSET_PARAM_DICT entry.
+
+    Args:
+        path: VCF/BCF path.
+        caller: Callset name (a key of _caller_params.CALLSET_PARAM_DICT).
+        sample_name: Sample whose FORMAT fields to read, for callers that
+            parse FORMAT. Defaults to the first sample in the header.
+    """
+    try:
+        params = copy.deepcopy(CALLSET_PARAM_DICT[caller])
+    except KeyError:
+        raise KeyError(f"Unknown caller {caller!r}: no CALLSET_PARAM_DICT entry") from None
+    with VariantFile(str(path)) as vcf:
+        vcf_df, _ = parse_vcf_to_df(vcf, params, sample_name=sample_name)
+    return vcf_df
+
 
 def read_bps(path: Path) -> pd.DataFrame:
     """Read any breakpoint CSV: raw, processed, matched or ground truth."""

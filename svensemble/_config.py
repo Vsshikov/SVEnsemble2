@@ -69,7 +69,7 @@ class GroundTruthConfig(TypedDict):
 
 
 class WorkflowConfig(TypedDict):
-    """Top-level config dict consumed by pipeline, models, and CLI."""
+    """Top-level config dict consumed by the api steps, models, and CLI."""
     sample_name: str
     callsets: dict[str, CallsetConfig]
     model: ResolvedModelConfig
@@ -78,7 +78,6 @@ class WorkflowConfig(TypedDict):
     workflow_dir: Path
     callset_bps_dir: Path
     is_reference: bool
-    ref_path: NotRequired[Path]
     ground_truth: NotRequired[GroundTruthConfig]
 
 def _tag_constructor(tag_dict):
@@ -242,7 +241,6 @@ def build_workflow_config(
     callers: list[str] | None = None,
     model_name: str | None = None,
     training_set: str | None = None,
-    ref_path: Path | None = None,
     model_config: dict | None = None,
     ground_truth_name: str | None = None,
     ground_truth_vcf_path: Path | None = None,
@@ -265,7 +263,6 @@ def build_workflow_config(
         model_name: Key in MODEL_CONFIGS; controls custom_cols_pred injection.
         training_set: Name to key the training_sets dict; matched against
             TRAINING_SET_PRESETS before falling back to `callers`.
-        ref_path: Optional reference FASTA, stored verbatim under 'ref_path'.
         model_config: Optional freeform model config dict override.
         ground_truth_name: Ground truth dataset name. When provided, a
             'ground_truth' sub-dict (from build_ground_truth_config) is
@@ -276,9 +273,8 @@ def build_workflow_config(
             bps CSV, stored in ground_truth config if ground_truth_name is set.
 
     Returns:
-        Dict with the shape consumed by pipeline.parse_preprocess_delly,
-        pipeline.parse_preprocess_vcf, breakpoints.common_bps_preprocess and
-        models.train_model.
+        Dict with the shape consumed by breakpoints.common_bps_preprocess,
+        chunk_match.outer_join_bps and models.train_model.
     """
     if callers is None:
         callers = []
@@ -330,9 +326,6 @@ def build_workflow_config(
         ),
         model_id=mid,
     )
-
-    if ref_path is not None:
-        config['ref_path'] = ref_path
 
     if ground_truth_name is not None:
         config['ground_truth'] = build_ground_truth_config(

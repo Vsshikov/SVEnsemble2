@@ -10,6 +10,8 @@ from typing import Iterator
 
 import pandas as pd
 
+from ._constants import CI_LEFT, CI_RIGHT
+
 
 @contextmanager
 def atomic_path(path: Path) -> Iterator[Path]:
@@ -111,13 +113,13 @@ def get_chrom_keys(chrom_series: pd.Series, chrom_keys: dict | None = None) -> p
 
 def split_cipos(cipos_col: pd.Series, default_cipos: tuple[int, int] = (0, 0)) -> pd.DataFrame:
     cipos_df = pd.DataFrame(cipos_col)
-    cipos_df.loc[:, cipos_col.name.replace('INFO_CIPOS', 'INFO_CIPOS_l')] = cipos_col.str[0].fillna(default_cipos[0]).astype(int)
-    cipos_df.loc[:, cipos_col.name.replace('INFO_CIPOS', 'INFO_CIPOS_r')] = cipos_col.str[1].fillna(default_cipos[1]).astype(int)
+    cipos_df.loc[:, cipos_col.name.replace('INFO_CIPOS', f'INFO_CIPOS_{CI_LEFT}')] = cipos_col.str[0].fillna(default_cipos[0]).astype(int)
+    cipos_df.loc[:, cipos_col.name.replace('INFO_CIPOS', f'INFO_CIPOS_{CI_RIGHT}')] = cipos_col.str[1].fillna(default_cipos[1]).astype(int)
     return cipos_df.drop(columns=[cipos_col.name])
 
 
 def split_ciend(ciend_col: pd.Series, default_ciend: tuple[int, int] = (0, 0)) -> pd.DataFrame:
     ciend_df = pd.DataFrame(ciend_col)
-    ciend_df.loc[:, ciend_col.name.replace('INFO_CIEND', 'INFO_CIEND_l')] = ciend_col.str[0].fillna(default_ciend[0]).astype(int)
-    ciend_df.loc[:, ciend_col.name.replace('INFO_CIEND', 'INFO_CIEND_r')] = ciend_col.str[1].fillna(default_ciend[1]).astype(int)
+    ciend_df.loc[:, ciend_col.name.replace('INFO_CIEND', f'INFO_CIEND_{CI_LEFT}')] = ciend_col.str[0].fillna(default_ciend[0]).astype(int)
+    ciend_df.loc[:, ciend_col.name.replace('INFO_CIEND', f'INFO_CIEND_{CI_RIGHT}')] = ciend_col.str[1].fillna(default_ciend[1]).astype(int)
     return ciend_df.drop(columns=[ciend_col.name])

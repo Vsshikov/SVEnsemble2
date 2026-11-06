@@ -5,11 +5,13 @@ Functions for parsing VCF files.
 
 import logging
 from collections.abc import Iterable
+from typing import Sequence
 
 import pandas as pd
 from pysam import VariantFile, VariantRecord
 
 from . import _caller_params
+from ._constants import ANNOT_PREFIX, FILTER_PREFIX, INFO_PREFIX, SAMPLE_ID_COL, SAMPLE_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +72,11 @@ def parse_vcf_to_df_no_format(
         caller_params = _caller_params.DEFAULT_PARAMS
 
     base_fields = {col: [] for col in caller_params['base_cols']}
-    filter_fields = {f'FILTER_{name}': [] for name in dict.fromkeys(caller_params['filter_cols'])}
+    filter_fields = {f'{FILTER_PREFIX}{name}': [] for name in dict.fromkeys(caller_params['filter_cols'])}
 
     info_col_names = _ordered_info_col_names(caller_params)
     info_fields = {
-        f'INFO_{name}': []
+        f'{INFO_PREFIX}{name}': []
         for name in info_col_names
     }
 
@@ -100,7 +102,7 @@ def parse_vcf_to_df_no_format(
 def parse_vcf_to_df_with_format(
     vcf_file: VariantFile,
     caller_params: dict = None,
-    sample_name: str | None = None
+    sample_names: list[str] | None = None
 ) -> tuple[pd.DataFrame, VariantFile.header]:
     """
     Parse a VCF file into a DataFrame including FORMAT/sample fields.
@@ -112,7 +114,7 @@ def parse_vcf_to_df_with_format(
         vcf_file: A pysam VariantFile object containing variant calls.
         caller_params: Caller-specific parameters; see _caller_params.py.
             Defaults to _caller_params.DEFAULT_PARAMS when None.
-        sample_name: Sample to extract FORMAT fields for. Defaults to the
+        sample_names: Samples to extract FORMAT fields for. Defaults to all
             first sample listed in the VCF header.
 
     Returns:
@@ -130,20 +132,38 @@ def parse_vcf_to_df_with_format(
         )
 
     base_fields = {col: [] for col in caller_params['base_cols']}
-    filter_fields = {f'FILTER_{name}': [] for name in dict.fromkeys(caller_params['filter_cols'])}
+    filter_fields = {f'{FILTER_PREFIX}{name}': [] for name in dict.fromkeys(caller_params['filter_cols'])}
     info_col_names = _ordered_info_col_names(caller_params)
     info_fields = {
-        f'INFO_{name}': []
+        f'{INFO_PREFIX}{name}': []
         for name in info_col_names
     }
 
-    if sample_name is None:
-        sample_name = vcf_file.header.samples[0]
-        logger.debug("parse_vcf_to_df_with_format: defaulting to first sample '%s'", sample_name)
+    # Fetch the sample names from the header if not provided as input. If samples are
+    header_samples = tuple(vcf_file.header.samples)
+    match sample_names:
+        case None:
+            sample_names = header_samples
+            logger.debug("parse_vcf_to_df_with_format: defaulting to all samples '%s'", sample_names)
+        case str():
+            sample_names = (sample_names,)
+            logger.debug("parse_vcf_to_df_with_format: using provided sample names '%s'", sample_names)
+        case _:
+            sample_names = tuple(sample_names)
+
+    if not sample_names:
+        raise ValueError("No samples to read FORMAT fields from")
+    missing = [name for name in sample_names if name not in header_samples]
+    if missing:
+        raise ValueError(f"Samples not in VCF header: {missing}")
+    logger.debug("parse_vcf_to_df_with_format: reading samples %s", sample_names)
+
 
     sample_fields = {
-        f'SAMPLE_{field_name}': []
-        for field_name in caller_params['format_cols']
+        f'{SAMPLE_PREFIX}{field_name}': []
+        for field_name in caller_params.get('format_cols', ())
+    } | {
+        SAMPLE_ID_COL: []
     }
 
     annot_format_names, annot_info_names = _detect_annotator_cols(vcf_file, caller_params)
@@ -154,16 +174,18 @@ def parse_vcf_to_df_with_format(
     _remove_unused_format_header_fields(vcf_file, caller_params, keep=annot_format_names)
 
     for record in vcf_file:
-        _fetch_base_fields(record, base_fields)
-        _fetch_filter_fields(record, filter_fields, caller_params)
-        _fetch_info_fields(record, info_fields, info_col_names)
-        _fetch_sample_fields(record, sample_fields, caller_params, sample_name)
-        _fetch_annotator_fields(record, annot_fields, annot_format_names, annot_info_names, sample_name)
+        for sample_name in sample_names:
+            _fetch_base_fields(record, base_fields)
+            _fetch_filter_fields(record, filter_fields, caller_params)
+            _fetch_info_fields(record, info_fields, info_col_names)
+            _fetch_sample_fields(record, sample_fields, caller_params, sample_name)
+            _fetch_annotator_fields(record, annot_fields, annot_format_names, annot_info_names, sample_name)
+            sample_fields[SAMPLE_ID_COL].append(sample_name)
 
     df = pd.DataFrame(base_fields | filter_fields | info_fields | sample_fields | annot_fields)
     logger.debug(
-        "parse_vcf_to_df_with_format: parsed %d records (sample='%s')",
-        len(df), sample_name,
+        "parse_vcf_to_df_with_format: parsed %d records (samples=%s)",
+        len(df), sample_fields[SAMPLE_ID_COL],
     )
     return df, vcf_file.header
 
@@ -213,7 +235,7 @@ def _init_annotator_fields(
     annot_info_names: tuple[str, ...],
 ) -> dict[str, list]:
     """Empty ANNOT_<field> accumulators for the detected annotator fields."""
-    return {f'ANNOT_{name}': [] for name in annot_format_names + annot_info_names}
+    return {f'{ANNOT_PREFIX}{name}': [] for name in annot_format_names + annot_info_names}
 
 
 def _remove_unused_info_header_fields(
@@ -297,7 +319,7 @@ def _fetch_filter_fields(
 ) -> None:
     """Append FILTER fields from a record to the accumulator dict (1/0 encoding)."""
     for filter_name in caller_params['filter_cols']:
-        filter_fields[f'FILTER_{filter_name}'].append(1 if filter_name in record.filter else 0)
+        filter_fields[f'{FILTER_PREFIX}{filter_name}'].append(1 if filter_name in record.filter else 0)
 
 
 def _fetch_info_fields(
@@ -308,9 +330,9 @@ def _fetch_info_fields(
     """Append INFO fields from a record to the accumulator dict (None when absent)."""
     for info_name in info_col_names:
         try:
-            info_fields[f'INFO_{info_name}'].append(record.info[info_name])
+            info_fields[f'{INFO_PREFIX}{info_name}'].append(record.info[info_name])
         except KeyError:
-            info_fields[f'INFO_{info_name}'].append(None)
+            info_fields[f'{INFO_PREFIX}{info_name}'].append(None)
 
 
 def _fetch_sample_fields(
@@ -323,9 +345,9 @@ def _fetch_sample_fields(
     sample = record.samples[sample_name]
     for format_name in caller_params['format_cols']:
         try:
-            format_fields[f'SAMPLE_{format_name}'].append(sample[format_name])
+            format_fields[f'{SAMPLE_PREFIX}{format_name}'].append(sample[format_name])
         except KeyError:
-            format_fields[f'SAMPLE_{format_name}'].append(None)
+            format_fields[f'{SAMPLE_PREFIX}{format_name}'].append(None)
 
 
 def _fetch_annotator_fields(
@@ -340,11 +362,18 @@ def _fetch_annotator_fields(
         sample = record.samples[sample_name]
         for name in annot_format_names:
             try:
-                annot_fields[f'ANNOT_{name}'].append(sample[name])
+                annot_fields[f'{ANNOT_PREFIX}{name}'].append(sample[name])
             except KeyError:
-                annot_fields[f'ANNOT_{name}'].append(None)
+                annot_fields[f'{ANNOT_PREFIX}{name}'].append(None)
     for name in annot_info_names:
         try:
-            annot_fields[f'ANNOT_{name}'].append(record.info[name])
+            annot_fields[f'{ANNOT_PREFIX}{name}'].append(record.info[name])
         except KeyError:
-            annot_fields[f'ANNOT_{name}'].append(None)
+            annot_fields[f'{ANNOT_PREFIX}{name}'].append(None)
+
+def _gen_single_sample_records(record: VariantRecord) -> tuple[str, VariantRecord.samples]:
+    """
+    Yield a tuple of (sample name, single sample record) for each sample in record.
+    """
+    for sample_name in record.samples:
+        yield sample_name, record.samples[sample_name]

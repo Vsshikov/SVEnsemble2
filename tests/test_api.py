@@ -34,6 +34,24 @@ class _FakeModel:
         return np.column_stack([1 - p, p])
 
 
+class TestPreprocessRaw:
+    def test_unknown_caller_raises(self):
+        with pytest.raises(ValueError, match="Unknown caller"):
+            api.preprocess_raw(pd.DataFrame(), "no_such_caller")
+
+    def test_caller_without_recipe_raises(self):
+        # gnomad has params but is ground truth, not a parse recipe source.
+        with pytest.raises(ValueError, match="no parse recipe"):
+            api.preprocess_raw(pd.DataFrame(), "gnomad")
+
+    def test_delly_from_vcf(self, tmp_path):
+        from .conftest import write_delly_vcf
+        vcf = tmp_path / "delly.vcf"
+        bnd_records = write_delly_vcf(vcf)
+        raw = api.preprocess_raw(sv_io.read_vcf(vcf, "delly"), "delly")
+        assert len(raw) == 1 + len(bnd_records)
+
+
 class TestFeatureMatrixIO:
     def test_index_round_trip(self, tmp_path):
         X = _train_shaped_X()
@@ -249,6 +267,7 @@ def fake_pipeline(monkeypatch):
         Path(path).write_text("##fileformat=VCFv4.5\n")
         return Path(path)
 
+    monkeypatch.setattr(sv_io, "read_vcf", lambda *a, **k: bps)
     monkeypatch.setattr(api, "preprocess_raw", step("preprocess_raw", lambda *a, **k: bps))
     monkeypatch.setattr(api, "preprocess", step("preprocess", lambda *a, **k: bps))
     monkeypatch.setattr(api, "match", step("match", lambda *a, **k: bps))

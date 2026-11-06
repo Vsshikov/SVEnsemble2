@@ -9,6 +9,7 @@ import pandas as pd
 
 from . import utils
 from . import _caller_params as caller_params
+from ._constants import INV_EVENT1_SUFFIX, INV_EVENT2_SUFFIX
 
 drop_cols = ['INFO_CHR2', 'INFO_CIEND_l', 'INFO_CIEND_r']
 
@@ -87,7 +88,7 @@ def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.
     bp1.loc[:, 'ID'] = inv_vcf_df['ID'] + '_bp1'
     bp1.loc[:, 'CHROM'] = inv_vcf_df['CHROM']
     bp1.loc[:, 'POS'] = inv_vcf_df['POS']
-    bp1.loc[:, 'INFO_EVENT'] = inv_vcf_df['INFO_EVENT'] + '_e1'
+    bp1.loc[:, 'INFO_EVENT'] = inv_vcf_df['INFO_EVENT'] + INV_EVENT1_SUFFIX
     bp1.loc[:, 'INFO_MATEID'] = inv_vcf_df['INFO_EVENT'] + '_bp3'
     bp1.loc[:, 'ALT'] = 'N]' + inv_vcf_df['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(inv_vcf_df, bnd2_pos) - 1).astype(str) + ']'
     bp1.loc[:, 'INFO_CIPOS_l'] = inv_vcf_df.loc[:, 'INFO_CIPOS_l']
@@ -99,7 +100,7 @@ def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.
     bp2.loc[:, 'ID'] = inv_vcf_df['ID'] + '_bp2'
     bp2.loc[:, 'CHROM'] = inv_vcf_df['CHROM']
     bp2.loc[:, 'POS'] = inv_vcf_df['POS'] + 1
-    bp2.loc[:, 'INFO_EVENT'] = inv_vcf_df['INFO_EVENT'] + '_e2'
+    bp2.loc[:, 'INFO_EVENT'] = inv_vcf_df['INFO_EVENT'] + INV_EVENT2_SUFFIX
     bp2.loc[:, 'INFO_MATEID'] = inv_vcf_df['INFO_EVENT'] + '_bp4'
     bp2.loc[:, 'ALT'] = '[' + inv_vcf_df['INFO_CHR2'].astype(str) + ':' + (_get_bnd2_pos(inv_vcf_df, bnd2_pos)).astype(str) + '[N'
     bp2.loc[:, 'INFO_CIPOS_l'] = inv_vcf_df.loc[:, 'INFO_CIPOS_l']
@@ -110,7 +111,7 @@ def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.
     bp3.loc[:, 'ID'] = inv_vcf_df['ID'] + '_bp3'
     bp3.loc[:, 'CHROM'] = inv_vcf_df['INFO_CHR2']
     bp3.loc[:, 'POS'] = _get_bnd2_pos(inv_vcf_df, bnd2_pos) - 1
-    bp3.loc[:, 'INFO_EVENT'] = inv_vcf_df['INFO_EVENT'] + '_e1'
+    bp3.loc[:, 'INFO_EVENT'] = inv_vcf_df['INFO_EVENT'] + INV_EVENT1_SUFFIX
     bp3.loc[:, 'INFO_MATEID'] = inv_vcf_df['INFO_EVENT'] + '_bp1'
     bp3.loc[:, 'ALT'] = 'N]' + inv_vcf_df['CHROM'].astype(str) + ':' + (inv_vcf_df['POS'].astype(int)).astype(str) + ']'
     bp3.loc[:, 'INFO_CIPOS_l'] = inv_vcf_df.loc[:, 'INFO_CIEND_l']
@@ -121,7 +122,7 @@ def convert_inv_to_bnd(inv_vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.
     bp4.loc[:, 'ID'] = inv_vcf_df['ID'] + '_bp4'
     bp4.loc[:, 'CHROM'] = inv_vcf_df['INFO_CHR2']
     bp4.loc[:, 'POS'] = _get_bnd2_pos(inv_vcf_df, bnd2_pos)
-    bp4.loc[:, 'INFO_EVENT'] = inv_vcf_df['INFO_EVENT'] + '_e2'
+    bp4.loc[:, 'INFO_EVENT'] = inv_vcf_df['INFO_EVENT'] + INV_EVENT2_SUFFIX
     bp4.loc[:, 'INFO_MATEID'] = inv_vcf_df['INFO_EVENT'] + '_bp2'
     bp4.loc[:, 'ALT'] = '[' + inv_vcf_df['CHROM'].astype(str) + ':' + (inv_vcf_df['POS'].astype(int) + 1).astype(str) + '[N'
     bp4.loc[:, 'INFO_CIPOS_l'] = inv_vcf_df.loc[:, 'INFO_CIEND_l']
