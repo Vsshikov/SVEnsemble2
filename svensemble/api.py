@@ -473,12 +473,11 @@ SAVE_ARTIFACTS = frozenset({"model", "feature_matrix", "matched_bps", "ground_tr
 
 
 def run(
-    sample: str,
+    *,
     caller_vcfs: CallerVcfs,
     ref: Path,
     model: str,
     output_dir: Path | None = None,
-    *,
     training_set: str | None = None,
     ground_truth_vcf: Path | None = None,
     ground_truth_bps: Path | None = None,
@@ -514,8 +513,10 @@ def run(
     A provenance record (io.RUN_PROVENANCE) is written to scratch and to
     output_dir at the start and rewritten at the end.
 
+    All arguments are keyword-only. The samples are read from the caller
+    VCF headers (check_sample_sets) and recorded in the provenance.
+
     Args:
-        sample: Sample name; used in the VCF outputs.
         caller_vcfs: Caller name -> caller VCF, or several (e.g. one per
             sample); each caller's files are parsed and concatenated. Sample
             names must agree across callers (check_sample_sets).
@@ -592,7 +593,6 @@ def run(
     record = _provenance.start(
         command=command,
         parameters={
-            "sample": sample,
             "caller_vcfs": caller_vcfs,
             "ref": ref,
             "model": model,
@@ -634,7 +634,7 @@ def run(
         _provenance.write(record, [scratch] + out)
         outputs = _run_in(
             scratch, output_dir,
-            sample=sample, caller_vcfs=caller_vcfs, ref=ref, model=model,
+            caller_vcfs=caller_vcfs, ref=ref, model=model,
             training_set=training_set, ground_truth_vcf=ground_truth_vcf,
             ground_truth_bps=ground_truth_bps, ground_truth_name=ground_truth_name,
             force_preprocess_ground_truth=force_preprocess_ground_truth,
@@ -665,7 +665,6 @@ def _run_in(
     scratch: Path,
     output_dir: Path | None,
     *,
-    sample: str,
     caller_vcfs: dict[str, tuple[Path, ...]],
     ref: Path,
     model: str,
@@ -701,7 +700,7 @@ def _run_in(
         )
         bps_path, vcf_path = sv_io.write_callset(
             preprocess(sv_io.read_bps(raw_path), caller, model=model, model_config=model_config),
-            artifact_dir("callsets", f"preprocess/{caller}"), caller, sample,
+            artifact_dir("callsets", f"preprocess/{caller}"), caller, None,
         )
         if "callsets" in save:
             published[f"{caller}.bps"] = bps_path
@@ -745,7 +744,7 @@ def _run_in(
         model_config=model_config, callers=list(caller_vcfs),
     )
     calls_csv, calls_vcf = sv_io.write_calls(
-        calls, output_dir, sample, vcf_header_lines, vcf_path=output_vcf,
+        calls, output_dir, None, vcf_header_lines, vcf_path=output_vcf,
     )
     if verbose:
         print(f"[run] done. calls -> {calls_vcf}")

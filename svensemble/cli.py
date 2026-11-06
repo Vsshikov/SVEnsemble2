@@ -539,7 +539,6 @@ def _register_run(subparsers):
         "run",
         help="End-to-end standalone run: preprocess-raw -> ... -> predict for one sample.",
     )
-    p.add_argument("--sample", type=str, required=True, help="Sample name (used as identifier only).")
     p.add_argument("--callers", type=str, nargs="+", required=True, help="Caller names (same order as --caller_vcfs); repeat a name for several files of one caller.")
     p.add_argument("--caller_vcfs", type=Path, nargs="+", required=True, help="Caller VCFs (same order as --callers).")
     p.add_argument("--ref", type=Path, required=True, help="Reference FASTA path. Reserved for VCF writing; currently only recorded in provenance.")
@@ -579,7 +578,6 @@ def _cmd_run(args):
     previous = signal.signal(signal.SIGTERM, _raise_on_sigterm)
     try:
         api.run(
-            sample=args.sample,
             caller_vcfs=caller_vcfs,
             ref=args.ref,
             model=args.model,

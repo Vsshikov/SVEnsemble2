@@ -110,8 +110,11 @@ def write_bps(bp_df: pd.DataFrame, path: Path) -> Path:
     return path
 
 
-def write_callset(bp_df: pd.DataFrame, out_dir: Path, caller: str, sample: str) -> tuple[Path, Path]:
-    """Write a processed callset as CALLSET_BPS plus CALLSET_VCF in *out_dir*."""
+def write_callset(bp_df: pd.DataFrame, out_dir: Path, caller: str, sample: str | None) -> tuple[Path, Path]:
+    """Write a processed callset as CALLSET_BPS plus CALLSET_VCF in *out_dir*.
+
+    *sample* names the VCF's sample column; None writes a sites-only VCF.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     bps_path = out_dir / CALLSET_BPS.format(caller=caller)
@@ -167,7 +170,7 @@ def write_model(model_fit, path: Path) -> Path:
 def write_calls(
     calls_df: pd.DataFrame,
     out_dir: Path | None,
-    sample: str,
+    sample: str | None,
     header_lines: Sequence[str] = (),
     vcf_path: Path | None = None,
 ) -> tuple[Path | None, Path]:
