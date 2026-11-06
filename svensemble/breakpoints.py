@@ -12,6 +12,7 @@ from . import breakends as bnds
 from . import events as evts
 from . import utils
 from . import _caller_params as caller_params
+from ._constants import ANNOT_PREFIX, BND1, BND2, BNDS, CUSTOM_PREFIX
 
 def _get_annotated_svtypes(bp_df: pd.DataFrame, caller_params: dict|None = None) -> pd.DataFrame:
     """
@@ -29,11 +30,11 @@ def _get_annotator_col(bp_df: pd.DataFrame, col_name: str) -> pd.Series:
     breakpoint disagree; bnd1 is then used, falling back to bnd2. Returns an
     all-NaN column when the callset's VCF was not annotated.
     """
-    col = f'ANNOT_{col_name}'
+    col = f'{ANNOT_PREFIX}{col_name}'
     if col in bp_df.columns:
         return bp_df[col]
-    if f'{col}_bnd1' in bp_df.columns:
-        return bp_df[f'{col}_bnd1'].fillna(bp_df[f'{col}_bnd2'])
+    if f'{col}_{BND1}' in bp_df.columns:
+        return bp_df[f'{col}_{BND1}'].fillna(bp_df[f'{col}_{BND2}'])
     return pd.Series(np.nan, index=bp_df.index)
 
 
@@ -58,7 +59,7 @@ def common_bps_preprocess(bp_df, caller_params: dict|None = None) -> pd.DataFram
     for custom_col_name in caller_params['custom_cols_pred']:
         if custom_col_name not in _custom_col_dispatch.keys():
             raise KeyError(f"Custom column {custom_col_name} specified in callset parameters but not supported.")
-        bp_df_.loc[:, f'CUSTOM_{custom_col_name}'] = _custom_col_dispatch[custom_col_name](bp_df_, caller_params=caller_params)
+        bp_df_.loc[:, f'{CUSTOM_PREFIX}{custom_col_name}'] = _custom_col_dispatch[custom_col_name](bp_df_, caller_params=caller_params)
 
     return bp_df_
 
@@ -131,9 +132,9 @@ def trim_cipos(bp_df: pd.DataFrame, by: int | None | tuple[int, int] = None, up_
     elif isinstance(up_to, int):
         up_to = (up_to, up_to)
 
-    for bnd in ['bnd1', 'bnd2']:
-        bp_df_.loc[:, f'INFO_CIPOS_l_{bnd}'] = np.clip(bp_df_[f'INFO_CIPOS_l_{bnd}'] + by[0], -up_to[0], 0)
-        bp_df_.loc[:, f'INFO_CIPOS_r_{bnd}'] = np.clip(bp_df_[f'INFO_CIPOS_r_{bnd}'] - by[1], 0, up_to[1])
+    for bnd_label in BNDS:
+        bp_df_.loc[:, f'INFO_CIPOS_l_{bnd_label}'] = np.clip(bp_df_[f'INFO_CIPOS_l_{bnd_label}'] + by[0], -up_to[0], 0)
+        bp_df_.loc[:, f'INFO_CIPOS_r_{bnd_label}'] = np.clip(bp_df_[f'INFO_CIPOS_r_{bnd_label}'] - by[1], 0, up_to[1])
     return bp_df_
 
 def get_insert_size(bp_df: pd.DataFrame, source: str | None = None) -> pd.Series:

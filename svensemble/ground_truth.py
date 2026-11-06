@@ -29,6 +29,7 @@ from pysam import VariantFile
 
 from . import _caller_params
 from . import callset_specific
+from ._constants import FILTER_PREFIX
 from . import io as sv_io
 from . import utils as sv_utils
 from . import vcfparse as vcfp
@@ -319,7 +320,7 @@ def _apply_filters(
     """
 
     if filters:
-        filter_cols = [f'FILTER_{f}' for f in filters]
+        filter_cols = [f'{FILTER_PREFIX}{f}' for f in filters]
         present_cols = [c for c in filter_cols if c in df.columns]
         if present_cols:
             if verbose:

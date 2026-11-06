@@ -9,6 +9,7 @@ from . import breakends as bnds
 from . import events as evts
 from . import utils as sv_utils
 from . import _caller_params
+from ._constants import BND1, BND2, CI_LEFT, CI_RIGHT, CUSTOM_PREFIX
 
 def gridss_preprocess(
     gridss_callset: pd.DataFrame,
@@ -400,8 +401,8 @@ def manta_post_bps(bp_df: pd.DataFrame) -> pd.DataFrame:
         'INFO_DOWNSTREAM_PAIR_COUNT',
     ]
     for col in _PAIR_COUNT_COLS:
-        bnd1 = f'{col}_bnd1'
-        bnd2 = f'{col}_bnd2'
+        bnd1 = f'{col}_{BND1}'
+        bnd2 = f'{col}_{BND2}'
         if col not in bp_df.columns and bnd1 in bp_df.columns and bnd2 in bp_df.columns:
             bp_df.loc[:, col] = bp_df[[bnd1, bnd2]].astype(float).mean(axis=1)
             bp_df = bp_df.drop(columns=[bnd1, bnd2])
@@ -564,7 +565,7 @@ def _sniffles_cipos_from_stdev(stdev_series: pd.Series) -> pd.DataFrame:
     stdev_int = stdev_series.fillna(0).apply(lambda x: int(round(x)))
     base = stdev_series.name.replace('INFO_STDEV_POS', 'INFO_CIPOS').replace('INFO_STDEV_LEN', 'INFO_CIEND')
     return pd.DataFrame(
-        {f'{base}_l': -stdev_int, f'{base}_r': stdev_int},
+        {f'{base}_{CI_LEFT}': -stdev_int, f'{base}_{CI_RIGHT}': stdev_int},
         index=stdev_series.index
     )
 
@@ -1022,7 +1023,7 @@ def svaba_preprocess(
 
     if 'INFO_EVDNC' in df.columns:
         for val in _SVABA_EVDNC_VALUES:
-            df.loc[:, f'CUSTOM_EVDNC_{val}'] = (df['INFO_EVDNC'] == val).astype(int)
+            df.loc[:, f'{CUSTOM_PREFIX}EVDNC_{val}'] = (df['INFO_EVDNC'] == val).astype(int)
         df = df.drop(columns=['INFO_EVDNC'])
 
     if 'SAMPLE_PL' in df.columns:

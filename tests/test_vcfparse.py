@@ -284,6 +284,34 @@ class TestParseVcfToDfWithFormat:
         finally:
             os.unlink(path)
 
+    _TWO_SAMPLE_ROWS = ["chr1\t1000\tsv1\tN\t<DEL>\t50\tPASS\tSVTYPE=DEL\tGT\t0/1\t1/1\n"]
+
+    def _parse_two_samples(self, sample_names=None):
+        header = _HEADER_LINES + _SAMPLE_COL + _CHROM_HEADER_FMT.replace("\tS1\n", "\tS1\tS2\n")
+        with tempfile.NamedTemporaryFile(suffix=".vcf", delete=False, mode="w") as f:
+            f.write(header + "".join(self._TWO_SAMPLE_ROWS))
+        try:
+            with pysam.VariantFile(f.name) as vf:
+                df, _ = parse_vcf_to_df_with_format(vf, self._PARAMS, sample_names)
+            return df
+        finally:
+            os.unlink(f.name)
+
+    def test_one_row_per_sample_by_default(self):
+        df = self._parse_two_samples()
+        assert list(df["FORMAT_SAMPLE_ID"]) == ["S1", "S2"]
+        assert list(df["SAMPLE_GT"]) == [(0, 1), (1, 1)]
+        assert list(df["POS"]) == [1000, 1000]
+
+    def test_named_sample_only(self):
+        df = self._parse_two_samples("S2")
+        assert list(df["FORMAT_SAMPLE_ID"]) == ["S2"]
+        assert list(df["SAMPLE_GT"]) == [(1, 1)]
+
+    def test_raises_on_sample_not_in_header(self):
+        with pytest.raises(ValueError, match="S3"):
+            self._parse_two_samples(["S1", "S3"])
+
 
 # ---------------------------------------------------------------------------
 # Annotator columns (duphold)

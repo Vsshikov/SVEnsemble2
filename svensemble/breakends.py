@@ -9,6 +9,7 @@ import re
 from typing import List
 
 from . import utils
+from ._constants import BND1, BND2
 
 _BND_PATTERN = re.compile(
         r'(?P<inserted_seq1>[ACGTN]+)?'  # Optional inserted sequence before breakend
@@ -121,18 +122,18 @@ def bnd_to_bp(
 
     # Rename columns to indicate which breakend they came from
     bnd1_col_rename = {
-        col: f'{col}_bnd1' for col in bnd1.columns
-        if (col not in same_cols) and (not col.endswith('_bnd1'))
+        col: f'{col}_{BND1}' for col in bnd1.columns
+        if (col not in same_cols) and (not col.endswith(f'_{BND1}'))
     }
     bnd2_col_rename = {
-        col: f'{col}_bnd2' for col in bnd2.columns
-        if (col not in same_cols) and (not col.endswith('_bnd2'))
+        col: f'{col}_{BND2}' for col in bnd2.columns
+        if (col not in same_cols) and (not col.endswith(f'_{BND2}'))
     }
 
     bnd1 = bnd1.rename(columns=bnd1_col_rename)
     bnd2 = bnd2.rename(columns=bnd2_col_rename)
 
-    diff_cols_bnd2 = [f'{col}_bnd2' for col in diff_cols]
+    diff_cols_bnd2 = [f'{col}_{BND2}' for col in diff_cols]
 
     # Combine into breakpoint records
     breakpoints = pd.concat([bnd1, bnd2.loc[:, diff_cols_bnd2]], axis=1)

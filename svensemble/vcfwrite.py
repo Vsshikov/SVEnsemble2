@@ -16,6 +16,7 @@ from pysam import VariantFile, VariantHeader
 from . import breakpoints as bps_mod
 from . import breakends as bnds
 from . import utils
+from ._constants import BND1, BND2, INV_EVENT_SUFFIXES
 
 logger = logging.getLogger(__name__)
 
@@ -147,10 +148,10 @@ def _has_ci(bps_df: pd.DataFrame) -> bool:
     return all(col in bps_df.columns for col in _CI_COLS)
 
 
-def _set_ci(record, row: pd.Series, bnd_suffix: str, info_key: str = 'CIPOS') -> None:
+def _set_ci(record, row: pd.Series, bnd_label: str, info_key: str = 'CIPOS') -> None:
     """Set CIPOS or CIEND on a pysam record and flag IMPRECISE if nonzero."""
-    ci_l = int(row[f'INFO_CIPOS_l_{bnd_suffix}'])
-    ci_r = int(row[f'INFO_CIPOS_r_{bnd_suffix}'])
+    ci_l = int(row[f'INFO_CIPOS_l_{bnd_label}'])
+    ci_r = int(row[f'INFO_CIPOS_r_{bnd_label}'])
     record.info[info_key] = (ci_l, ci_r)
     if ci_l != 0 or ci_r != 0:
         record.info['IMPRECISE'] = True
@@ -178,8 +179,9 @@ def _get_ins_svlen(row: pd.Series) -> int | None:
 
 def _strip_inv_event_suffix(event_id: str) -> str:
     """Strip _e1 / _e2 suffixes added during inversion breakpoint expansion."""
-    if event_id.endswith(('_e1', '_e2')):
-        return event_id[:-3]
+    for suffix in INV_EVENT_SUFFIXES:
+        if event_id.endswith(suffix):
+            return event_id.removesuffix(suffix)
     return event_id
 
 
@@ -221,8 +223,8 @@ def _write_symbolic_record(
         rec.info['SVLEN'] = span
 
     if has_ci:
-        _set_ci(rec, row, 'bnd1', 'CIPOS')
-        _set_ci(rec, row, 'bnd2', 'CIEND')
+        _set_ci(rec, row, BND1, 'CIPOS')
+        _set_ci(rec, row, BND2, 'CIEND')
 
     vcf_out.write(rec)
 
@@ -240,21 +242,21 @@ def _write_bnd_records(
     """
     raw_event_id = str(row['INFO_EVENT'])
     event_id = _strip_inv_event_suffix(raw_event_id)
-    bnd1_id = f'{raw_event_id}_bnd1'
-    bnd2_id = f'{raw_event_id}_bnd2'
+    bnd1_id = f'{raw_event_id}_{BND1}'
+    bnd2_id = f'{raw_event_id}_{BND2}'
 
-    for bnd_suffix, own_id, mate_id in [
-        ('bnd1', bnd1_id, bnd2_id),
-        ('bnd2', bnd2_id, bnd1_id),
+    for bnd_label, own_id, mate_id in [
+        (BND1, bnd1_id, bnd2_id),
+        (BND2, bnd2_id, bnd1_id),
     ]:
         rec = vcf_out.new_record()
-        rec.contig = str(row[f'CHROM_{bnd_suffix}'])
-        pos = int(row[f'POS_{bnd_suffix}'])
+        rec.contig = str(row[f'CHROM_{bnd_label}'])
+        pos = int(row[f'POS_{bnd_label}'])
         rec.pos = pos
         rec.stop = pos + 1
         rec.id = own_id
         rec.ref = 'N'
-        rec.alts = (str(row[f'ALT_{bnd_suffix}']),)
+        rec.alts = (str(row[f'ALT_{bnd_label}']),)
         rec.filter.add('PASS')
 
         rec.info['SVTYPE'] = 'BND'
@@ -262,7 +264,7 @@ def _write_bnd_records(
         rec.info['EVENT'] = event_id
 
         if has_ci:
-            _set_ci(rec, row, bnd_suffix, 'CIPOS')
+            _set_ci(rec, row, bnd_label, 'CIPOS')
 
         vcf_out.write(rec)
 

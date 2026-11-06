@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from . import breakpoints as bps
+from ._constants import BND1, BND2
 
 # Maps each BND relative-position string to a unique integer code.
 # Combined code = enc(bnd1) * 4 + enc(bnd2) gives a unique scalar per orientation pair,
@@ -358,8 +359,8 @@ def get_pairwise_matches(
         cross_source_mask = cross_source_mask.astype(bool)
 
         # Calculate distance matrices
-        bp1_matrix = dist_matrix_ref(chunk_df, chunk_df, 'bnd1')
-        bp2_matrix = dist_matrix_ref(chunk_df, chunk_df, 'bnd2')
+        bp1_matrix = dist_matrix_ref(chunk_df, chunk_df, BND1)
+        bp2_matrix = dist_matrix_ref(chunk_df, chunk_df, BND2)
 
         # Create position match matrix
         pos_match_matrix = (bp1_matrix <= max_dist) & (bp2_matrix <= max_dist)

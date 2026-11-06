@@ -43,6 +43,7 @@ from . import matched_breakpoints as mbps
 from . import models
 from ._caller_params import CALLSET_PARAM_DICT
 from ._config import list_preset_ids
+from ._constants import PRED_SUFFIX
 from .benchmark import run_single_callset_benchmark as benchmark_callset
 from .ground_truth import preprocess_ground_truth
 from .validation_sets import preprocess_validation_set
@@ -270,7 +271,7 @@ def predict(
     X = feature_matrix.reindex(columns=model_fit.feature_names_in_, fill_value=fill_val)
 
     y_pred = model_fit.predict_proba(X)[:, 1]
-    pred_col = f"{training_set}_{sv_config.model_id(resolved)}_pred"
+    pred_col = f"{training_set}_{sv_config.model_id(resolved)}{PRED_SUFFIX}"
     y_pred_df = pd.DataFrame(y_pred, columns=[pred_col], index=X.index).reset_index(drop=False)
     return mbps.get_svensemble2_calls(matched_bps, y_pred_df)
 
