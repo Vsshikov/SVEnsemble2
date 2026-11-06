@@ -4,6 +4,7 @@ Following a similar algorith with chunking and creating similarity
 matrices to the one used by Truvari
 """
 import itertools
+from collections.abc import Iterable
 from collections import defaultdict
 from functools import lru_cache
 
@@ -12,8 +13,7 @@ import numpy as np
 import pandas as pd
 
 from . import breakpoints as bps
-from ._constants import GROUND_TRUTH_SAMPLE, SAMPLE_ID_COL
-from ._constants import BND1, BND2
+from ._constants import BND1, BND2, GROUND_TRUTH_SAMPLE, SAMPLE_ID_COL
 
 # Maps each BND relative-position string to a unique integer code.
 # Combined code = enc(bnd1) * 4 + enc(bnd2) gives a unique scalar per orientation pair,
@@ -305,23 +305,30 @@ def get_pairwise_matches(
         ignore_size (bool): If True, skip insert delta filtering
         ins_dup_match (bool): If True, allow INS/DUP cross-type matching
         return_graph (bool): If True, return an undirected ig.Graph where
-            each vertex name is a (source, event_id) tuple. Default False
-            returns the raw matched pairs list.
+            each vertex name is a (source, event_id, sample) tuple. Default
+            False returns the raw matched pairs list.
         return_unmatched (bool): If True, also add unmatched breakpoint pairs to the result as single items.
 
     Returns:
         ig.Graph: Undirected graph of matched breakpoints. Each vertex has a
-            'name' attribute holding a (source, event_id) tuple. Returned
+            'name' attribute holding a (source, event_id, sample) tuple; the
+            ground truth's sample is GROUND_TRUTH_SAMPLE. Matching ignores
+            samples, so edges may join different samples: split the graph
+            with split_graph_by_sample before using its components. Returned
             when return_graph is True.
         list[tuple[tuple[str, str], tuple[str, str]]]: Raw matched pairs,
             returned when return_graph is False (default).
     """
     if return_unmatched and skip_single_source_for == 'all':
         raise ValueError("return_unmatched=True requires skip_single_source_for != 'all'")
+    if SAMPLE_ID_COL not in zipped_bp_df.columns or zipped_bp_df[SAMPLE_ID_COL].isna().any():
+        raise ValueError(
+            f"Every breakpoint needs a {SAMPLE_ID_COL}; give the ground truth one with mark_ground_truth"
+        )
 
     # First, minimize the number of columns in the input dataframe
     # by removing columns that are not needed for matching
-    col_retain_list = ['source', 'INFO_EVENT', 'CHROM_bnd1', 'CHROM_bnd2', 'POS_bnd1', 'POS_bnd2', 'ALT_bnd1', 'ALT_bnd2', 'INFO_CIPOS_l_bnd1', 'INFO_CIPOS_r_bnd1', 'INFO_CIPOS_l_bnd2', 'INFO_CIPOS_r_bnd2', 'INFO_SVTYPE']
+    col_retain_list = ['source', 'INFO_EVENT', SAMPLE_ID_COL, 'CHROM_bnd1', 'CHROM_bnd2', 'POS_bnd1', 'POS_bnd2', 'ALT_bnd1', 'ALT_bnd2', 'INFO_CIPOS_l_bnd1', 'INFO_CIPOS_r_bnd1', 'INFO_CIPOS_l_bnd2', 'INFO_CIPOS_r_bnd2', 'INFO_SVTYPE']
     if 'INFO_SVLEN' in zipped_bp_df.columns:
         col_retain_list.append('INFO_SVLEN')
     if 'svensemble2_insert_size' in zipped_bp_df.columns:
@@ -352,7 +359,7 @@ def get_pairwise_matches(
             if (skip_single_source_for == "all") or (isinstance(skip_single_source_for, list) and (chunk[0]['source'] in skip_single_source_for)):
                 continue
             if return_unmatched:
-                unmatched.append( (chunk[0]['source'], chunk[0]['INFO_EVENT']) )
+                unmatched.append((chunk[0]['source'], chunk[0]['INFO_EVENT'], str(chunk[0][SAMPLE_ID_COL])))
             continue
 
 
@@ -398,8 +405,11 @@ def get_pairwise_matches(
         # Create final match matrix (cross-source filter applied inside the matrix)
         match_matrix = _get_match_matrix(pos_match_matrix, delta_matrix, alt_mask, triu_mask, cross_source_mask)
 
-        sources = chunk_df['source'].values
-        events = chunk_df['INFO_EVENT'].values
+        nodes = list(zip(
+            chunk_df['source'].values,
+            chunk_df['INFO_EVENT'].values,
+            chunk_df[SAMPLE_ID_COL].astype(str).values,
+        ))
 
         # Check if any matches exist in the matrix
         matched_indices = np.zeros(n, dtype=int)
@@ -409,18 +419,13 @@ def get_pairwise_matches(
             matched_indices[i_indices] = 1
             matched_indices[j_indices] = 1
 
-            matched_pairs.extend(
-                [
-                    ((sources[i], events[i]), (sources[j], events[j]))
-                    for i, j in zip(i_indices, j_indices)
-                ]
-            )
+            matched_pairs.extend((nodes[i], nodes[j]) for i, j in zip(i_indices, j_indices))
 
         if return_unmatched:
-            unmatched.extend( [ (sources[i], events[i]) for i in np.where(matched_indices == 0)[0] ] )
+            unmatched.extend(nodes[i] for i in np.where(matched_indices == 0)[0])
 
     if isinstance(skip_single_source_for, list):
-        unmatched = [ (source, event) for source, event in unmatched if source not in skip_single_source_for ]
+        unmatched = [node for node in unmatched if node[0] not in skip_single_source_for]
     elif skip_single_source_for == "all":
         unmatched = []
 
@@ -431,6 +436,46 @@ def get_pairwise_matches(
         out = matched_pairs + unmatched
 
     return out
+
+def sample_vertex_mask(
+    graph_in: ig.Graph,
+    samples: Iterable[str],
+    include_ground_truth: bool = True,
+) -> np.ndarray:
+    """Boolean mask over graph_in.vs: nodes whose sample is in *samples*.
+
+    Ground-truth nodes (sample GROUND_TRUTH_SAMPLE) are included when
+    *include_ground_truth*, since the ground truth applies to every sample.
+    """
+    wanted = set(samples) | ({GROUND_TRUTH_SAMPLE} if include_ground_truth else set())
+    return np.array([v['name'][2] in wanted for v in graph_in.vs], dtype=bool)
+
+
+def split_graph_by_sample(graph_in: ig.Graph) -> dict[str, ig.Graph]:
+    """One subgraph per sample: that sample's nodes plus the ground truth.
+
+    Each subgraph is induced by sample_vertex_mask, which drops every edge
+    between different samples. Ground-truth nodes left without a neighbour
+    in a sample are removed from that sample's subgraph, so they do not form
+    ground-truth-only components there. Samples are in sorted order.
+    """
+    samples = sorted({v['name'][2] for v in graph_in.vs} - {GROUND_TRUTH_SAMPLE})
+    out = {}
+    for sample in samples:
+        sub = graph_in.induced_subgraph(np.flatnonzero(sample_vertex_mask(graph_in, (sample,))))
+        stray = [v.index for v in sub.vs if v['name'][2] == GROUND_TRUTH_SAMPLE and v.degree() == 0]
+        sub.delete_vertices(stray)
+        out[sample] = sub
+    return out
+
+
+def component_sample(component: list[tuple]) -> str:
+    """The sample of a per-sample component (its one non-ground-truth sample)."""
+    samples = {node[2] for node in component} - {GROUND_TRUTH_SAMPLE}
+    if len(samples) != 1:
+        raise ValueError(f"Component spans samples {sorted(samples)}; split the graph by sample first")
+    return samples.pop()
+
 
 def merge_bp_pairs_dfs(pairs):
     """
@@ -546,11 +591,11 @@ def graph_to_unique_component_lists(
 
     Args:
         graph_in (ig.Graph): Undirected graph where each vertex name is a
-            (source, event_id) tuple.
+            (source, event_id, sample) tuple.
 
     Returns:
-        list[list[tuple[str, str]]]: One inner list per connected component,
-            each containing at most one (source, event_id) tuple per source.
+        list[list[tuple]]: One inner list per connected component, each
+            containing at most one (source, event_id, sample) tuple per source.
     """
     out = []
     for component in graph_in.connected_components():
@@ -595,9 +640,9 @@ def build_matched_bp_df(
     """
     # Get unique matched events across all components
     unique_matched_events = {
-        bp_event
+        node[1]
         for matched_list in matched_lists
-        for _, bp_event in matched_list
+        for node in matched_list
     }
 
     # Create prefixed DataFrames containing only matched events
@@ -612,9 +657,10 @@ def build_matched_bp_df(
     # This table will be used to join the breakpoint dataframes
     id_table_columns = [f'{source}_INFO_EVENT' for source in bp_df_dict.keys()]
     id_dict = {col: [pd.NA] * len(matched_lists) for col in id_table_columns}
+    id_dict[SAMPLE_ID_COL] = [component_sample(matched_list) for matched_list in matched_lists]
     for i, matched_list in enumerate(matched_lists):
         sources_seen = set()
-        for bp_source, bp_event in matched_list:
+        for bp_source, bp_event, _sample in matched_list:
             if bp_source in sources_seen:
                 continue
             sources_seen.add(bp_source)
@@ -626,7 +672,10 @@ def build_matched_bp_df(
 
     # Remove rows where the only event is from the reference callset
     if ref_callset is not None:
-        non_ref_notna_mask = np.any(id_table.loc[:, ~id_table.columns.str.startswith(ref_callset)].notna(), axis=1)
+        non_ref_event_cols = [
+            f'{source}_INFO_EVENT' for source in bp_df_dict if source != ref_callset
+        ]
+        non_ref_notna_mask = np.any(id_table.loc[:, non_ref_event_cols].notna(), axis=1)
         id_table = id_table[non_ref_notna_mask]
 
     if ids_only:
@@ -638,18 +687,38 @@ def build_matched_bp_df(
             continue
 
         try:
-            join_key = f'{source}_INFO_EVENT'
-            # Ensure both sides are string dtype on the join key
-            if join_key in id_table.columns:
-                id_table.loc[:, join_key] = id_table.loc[:, join_key].astype('string')
-            if join_key in bp_df.columns:
-                bp_df = bp_df.copy()
-                bp_df.loc[:, join_key] = bp_df.loc[:, join_key].astype('string')
-            id_table = id_table.merge(bp_df, left_on=join_key, right_on=join_key, how='left')
+            id_table = _merge_on_event_and_sample(id_table, bp_df, source, how='left')
         except ValueError:
             raise ValueError(f"Error merging {source} breakpoint dataframe with id_table")
 
     return id_table
+
+
+def _merge_on_event_and_sample(
+    left: pd.DataFrame,
+    source_df: pd.DataFrame,
+    source: str,
+    how: str,
+) -> pd.DataFrame:
+    """Merge a source's prefixed breakpoints into *left* on (event, sample).
+
+    *source_df* carries {source}_INFO_EVENT and {source}_SAMPLE_ID_COL;
+    *left* carries {source}_INFO_EVENT and the shared SAMPLE_ID_COL. The
+    source's sample column is folded into the shared one (filling it for rows
+    the merge adds) and dropped. Keys are compared as strings.
+    """
+    event_col = f'{source}_INFO_EVENT'
+    source_sample_col = f'{source}_{SAMPLE_ID_COL}'
+    left = left.copy()
+    source_df = source_df.copy()
+    for df, cols in ((left, (event_col, SAMPLE_ID_COL)), (source_df, (event_col, source_sample_col))):
+        for col in cols:
+            df[col] = df[col].astype('string')
+    merged = left.merge(
+        source_df, left_on=[event_col, SAMPLE_ID_COL], right_on=[event_col, source_sample_col], how=how,
+    )
+    merged[SAMPLE_ID_COL] = merged[SAMPLE_ID_COL].fillna(merged[source_sample_col])
+    return merged.drop(columns=[source_sample_col])
 
 
 def inner_join_bps(
@@ -684,42 +753,39 @@ def inner_join_bps(
     if workflow_config is not None:
         add_topology = workflow_config['model']['training_params'].get('add_topology', False)
 
+    match_graph = get_pairwise_matches(
+        zipped_bp_df,
+        insert_delta_threshold=insert_delta_threshold,
+        max_dist=max_dist,
+        ignore_size=ignore_size,
+        return_graph=True,
+        return_unmatched=return_unmatched,
+        skip_single_source_for=([ref_callset] if ref_callset is not None else None)
+    )
+
+    # Components and topology are per sample: matching ignores samples, so
+    # on the whole graph cross-sample edges would merge components and
+    # inflate degrees (and with them the representative chosen per source).
+    ignore_callsets = [ref_callset] if ref_callset is not None else None
+    matched_lists = []
+    topology_dfs = []
+    for sample_graph in split_graph_by_sample(match_graph).values():
+        matched_lists.extend(graph_to_unique_component_lists(sample_graph))
+        if add_topology:
+            topology_dfs.append(calc_component_stats(sample_graph, ignore_callsets=ignore_callsets))
+
+    topology_df = None
     if add_topology:
-        match_graph = get_pairwise_matches(
-            zipped_bp_df,
-            insert_delta_threshold=insert_delta_threshold,
-            max_dist=max_dist,
-            ignore_size=ignore_size,
-            return_graph=True,
-            return_unmatched=return_unmatched,
-            skip_single_source_for=([ref_callset] if ref_callset is not None else None)
-        )
-        matched_lists = graph_to_unique_component_lists(match_graph)
-        if ref_callset is not None:
-            ignore_callsets = [ref_callset]
-        else:
-            ignore_callsets = None
-        topology_df = calc_component_stats(match_graph, ignore_callsets=ignore_callsets)
-        matched_bp_df = build_matched_bp_df(
-            bp_df_dict, matched_lists, ref_callset, ids_only,
-            topology_df=topology_df
-        )
-    else:
-        match_graph = get_pairwise_matches(
-            zipped_bp_df,
-            insert_delta_threshold=insert_delta_threshold,
-            max_dist=max_dist,
-            ignore_size=ignore_size,
-            return_graph=True,
-            return_unmatched=return_unmatched,
-            skip_single_source_for=([ref_callset] if ref_callset is not None else None)
-        )
-        matched_lists = graph_to_unique_component_lists(match_graph)
-        matched_bp_df = build_matched_bp_df(
-            bp_df_dict, matched_lists, ref_callset, ids_only
+        topology_df = (
+            pd.concat(topology_dfs, ignore_index=True) if topology_dfs
+            else calc_component_stats(ig.Graph(), ignore_callsets=ignore_callsets)
         )
 
-    return matched_bp_df
+    return build_matched_bp_df(
+        bp_df_dict, matched_lists, ref_callset, ids_only,
+        topology_df=topology_df,
+    )
+
 
 def outer_join_bps(
     bp_df_dict: dict,
@@ -773,29 +839,16 @@ def outer_join_bps(
             # Skip the reference callset; only need to know if calls match to it
             continue
 
-        # Only keep the INFO_EVENT column if ids_only is True
+        # Only keep the event and sample columns if ids_only is True
         if ids_only:
-            df_prefixed = df[['INFO_EVENT']]
+            df_prefixed = df[['INFO_EVENT', SAMPLE_ID_COL]]
         else:
             df_prefixed = df.copy()
 
         # Add a prefix to all columns to distinguish between callers
         df_prefixed = df_prefixed.add_prefix(f'{caller}_')
 
-        # Align join key dtype on both sides
-        join_key = f'{caller}_INFO_EVENT'
-        if join_key in joint_bp_df.columns:
-            joint_bp_df.loc[:, join_key] = joint_bp_df.loc[:, join_key].astype('string')
-        if join_key in df_prefixed.columns:
-            df_prefixed = df_prefixed.copy()
-            df_prefixed.loc[:, join_key] = df_prefixed.loc[:, join_key].astype('string')
-
-        # Merge on the INFO_EVENT column, using an outer join to retain all breakpoints
-        joint_bp_df = joint_bp_df.merge(
-            df_prefixed,
-            left_on=join_key,
-            right_on=join_key,
-            how='outer'
-        )
+        # Merge on (event, sample), outer, to retain every breakpoint
+        joint_bp_df = _merge_on_event_and_sample(joint_bp_df, df_prefixed, caller, how='outer')
 
     return joint_bp_df
