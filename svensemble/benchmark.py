@@ -16,7 +16,25 @@ from . import chunk_match as chunk_match
 from . import breakpoints as bps
 from . import io as sv_io
 from . import utils as sv_utils
-from ._constants import PRED_SUFFIX
+from ._constants import PRED_SUFFIX, SAMPLE_ID_COL
+
+
+def _select_sample(bps_df: pd.DataFrame, sample: str | None) -> pd.DataFrame:
+    """The rows of one sample, so a benchmark never mixes samples.
+
+    With *sample* None the callset must hold exactly one sample; with a
+    sample given it must be present. Raises otherwise.
+    """
+    if SAMPLE_ID_COL not in bps_df.columns:
+        raise ValueError(f"Callset has no {SAMPLE_ID_COL} column; regenerate it with this version")
+    samples = sorted(bps_df[SAMPLE_ID_COL].dropna().astype(str).unique())
+    if sample is None:
+        if len(samples) > 1:
+            raise ValueError(f"Callset has samples {samples}; choose one with sample=")
+        return bps_df
+    if sample not in samples:
+        raise ValueError(f"Sample {sample!r} not in callset samples {samples}")
+    return bps_df[bps_df[SAMPLE_ID_COL].astype(str) == sample]
 
 
 def get_truth_count(
@@ -41,7 +59,7 @@ def get_truth_count(
     return len(truth_filtered)
 
 
-def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True):
+def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True, sample: str | None = None):
     """
     Given dataframes of a callset and a validation set, match them and return a dataframe with the following columns:
     INFO_EVENT, {qual_metric}, is_in_val, INFO_INFERRED_SVTYPE, {FILTER_PASS}
@@ -49,10 +67,12 @@ def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_mat
     qual_metric column is dependent on the callset and is read from CALLSET_PARAM_DICT[callset_name]
     FILTER_PASS column is returned only if it is present in the callset
     val_name is the validation set's CALLSET_PARAM_DICT key
+    sample selects one sample of a multi-sample callset (see _select_sample);
+    the validation set is a sample-less truth reference matched within it.
     """
     qual_metric = caller_params.CALLSET_PARAM_DICT[callset_name]['qual_metric']
-    callset_bps_ = callset_bps.copy()
-    val_set_ = val_set.copy()
+    callset_bps_ = _select_sample(callset_bps, sample).copy()
+    val_set_ = chunk_match.mark_ground_truth(val_set)
 
     # Caller-specific operations go here
     if callset_name == 'manta_candidate':
@@ -103,9 +123,9 @@ def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_mat
 
 
 
-def validate_svensemble2_predictions(svensemble2_bps, val_set, val_name, training_set_name=None, model_name=None, pred_col=None, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True):
-    svens_calls_ = svensemble2_bps.copy()
-    val_set_ = val_set.copy()
+def validate_svensemble2_predictions(svensemble2_bps, val_set, val_name, training_set_name=None, model_name=None, pred_col=None, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True, sample: str | None = None):
+    svens_calls_ = _select_sample(svensemble2_bps, sample).copy()
+    val_set_ = chunk_match.mark_ground_truth(val_set)
 
     # Resolve the single prediction column. Callers may pass it explicitly,
     # supply training_set_name + model_name to reconstruct it, or rely on
@@ -173,6 +193,7 @@ def run_single_callset_benchmark(
     svlen_min: int | None = None,
     svlen_max: int | None = None,
     verbose: bool = False,
+    sample: str | None = None,
 ):
     """Benchmark one callset against a validation set and write a single CSV.
 
@@ -206,6 +227,8 @@ def run_single_callset_benchmark(
             unbounded. Default: None.
         verbose (bool, optional): Whether to print processing info.
             Default: False.
+        sample (str, optional): Sample to benchmark in a multi-sample
+            callset; required when the callset holds more than one sample.
 
     Returns:
         pandas.DataFrame or None:
@@ -234,6 +257,7 @@ def run_single_callset_benchmark(
             val_set=val_set,
             val_name=val_name,
             verbose=verbose,
+            sample=sample,
         )
     else:
         val_df = validate_basic_callset(
@@ -242,6 +266,7 @@ def run_single_callset_benchmark(
             val_name=val_name,
             callset_name=callset_name,
             verbose=verbose,
+            sample=sample,
         )
 
     if verbose:

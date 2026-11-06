@@ -32,15 +32,16 @@ def parse_vcf_to_df(
     ANNOT_<field> columns for annotators detected in the header (see
     _detect_annotator_cols), read from the row's sample.
 
-    A header without samples (sites-only: ground truth and validation sets)
-    gives one row per record and no SAMPLE_ID_COL; that is only allowed when
-    no FORMAT fields are requested.
+    A header without samples (sites-only: ground truth and validation sets),
+    or an empty *sample_names*, gives one row per record and no
+    SAMPLE_ID_COL; that is only allowed when no FORMAT fields are requested.
 
     Args:
         vcf_file: A pysam VariantFile object containing variant calls.
         caller_params: Caller-specific parameters; see _caller_params.py.
             Defaults to _caller_params.DEFAULT_PARAMS when None.
-        sample_names: Sample(s) to read. Defaults to every sample in the header.
+        sample_names: Sample(s) to read. Defaults to every sample in the
+            header; an empty sequence reads records only (no sample rows).
 
     Returns:
         Tuple of (DataFrame of variants, VCF header).
@@ -80,7 +81,7 @@ def parse_vcf_to_df(
     if sample_names:
         sample_fields[SAMPLE_ID_COL] = []
 
-    annot_format_names, annot_info_names = _detect_annotator_cols(vcf_file, caller_params)
+    annot_format_names, annot_info_names = _detect_annotator_cols(vcf_file, caller_params, bool(sample_names))
     annot_fields = _init_annotator_fields(annot_format_names, annot_info_names)
 
     _remove_unused_info_header_fields(vcf_file, caller_params, keep=annot_info_names)
@@ -115,13 +116,14 @@ def _ordered_info_col_names(caller_params: dict) -> tuple[str, ...]:
 def _detect_annotator_cols(
     vcf_file: VariantFile,
     caller_params: dict,
+    reads_samples: bool = True,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """FORMAT and INFO field names of the annotators present in the VCF header.
 
     An annotator from caller_params['annotator_cols'] counts as present only
     when the header defines all of its fields, so field names it happens to
     share with a caller cannot trigger it on their own. Annotators with FORMAT
-    fields also need at least one sample to read them from.
+    fields also need at least one sample to read them from (*reads_samples*).
     """
     header = vcf_file.header
     format_names: dict[str, None] = {}
@@ -129,7 +131,7 @@ def _detect_annotator_cols(
     for annotator, cols in caller_params.get('annotator_cols', {}).items():
         annot_format = tuple(cols.get('format', ()))
         annot_info = tuple(cols.get('info', ()))
-        if annot_format and not header.samples:
+        if annot_format and not (header.samples and reads_samples):
             continue
         if (all(name in header.formats for name in annot_format)
                 and all(name in header.info for name in annot_info)):

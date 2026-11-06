@@ -351,6 +351,7 @@ def _register_benchmark_callset(subparsers):
     p.add_argument("--svtypes", type=str, default=None, help="Optional '+'-separated SV types to keep (e.g. DEL+INS). Default: all types.")
     p.add_argument("--svlen_min", type=int, default=None, help="Optional inclusive minimum SV length. Default: no lower bound.")
     p.add_argument("--svlen_max", type=int, default=None, help="Optional inclusive maximum SV length. Default: no upper bound.")
+    p.add_argument("--sample", type=str, default=None, help="Sample to benchmark; required when the callset holds more than one sample.")
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_benchmark_callset)
 
@@ -368,6 +369,7 @@ def _cmd_benchmark_callset(args):
         svlen_min=args.svlen_min,
         svlen_max=args.svlen_max,
         verbose=args.verbose,
+        sample=args.sample,
     )
 
 
