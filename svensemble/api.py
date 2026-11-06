@@ -171,19 +171,27 @@ def match(
     """Outer-join the callers' breakpoints with the ground truth.
 
     Args:
-        caller_bps: Processed breakpoints per caller name; not modified.
-        ground_truth_bps: Ground truth breakpoints (from preprocess_ground_truth).
+        caller_bps: Processed breakpoints per caller name; not modified. Each
+            must carry SAMPLE_ID_COL, and all must share one sample set.
+        ground_truth_bps: Ground truth breakpoints (from preprocess_ground_truth);
+            sample-less, given the GROUND_TRUTH_SAMPLE placeholder here.
         ground_truth_name: Ground truth set name; becomes its column prefix.
         model, model_config: Only the ``add_topology`` training param is used.
         max_dist: Maximum breakpoint distance for a match.
         insert_delta_threshold: Insert-size similarity threshold for a match.
         verbose: Print the callsets being matched.
     """
+    without_sample = [caller for caller, df in caller_bps.items() if SAMPLE_ID_COL not in df.columns]
+    if without_sample:
+        raise ValueError(f"Caller breakpoints without a {SAMPLE_ID_COL} column: {without_sample}")
+    _compare_sample_sets({
+        caller: set(df[SAMPLE_ID_COL].dropna().astype(str)) for caller, df in caller_bps.items()
+    })
     workflow_config = _workflow_config_anonymous_sample(
         callers=list(caller_bps), model_name=model, model_config=model_config,
         ground_truth_name=ground_truth_name,
     )
-    bp_df_dict = {**caller_bps, ground_truth_name: ground_truth_bps}
+    bp_df_dict = {**caller_bps, ground_truth_name: chunk_match.mark_ground_truth(ground_truth_bps)}
     if verbose:
         print(f"Matching breakpoints: {list(bp_df_dict.keys())}")
     return chunk_match.outer_join_bps(

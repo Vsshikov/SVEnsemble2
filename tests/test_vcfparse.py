@@ -11,8 +11,7 @@ import pytest
 import pysam
 
 from svensemble.vcfparse import (
-    parse_vcf_to_df_no_format,
-    parse_vcf_to_df_with_format,
+    parse_vcf_to_df,
     _fetch_filter_fields,
     _fetch_info_fields,
     _ordered_info_col_names,
@@ -174,9 +173,9 @@ class TestColumnOrder:
         script = (
             "import sys, pysam\n"
             "from svensemble import _caller_params\n"
-            "from svensemble.vcfparse import parse_vcf_to_df_no_format\n"
+            "from svensemble.vcfparse import parse_vcf_to_df\n"
             "with pysam.VariantFile(sys.argv[1]) as vf:\n"
-            "    df, _ = parse_vcf_to_df_no_format(vf, _caller_params.DELLY_PARAMS)\n"
+            "    df, _ = parse_vcf_to_df(vf, _caller_params.DELLY_PARAMS | {'format_cols': []})\n"
             "print(','.join(df.columns))\n"
         )
         try:
@@ -194,16 +193,15 @@ class TestColumnOrder:
 
 
 # ---------------------------------------------------------------------------
-# parse_vcf_to_df_no_format — integration
+# parse_vcf_to_df on a sites-only VCF (ground truth, validation sets)
 # ---------------------------------------------------------------------------
 
-class TestParseVcfToDfNoFormat:
+class TestParseVcfToDfSitesOnly:
 
     _PARAMS = _caller_params.DEFAULT_PARAMS | {
         "filter_cols": ["PASS", "LowQual"],
         "info_cols_mandatory": ["SVTYPE", "SVLEN"],
         "info_cols_pred": [],
-        "parse_format": False,
         "format_cols": [],
     }
 
@@ -211,7 +209,7 @@ class TestParseVcfToDfNoFormat:
         path = _write_vcf(rows)
         try:
             with pysam.VariantFile(path) as vf:
-                df, _ = parse_vcf_to_df_no_format(vf, self._PARAMS)
+                df, _ = parse_vcf_to_df(vf, self._PARAMS)
             return df
         finally:
             os.unlink(path)
@@ -244,18 +242,21 @@ class TestParseVcfToDfNoFormat:
         df = self._parse(rows)
         assert len(df) == 5
 
+    def test_no_sample_column(self):
+        df = self._parse(["chr1\t1000\tsv1\tN\t<DEL>\t50\tPASS\tSVTYPE=DEL;SVLEN=500\n"])
+        assert "FORMAT_SAMPLE_ID" not in df.columns
+
 
 # ---------------------------------------------------------------------------
-# parse_vcf_to_df_with_format — integration
+# parse_vcf_to_df with samples — integration
 # ---------------------------------------------------------------------------
 
-class TestParseVcfToDfWithFormat:
+class TestParseVcfToDfWithSamples:
 
     _PARAMS = _caller_params.DEFAULT_PARAMS | {
         "filter_cols": ["PASS"],
         "info_cols_mandatory": ["SVTYPE"],
         "info_cols_pred": [],
-        "parse_format": True,
         "format_cols": ["GT"],
     }
 
@@ -263,7 +264,7 @@ class TestParseVcfToDfWithFormat:
         path = _write_vcf(rows, with_format=True)
         try:
             with pysam.VariantFile(path) as vf:
-                df, _ = parse_vcf_to_df_with_format(vf, self._PARAMS, sample_name)
+                df, _ = parse_vcf_to_df(vf, self._PARAMS, sample_name)
             return df
         finally:
             os.unlink(path)
@@ -274,25 +275,25 @@ class TestParseVcfToDfWithFormat:
         assert "SAMPLE_GT" in df.columns
         assert df["SAMPLE_GT"].iloc[0] == (0, 1)
 
-    def test_raises_when_no_format_in_vcf(self):
+    def test_raises_when_format_requested_from_sites_only_vcf(self):
         rows = ["chr1\t1000\tsv1\tN\t<DEL>\t50\tPASS\tSVTYPE=DEL\n"]
         path = _write_vcf(rows, with_format=False)
         try:
             with pysam.VariantFile(path) as vf:
                 with pytest.raises(ValueError, match="FORMAT"):
-                    parse_vcf_to_df_with_format(vf, self._PARAMS)
+                    parse_vcf_to_df(vf, self._PARAMS)
         finally:
             os.unlink(path)
 
     _TWO_SAMPLE_ROWS = ["chr1\t1000\tsv1\tN\t<DEL>\t50\tPASS\tSVTYPE=DEL\tGT\t0/1\t1/1\n"]
 
-    def _parse_two_samples(self, sample_names=None):
+    def _parse_two_samples(self, sample_names=None, params=None):
         header = _HEADER_LINES + _SAMPLE_COL + _CHROM_HEADER_FMT.replace("\tS1\n", "\tS1\tS2\n")
         with tempfile.NamedTemporaryFile(suffix=".vcf", delete=False, mode="w") as f:
             f.write(header + "".join(self._TWO_SAMPLE_ROWS))
         try:
             with pysam.VariantFile(f.name) as vf:
-                df, _ = parse_vcf_to_df_with_format(vf, self._PARAMS, sample_names)
+                df, _ = parse_vcf_to_df(vf, params or self._PARAMS, sample_names)
             return df
         finally:
             os.unlink(f.name)
@@ -311,6 +312,11 @@ class TestParseVcfToDfWithFormat:
     def test_raises_on_sample_not_in_header(self):
         with pytest.raises(ValueError, match="S3"):
             self._parse_two_samples(["S1", "S3"])
+
+    def test_rows_per_sample_without_format_cols(self):
+        df = self._parse_two_samples(params=self._PARAMS | {"format_cols": []})
+        assert list(df["FORMAT_SAMPLE_ID"]) == ["S1", "S2"]
+        assert not any(c.startswith("SAMPLE_") for c in df.columns)
 
 
 # ---------------------------------------------------------------------------
@@ -354,26 +360,22 @@ class TestAnnotatorCols:
         "filter_cols": ["PASS"],
         "info_cols_mandatory": ["SVTYPE"],
         "info_cols_pred": [],
-        "parse_format": False,
         "format_cols": [],
     }
     _WITH_FORMAT_PARAMS = _NO_FORMAT_PARAMS | {
-        "parse_format": True,
         "format_cols": ["GT"],
     }
     _ANNOT_COLS = ["ANNOT_DHFC", "ANNOT_DHBFC", "ANNOT_DHFFC", "ANNOT_GCF"]
 
     def _parse(self, path: str, params: dict):
-        parse = (parse_vcf_to_df_with_format if params["parse_format"]
-                 else parse_vcf_to_df_no_format)
         try:
             with pysam.VariantFile(path) as vf:
-                df, _ = parse(vf, params)
+                df, _ = parse_vcf_to_df(vf, params)
             return df
         finally:
             os.unlink(path)
 
-    def test_parsed_without_parse_format(self):
+    def test_parsed_without_format_cols(self):
         df = self._parse(_write_annotated_vcf(_DUPHOLD_ROWS), self._NO_FORMAT_PARAMS)
         assert [c for c in df.columns if c.startswith("ANNOT_")] == self._ANNOT_COLS
         assert not any(c.startswith("SAMPLE_") for c in df.columns)

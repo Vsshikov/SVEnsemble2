@@ -21,6 +21,9 @@ TOPOLOGY_PREFIX = 'svensembletopology_'
 # VCF sample each parsed row was read from
 SAMPLE_ID_COL = 'FORMAT_SAMPLE_ID'
 
+# Placeholder sample of the ground truth (sites-only); matched within every sample
+GROUND_TRUTH_SAMPLE = '*'
+
 # Breakend labels
 BND1 = 'bnd1'
 BND2 = 'bnd2'

@@ -72,7 +72,7 @@ REQUIRED_KEYS = {"sample_name"}
 
 # -- Pipeline artifacts -----------------------------------------------------
 
-def read_vcf(path: Path, caller: str, sample_name: str | None = None) -> pd.DataFrame:
+def read_vcf(path: Path, caller: str, sample_names: str | list[str] | None = None) -> pd.DataFrame:
     """Parse a caller's VCF/BCF into a DataFrame (the input to api.preprocess_raw).
 
     Columns are chosen by the caller's CALLSET_PARAM_DICT entry.
@@ -80,15 +80,15 @@ def read_vcf(path: Path, caller: str, sample_name: str | None = None) -> pd.Data
     Args:
         path: VCF/BCF path.
         caller: Callset name (a key of _caller_params.CALLSET_PARAM_DICT).
-        sample_name: Sample whose FORMAT fields to read, for callers that
-            parse FORMAT. Defaults to the first sample in the header.
+        sample_names: Sample(s) to read, one row per (record, sample).
+            Defaults to every sample in the header.
     """
     try:
         params = copy.deepcopy(CALLSET_PARAM_DICT[caller])
     except KeyError:
         raise KeyError(f"Unknown caller {caller!r}: no CALLSET_PARAM_DICT entry") from None
     with VariantFile(str(path)) as vcf:
-        vcf_df, _ = parse_vcf_to_df(vcf, params, sample_name=sample_name)
+        vcf_df, _ = parse_vcf_to_df(vcf, params, sample_names=sample_names)
     return vcf_df
 
 

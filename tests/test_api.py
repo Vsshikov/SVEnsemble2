@@ -9,6 +9,7 @@ import pytest
 
 from svensemble import api
 from svensemble import io as sv_io
+from svensemble._constants import GROUND_TRUTH_SAMPLE, SAMPLE_ID_COL
 
 
 def _train_shaped_X():
@@ -117,15 +118,36 @@ class TestMatch:
             return pd.DataFrame()
 
         monkeypatch.setattr("svensemble.chunk_match.outer_join_bps", fake_outer_join)
-        caller_bps = {"delly": pd.DataFrame({"a": [1]}), "manta_diploid": pd.DataFrame({"a": [2]})}
+        caller_bps = {
+            "delly": pd.DataFrame({"a": [1], SAMPLE_ID_COL: ["S1"]}),
+            "manta_diploid": pd.DataFrame({"a": [2], SAMPLE_ID_COL: ["S1"]}),
+        }
         gt = pd.DataFrame({"a": [3]})
 
         api.match(caller_bps, gt, ground_truth_name="gnomad")
 
         assert list(caller_bps) == ["delly", "manta_diploid"]
         assert list(captured["bp_df_dict"]) == ["delly", "manta_diploid", "gnomad"]
-        assert captured["bp_df_dict"]["gnomad"] is gt
+        assert list(gt.columns) == ["a"]
+        assert list(captured["bp_df_dict"]["gnomad"][SAMPLE_ID_COL]) == [GROUND_TRUTH_SAMPLE]
         assert captured["ref_callset"] == "gnomad"
+
+    def test_ground_truth_with_sample_column_rejected(self):
+        caller_bps = {"delly": pd.DataFrame({"a": [1], SAMPLE_ID_COL: ["S1"]})}
+        with pytest.raises(ValueError, match="sample-less"):
+            api.match(caller_bps, pd.DataFrame({"a": [3], SAMPLE_ID_COL: ["S1"]}))
+
+    def test_caller_without_sample_column_rejected(self):
+        with pytest.raises(ValueError, match="without a"):
+            api.match({"delly": pd.DataFrame({"a": [1]})}, pd.DataFrame({"a": [3]}))
+
+    def test_callers_with_different_samples_rejected(self):
+        caller_bps = {
+            "delly": pd.DataFrame({"a": [1], SAMPLE_ID_COL: ["S1"]}),
+            "manta_diploid": pd.DataFrame({"a": [2], SAMPLE_ID_COL: ["SAMPLE1"]}),
+        }
+        with pytest.raises(ValueError, match="share one sample set"):
+            api.match(caller_bps, pd.DataFrame({"a": [3]}))
 
 
 class TestTrain:

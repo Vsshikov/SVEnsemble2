@@ -325,7 +325,7 @@ def preprocess_hgsvc2_val_set(raw_path, output_path, overwrite=False, sample_nam
         hgsvc2_df, _ = vcfp.parse_vcf_to_df(
             hgsvc2_vcf,
             caller_params=caller_params.HGSVC2_PARAMS,
-            sample_name=sample_name
+            sample_names=sample_name
         )
 
         # Filter to records where the sample carries at least one ALT allele
@@ -371,7 +371,7 @@ def preprocess_huddleston_val_set(raw_path, output_path, overwrite=False):
     out_path = Path(output_path)
 
     if not out_path.exists() or overwrite:
-        huddleston_vcf_df, huddleston_vcf_df_meta  = vcfp.parse_vcf_to_df(pysam.VariantFile(raw_path), caller_params=caller_params.HUDDLESTON_PARAMS, sample_name='huddleston')
+        huddleston_vcf_df, huddleston_vcf_df_meta  = vcfp.parse_vcf_to_df(pysam.VariantFile(raw_path), caller_params=caller_params.HUDDLESTON_PARAMS, sample_names='huddleston')
         huddleston_vcf_df.loc[:, 'INFO_SVLEN'] = huddleston_vcf_df['INFO_SVLEN'].str[0]
         # Replace all strings in INFO_SVTYPE using the mapping dictionary from caller_params.HUDDLESTON_PARAMS
         mapping = caller_params.HUDDLESTON_PARAMS['svtype_mapping']

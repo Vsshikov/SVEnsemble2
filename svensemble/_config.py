@@ -39,7 +39,6 @@ class CallsetParams(TypedDict, total=False):
     info_cols_mandatory: list[str]
     info_cols_pred: list[str]
     custom_cols_pred: list[str]
-    parse_format: bool
     format_cols: list[str]
     is_reference: bool
     qual_metric: str | None

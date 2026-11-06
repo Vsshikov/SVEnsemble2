@@ -35,11 +35,10 @@ BASE_COLS = ['CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL']
 # - 'filter_cols': List[str] - FILTER fields to extract for pre-processing or prediction
 # - 'info_cols_mandatory': List[str] - INFO fields required for correct parsing; absence may break downstream logic
 # - 'info_cols_pred': List[str] - INFO fields used for call posterior probability estimation
-# - 'parse_format': bool - Whether to parse FORMAT fields (default: False)
-# - 'format_cols': List[str] - FORMAT fields to extract if 'parse_format' is True
+# - 'format_cols': List[str] - FORMAT fields to extract for each sample (every VCF is parsed per sample)
 # - 'annotator_cols': Dict[str, Dict[str, Tuple[str]]] - optional annotators (e.g. duphold) keyed by
 #   name, each with 'format'/'info' field names. Parsed into ANNOT_<field> columns only when the VCF
-#   header defines all of an annotator's fields, regardless of 'parse_format'. Never used as features
+#   header defines all of an annotator's fields. Never used as features
 #   directly; expose them through custom_cols_pred.
 # Example:
 # GRIDSS_PARAMS = {
@@ -47,7 +46,6 @@ BASE_COLS = ['CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL']
 #     'filter_cols': GRIDSS_FILTERS,
 #     'info_cols_mandatory': GRIDSS_INFO_MANDATORY_COLS,
 #     'info_cols_pred': GRIDSS_INFO_PRED_COLS,
-#     'parse_format': False,
 #     'format_cols': []
 # }
 
@@ -66,7 +64,6 @@ DEFAULT_PARAMS = {
     'info_cols_mandatory': DEFAULT_INFO_MANDATORY_COLS,
     'info_cols_pred': DEFAULT_INFO_PRED_COLS,
     'custom_cols_pred': DEFAULT_CUSTOM_COLS_PRED,
-    'parse_format': False,
     'format_cols': DEFAULT_FORMAT_COLS,
     'is_reference': False,
     'qual_metric': 'QUAL',
@@ -205,7 +202,6 @@ GRIDSS_PARAMS = DEFAULT_PARAMS | {
     'filter_cols': GRIDSS_FILTERS,
     'info_cols_mandatory': GRIDSS_INFO_MANDATORY_COLS,
     'info_cols_pred': GRIDSS_INFO_PRED_COLS,
-    'parse_format': False,
     'svlen_source': 'alt',
     'bnd2_pos': None
 }
@@ -215,7 +211,6 @@ GNOMAD_PARAMS = DEFAULT_PARAMS | {
     'filter_cols': ['PASS'],
     'info_cols_mandatory': ['EVIDENCE', 'SVTYPE', 'CHR2', 'POS2', 'END', 'END2', 'CPX_INTERVALS', 'SVLEN', 'ALGORITHMS', 'AF', 'BOTHSIDES_SUPPORT'],
     'info_cols_pred': [],
-    'parse_format': False,
     'svlen_source': 'svlen',
     'supported_svtypes': ['DEL', 'DUP', 'INV', 'INS'],
     'method_cipos': {
@@ -263,7 +258,6 @@ MANTA_CANDIDATE_PARAMS = DEFAULT_PARAMS | {
     'filter_cols': ['PASS'],
     'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'POS2', 'CIPOS', 'CIEND', 'MATEID', 'EVENT'],
     'info_cols_pred': ['IMPRECISE', 'HOMLEN', 'BND_DEPTH', 'SVLEN', 'PAIR_COUNT', 'UPSTREAM_PAIR_COUNT', 'DOWNSTREAM_PAIR_COUNT', 'BND_PAIR_COUNT'],
-    'parse_format': False,
     'svlen_source': 'svlen',
     'qual_metric': 'INFO_TOTAL_PAIR_COUNT',
     'bnd2_pos': 'end'
@@ -275,7 +269,6 @@ MANTA_DIPLOID_PARAMS = DEFAULT_PARAMS | {
     'filter_cols': ['PASS'],
     'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'POS2', 'CIPOS', 'CIEND', 'MATEID', 'EVENT'],
     'info_cols_pred': ['IMPRECISE', 'HOMLEN', 'BND_DEPTH', 'SVLEN'],
-    'parse_format': True,
     'format_cols': ['FT', 'GQ', 'PR', 'SR'],
     'svlen_source': 'svlen',
     'bnd2_pos': 'end'
@@ -287,7 +280,6 @@ DELLY_PARAMS = DEFAULT_PARAMS | {
     'filter_cols': ['PASS', 'LowQual'],
     'info_cols_mandatory': ['SVTYPE', 'SVLEN', 'CHR2', 'POS2', 'CIPOS', 'CIEND'],
     'info_cols_pred': ['PE', 'MAPQ', 'SRMAPQ', 'SR', 'SRQ', 'CE', 'CT', 'SVLEN', 'IMPRECISE', 'SVTYPE', 'SVMETHOD', 'HOMLEN'],
-    'parse_format': True,
     'format_cols': ['GT', 'GQ', 'RC', 'RCL', 'RCR', 'RDCN', 'DR', 'DV', 'RR', 'RV'],
     'svlen_source': 'svlen',
     'bnd2_pos': 'end'
@@ -353,7 +345,6 @@ HUDDLESTON_PARAMS = DEFAULT_PARAMS | {
 
 HGSVC2_PARAMS = DEFAULT_PARAMS | {
     'info_cols_mandatory': ['SVTYPE', 'SVLEN'],
-    'parse_format': True,
     'format_cols': ['GT'],
     'svlen_source': 'svlen',
     'svlens': (50, np.inf)
@@ -425,7 +416,6 @@ SNIFFLES_PARAMS = DEFAULT_PARAMS | {
     'filter_cols': SNIFFLES_FILTERS,
     'info_cols_mandatory': SNIFFLES_INFO_MANDATORY_COLS,
     'info_cols_pred': SNIFFLES_INFO_PRED_COLS,
-    'parse_format': True,
     'format_cols': ['GT', 'GQ', 'DR', 'DV'],
     'svlen_source': 'svlen',
     'bnd2_pos': 'svlen'
@@ -476,7 +466,6 @@ SNIFFLES_207_PARAMS = DEFAULT_PARAMS | {
     'filter_cols': SNIFFLES_207_FILTERS,
     'info_cols_mandatory': SNIFFLES_207_INFO_MANDATORY_COLS,
     'info_cols_pred': SNIFFLES_207_INFO_PRED_COLS,
-    'parse_format': True,
     'format_cols': ['GT', 'GQ', 'DR', 'DV'],
     'svlen_source': 'svlen',
     'bnd2_pos': 'svlen'
@@ -511,7 +500,6 @@ SEVERUS_PARAMS = DEFAULT_PARAMS | {
     'filter_cols': SEVERUS_FILTERS,
     'info_cols_mandatory': SEVERUS_INFO_MANDATORY_COLS,
     'info_cols_pred': SEVERUS_INFO_PRED_COLS,
-    'parse_format': True,
     'format_cols': ['GT', 'DR', 'DV', 'VAF', 'hVAF'],
     'svlen_source': 'svlen',
     'bnd2_pos': 'end',
@@ -545,7 +533,6 @@ CUTESV_PARAMS = DEFAULT_PARAMS | {
     'filter_cols': CUTESV_FILTERS,
     'info_cols_mandatory': CUTESV_INFO_MANDATORY_COLS,
     'info_cols_pred': CUTESV_INFO_PRED_COLS,
-    'parse_format': True,
     'format_cols': ['GT', 'GQ', 'DR', 'DV'],
     'svlen_source': 'svlen',
     'bnd2_pos': 'end',
@@ -604,7 +591,6 @@ SVABA_PARAMS = DEFAULT_PARAMS | {
     'filter_cols': SVABA_FILTERS,
     'info_cols_mandatory': SVABA_INFO_MANDATORY_COLS,
     'info_cols_pred': SVABA_INFO_PRED_COLS,
-    'parse_format': True,
     'format_cols': ['GT', 'GQ', 'AD', 'DP', 'SR', 'DR', 'LO', 'SL', 'LR', 'PL'],
     'svlen_source': 'alt',
     'bnd2_pos': None,
@@ -638,7 +624,6 @@ SMOOVE_PARAMS = DEFAULT_PARAMS | {
     'filter_cols': SMOOVE_FILTERS,
     'info_cols_mandatory': SMOOVE_INFO_MANDATORY_COLS,
     'info_cols_pred': SMOOVE_INFO_PRED_COLS,
-    'parse_format': False,
     'svlen_source': 'svlen',
     'bnd2_pos': 'end',
     # QUAL is '.' on every smoove/LUMPY record; SU (total supporting evidence)

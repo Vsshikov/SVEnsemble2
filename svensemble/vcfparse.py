@@ -20,116 +20,37 @@ logger = logging.getLogger(__name__)
 
 def parse_vcf_to_df(
     vcf_file: VariantFile,
-    caller_params: dict,
-    sample_name: str | None = None
+    caller_params: dict | None = None,
+    sample_names: str | Sequence[str] | None = None,
 ) -> tuple[pd.DataFrame, VariantFile.header]:
     """
-    Parse a VCF file into a pandas DataFrame with variant information.
+    Parse a VCF file into a DataFrame with one row per (record, sample).
 
-    Dispatches to parse_vcf_to_df_with_format when
-    caller_params['parse_format'] is True, otherwise to
-    parse_vcf_to_df_no_format.
+    Each row carries SAMPLE_ID_COL and that sample's FORMAT fields from
+    caller_params['format_cols'] (empty for callers whose features are all
+    INFO). Only columns specified by caller_params are created, plus
+    ANNOT_<field> columns for annotators detected in the header (see
+    _detect_annotator_cols), read from the row's sample.
 
-    Args:
-        vcf_file: A pysam VariantFile object containing variant calls.
-        caller_params: Caller-specific parameters; see _caller_params.py.
-        sample_name: Sample to extract FORMAT fields for (with-format path
-            only). Defaults to the first sample in the header.
-
-    Returns:
-        Tuple of (DataFrame of variants, VCF header).
-    """
-    parse_format = caller_params['parse_format']
-    logger.debug(
-        "parse_vcf_to_df: parse_format=%s, sample_name=%s",
-        parse_format, sample_name,
-    )
-    if parse_format:
-        return parse_vcf_to_df_with_format(vcf_file, caller_params, sample_name)
-    return parse_vcf_to_df_no_format(vcf_file, caller_params)
-
-
-def parse_vcf_to_df_no_format(
-    vcf_file: VariantFile,
-    caller_params: dict = None
-) -> tuple[pd.DataFrame, VariantFile.header]:
-    """
-    Parse a VCF file into a pandas DataFrame, skipping FORMAT/sample fields.
-
-    Only columns specified by caller_params are created, plus ANNOT_<field>
-    columns for annotators detected in the header (see _detect_annotator_cols),
-    whose FORMAT fields are read from the first sample.
+    A header without samples (sites-only: ground truth and validation sets)
+    gives one row per record and no SAMPLE_ID_COL; that is only allowed when
+    no FORMAT fields are requested.
 
     Args:
         vcf_file: A pysam VariantFile object containing variant calls.
         caller_params: Caller-specific parameters; see _caller_params.py.
             Defaults to _caller_params.DEFAULT_PARAMS when None.
-
-    Returns:
-        Tuple of (DataFrame of variants, VCF header).
-    """
-    if caller_params is None:
-        caller_params = _caller_params.DEFAULT_PARAMS
-
-    base_fields = {col: [] for col in caller_params['base_cols']}
-    filter_fields = {f'{FILTER_PREFIX}{name}': [] for name in dict.fromkeys(caller_params['filter_cols'])}
-
-    info_col_names = _ordered_info_col_names(caller_params)
-    info_fields = {
-        f'{INFO_PREFIX}{name}': []
-        for name in info_col_names
-    }
-
-    annot_format_names, annot_info_names = _detect_annotator_cols(vcf_file, caller_params)
-    annot_fields = _init_annotator_fields(annot_format_names, annot_info_names)
-    annot_sample = vcf_file.header.samples[0] if annot_format_names else None
-
-    _remove_unused_info_header_fields(vcf_file, caller_params, keep=annot_info_names)
-    _remove_unused_filter_header_fields(vcf_file, caller_params)
-    _remove_format_header_fields(vcf_file, keep=annot_format_names)
-
-    for record in vcf_file:
-        _fetch_base_fields(record, base_fields)
-        _fetch_filter_fields(record, filter_fields, caller_params)
-        _fetch_info_fields(record, info_fields, info_col_names)
-        _fetch_annotator_fields(record, annot_fields, annot_format_names, annot_info_names, annot_sample)
-
-    df = pd.DataFrame(base_fields | filter_fields | info_fields | annot_fields)
-    logger.debug("parse_vcf_to_df_no_format: parsed %d records", len(df))
-    return df, vcf_file.header
-
-
-def parse_vcf_to_df_with_format(
-    vcf_file: VariantFile,
-    caller_params: dict = None,
-    sample_names: list[str] | None = None
-) -> tuple[pd.DataFrame, VariantFile.header]:
-    """
-    Parse a VCF file into a DataFrame including FORMAT/sample fields.
-
-    Only columns specified by caller_params are created, plus ANNOT_<field>
-    columns for annotators detected in the header (see _detect_annotator_cols).
-
-    Args:
-        vcf_file: A pysam VariantFile object containing variant calls.
-        caller_params: Caller-specific parameters; see _caller_params.py.
-            Defaults to _caller_params.DEFAULT_PARAMS when None.
-        sample_names: Samples to extract FORMAT fields for. Defaults to all
-            first sample listed in the VCF header.
+        sample_names: Sample(s) to read. Defaults to every sample in the header.
 
     Returns:
         Tuple of (DataFrame of variants, VCF header).
 
     Raises:
-        ValueError: If the VCF file contains no FORMAT fields.
+        ValueError: If requested samples are not in the header, or FORMAT
+            fields are requested from a VCF without samples.
     """
     if caller_params is None:
         caller_params = _caller_params.DEFAULT_PARAMS
-
-    if not bool(vcf_file.header.formats):
-        raise ValueError(
-            'FORMAT field presence specified but VCF file does not contain FORMAT fields'
-        )
 
     base_fields = {col: [] for col in caller_params['base_cols']}
     filter_fields = {f'{FILTER_PREFIX}{name}': [] for name in dict.fromkeys(caller_params['filter_cols'])}
@@ -138,33 +59,26 @@ def parse_vcf_to_df_with_format(
         f'{INFO_PREFIX}{name}': []
         for name in info_col_names
     }
+    format_cols = caller_params.get('format_cols', ())
 
-    # Fetch the sample names from the header if not provided as input. If samples are
     header_samples = tuple(vcf_file.header.samples)
     match sample_names:
         case None:
             sample_names = header_samples
-            logger.debug("parse_vcf_to_df_with_format: defaulting to all samples '%s'", sample_names)
         case str():
             sample_names = (sample_names,)
-            logger.debug("parse_vcf_to_df_with_format: using provided sample names '%s'", sample_names)
         case _:
             sample_names = tuple(sample_names)
-
-    if not sample_names:
-        raise ValueError("No samples to read FORMAT fields from")
     missing = [name for name in sample_names if name not in header_samples]
     if missing:
         raise ValueError(f"Samples not in VCF header: {missing}")
-    logger.debug("parse_vcf_to_df_with_format: reading samples %s", sample_names)
+    if not sample_names and format_cols:
+        raise ValueError(f"FORMAT fields {list(format_cols)} requested but the VCF has no samples")
+    logger.debug("parse_vcf_to_df: reading samples %s", sample_names)
 
-
-    sample_fields = {
-        f'{SAMPLE_PREFIX}{field_name}': []
-        for field_name in caller_params.get('format_cols', ())
-    } | {
-        SAMPLE_ID_COL: []
-    }
+    sample_fields = {f'{SAMPLE_PREFIX}{field_name}': [] for field_name in format_cols}
+    if sample_names:
+        sample_fields[SAMPLE_ID_COL] = []
 
     annot_format_names, annot_info_names = _detect_annotator_cols(vcf_file, caller_params)
     annot_fields = _init_annotator_fields(annot_format_names, annot_info_names)
@@ -174,19 +88,17 @@ def parse_vcf_to_df_with_format(
     _remove_unused_format_header_fields(vcf_file, caller_params, keep=annot_format_names)
 
     for record in vcf_file:
-        for sample_name in sample_names:
+        for sample_name in sample_names or (None,):
             _fetch_base_fields(record, base_fields)
             _fetch_filter_fields(record, filter_fields, caller_params)
             _fetch_info_fields(record, info_fields, info_col_names)
-            _fetch_sample_fields(record, sample_fields, caller_params, sample_name)
             _fetch_annotator_fields(record, annot_fields, annot_format_names, annot_info_names, sample_name)
-            sample_fields[SAMPLE_ID_COL].append(sample_name)
+            if sample_name is not None:
+                _fetch_sample_fields(record, sample_fields, caller_params, sample_name)
+                sample_fields[SAMPLE_ID_COL].append(sample_name)
 
     df = pd.DataFrame(base_fields | filter_fields | info_fields | sample_fields | annot_fields)
-    logger.debug(
-        "parse_vcf_to_df_with_format: parsed %d records (samples=%s)",
-        len(df), sample_fields[SAMPLE_ID_COL],
-    )
+    logger.debug("parse_vcf_to_df: parsed %d rows (samples=%s)", len(df), sample_names)
     return df, vcf_file.header
 
 
@@ -264,17 +176,6 @@ def _remove_unused_filter_header_fields(vcf_file: VariantFile, field_info: dict)
             vcf_file.header.filters[filter_field].remove_header()
     if dropped:
         logger.debug("Dropping FILTER header fields not in caller_params: %s", dropped)
-
-
-def _remove_format_header_fields(vcf_file: VariantFile, keep: Iterable[str] = ()) -> None:
-    """Remove all FORMAT header entries except keep (used when FORMAT fields are not parsed)."""
-    kept = set(keep)
-    format_fields = [f for f in vcf_file.header.formats if str(f) not in kept]
-    if not format_fields:
-        return
-    logger.debug("Dropping FORMAT header fields: %s", format_fields)
-    for format_field in format_fields:
-        vcf_file.header.formats[format_field].remove_header()
 
 
 def _remove_unused_format_header_fields(

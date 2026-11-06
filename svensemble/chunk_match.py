@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from . import breakpoints as bps
+from ._constants import GROUND_TRUTH_SAMPLE, SAMPLE_ID_COL
 from ._constants import BND1, BND2
 
 # Maps each BND relative-position string to a unique integer code.
@@ -26,6 +27,20 @@ _INS_DUP_CODES: frozenset[int] = frozenset([
     _ORIENT_ENCODE['N['] * 4 + _ORIENT_ENCODE[']N'],  # 1  – insertion
     _ORIENT_ENCODE[']N'] * 4 + _ORIENT_ENCODE['N['],  # 4  – tandem duplication
 ])
+
+def mark_ground_truth(bp_df: pd.DataFrame) -> pd.DataFrame:
+    """Ground-truth breakpoints with the GROUND_TRUTH_SAMPLE placeholder sample.
+
+    The ground truth is sites-only, so it has no sample of its own; the
+    placeholder lets it match within every sample. A frame that already
+    carries SAMPLE_ID_COL is rejected rather than silently relabelled.
+    """
+    if SAMPLE_ID_COL in bp_df.columns:
+        raise ValueError(
+            f"Ground truth already has a {SAMPLE_ID_COL} column; truth sets must be sample-less"
+        )
+    return bp_df.assign(**{SAMPLE_ID_COL: GROUND_TRUTH_SAMPLE})
+
 
 def concat_bp_dfs(bp_df_dict: dict[str, pd.DataFrame]):
     """
