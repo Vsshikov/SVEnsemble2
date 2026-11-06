@@ -537,7 +537,7 @@ def _register_run(subparsers):
         help="End-to-end standalone run: preprocess-raw -> ... -> predict for one sample.",
     )
     p.add_argument("--sample", type=str, required=True, help="Sample name (used as identifier only).")
-    p.add_argument("--callers", type=str, nargs="+", required=True, help="Caller names (same order as --caller_vcfs).")
+    p.add_argument("--callers", type=str, nargs="+", required=True, help="Caller names (same order as --caller_vcfs); repeat a name for several files of one caller.")
     p.add_argument("--caller_vcfs", type=Path, nargs="+", required=True, help="Caller VCFs (same order as --callers).")
     p.add_argument("--ref", type=Path, required=True, help="Reference FASTA path. Reserved for VCF writing; currently only recorded in provenance.")
     p.add_argument("--model", type=str, required=True, help="Model name.")
@@ -557,6 +557,7 @@ def _register_run(subparsers):
     p.add_argument("--save_matched_bps", action="store_true", help="Also write matched_bps.csv to --output_dir.")
     p.add_argument("--save_ground_truth", action="store_true", help="Also write the preprocessed ground truth to --output_dir (needs --ground_truth_vcf).")
     p.add_argument("--save_callsets", action="store_true", help="Also write each caller's processed {caller}.bps.csv and {caller}.vcf to --output_dir.")
+    p.add_argument("--annotate_vcfs", action="store_true", help="Also write each caller VCF with the ensemble score added as FORMAT SVENSSC to --output_dir.")
     _add_model_config_arg(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_run)
@@ -568,17 +569,12 @@ def _raise_on_sigterm(signum, frame):
 
 
 def _cmd_run(args):
-    if len(args.callers) != len(args.caller_vcfs):
-        raise SystemExit(
-            f"--callers ({len(args.callers)}) and --caller_vcfs ({len(args.caller_vcfs)}) must be the same length."
-        )
-    if len(set(args.callers)) != len(args.callers):
-        raise SystemExit(f"--callers has duplicates: {args.callers}")
+    caller_vcfs = _caller_vcfs_from_args(args.callers, args.caller_vcfs)
     previous = signal.signal(signal.SIGTERM, _raise_on_sigterm)
     try:
         api.run(
             sample=args.sample,
-            caller_vcfs=dict(zip(args.callers, args.caller_vcfs)),
+            caller_vcfs=caller_vcfs,
             ref=args.ref,
             model=args.model,
             training_set=args.training_set,
@@ -593,6 +589,7 @@ def _cmd_run(args):
             save={artifact for flag, artifact in _SAVE_FLAGS.items() if getattr(args, flag)},
             workdir=args.workdir,
             keep_workdir=args.keep_workdir,
+            annotate_vcfs=args.annotate_vcfs,
             command=shlex.join([sys.executable, "-m", "svensemble", *sys.argv[1:]]),
             verbose=args.verbose,
         )

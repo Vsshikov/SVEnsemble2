@@ -282,9 +282,23 @@ class TestRunSubcommand:
         assert captured["workdir"] is None
         assert captured["keep_workdir"] is False
         assert captured["save"] == set()
-        assert captured["caller_vcfs"] == {"gridss": tmp_path / "g.vcf", "manta_diploid": tmp_path / "m.vcf"}
+        assert captured["caller_vcfs"] == {"gridss": (tmp_path / "g.vcf",), "manta_diploid": (tmp_path / "m.vcf",)}
+        assert captured["annotate_vcfs"] is False
         assert captured["output_dir"] == tmp_path / "out"
         assert " run " in captured["command"] and "--output_dir" in captured["command"]
+
+    def test_repeated_caller_and_annotate_flag(self, tmp_path, captured):
+        sys.argv = [
+            "svensemble", "run", "--sample", "S",
+            "--callers", "delly", "delly",
+            "--caller_vcfs", str(tmp_path / "a.vcf"), str(tmp_path / "b.vcf"),
+            "--ref", str(tmp_path / "ref.fa"), "--model", "unbiased_xgb",
+            "--ground_truth_bps", str(tmp_path / "gt.csv"),
+            "--output_dir", str(tmp_path / "out"), "--annotate_vcfs",
+        ]
+        main()
+        assert captured["caller_vcfs"] == {"delly": (tmp_path / "a.vcf", tmp_path / "b.vcf")}
+        assert captured["annotate_vcfs"] is True
 
     def test_output_dir_required(self, tmp_path, captured):
         sys.argv = self._argv(tmp_path)

@@ -268,6 +268,7 @@ def fake_pipeline(monkeypatch):
         return Path(path)
 
     monkeypatch.setattr(sv_io, "read_vcf", lambda *a, **k: bps)
+    monkeypatch.setattr(sv_io, "parse_samples_from_vcf", lambda path: ["S"])
     monkeypatch.setattr(api, "preprocess_raw", step("preprocess_raw", lambda *a, **k: bps))
     monkeypatch.setattr(api, "preprocess", step("preprocess", lambda *a, **k: bps))
     monkeypatch.setattr(api, "match", step("match", lambda *a, **k: bps))
@@ -400,11 +401,13 @@ class TestRunProvenance:
         rec = _provenance(tmp_path / "out")
         assert rec["status"] == "succeeded"
         assert rec["command"] == "svensemble run --sample S"
-        assert rec["parameters"]["caller_vcfs"] == {"gridss": str((tmp_path / "g.vcf").resolve())}
+        assert rec["parameters"]["caller_vcfs"] == {"gridss": [str((tmp_path / "g.vcf").resolve())]}
+        assert rec["parameters"]["samples"] == ["S"]
+        assert rec["parameters"]["annotate_vcfs"] is False
         assert rec["parameters"]["workdir_is_tmp"] is True
         assert rec["model"]["model_id"] == api.model_id(model="unbiased_xgb")
         assert rec["inputs"]["ground_truth_bps"]["size"] == (tmp_path / "gt.csv").stat().st_size
-        assert rec["inputs"]["caller_vcfs"]["gridss"] == {"path": str((tmp_path / "g.vcf").resolve()), "exists": False}
+        assert rec["inputs"]["caller_vcfs"]["gridss"] == [{"path": str((tmp_path / "g.vcf").resolve()), "exists": False}]
         sha = hashlib.sha256(out["calls_csv"].read_bytes()).hexdigest()
         assert rec["outputs"]["calls_csv"]["sha256"] == sha
         assert rec["end_time"] is not None and rec["duration_s"] >= 0
@@ -424,3 +427,37 @@ class TestRunProvenance:
         monkeypatch.setattr(api, "preprocess_raw", spy)
         api.run(**_run_kwargs(tmp_path))
         assert seen["status"] == "running"
+
+
+class TestRunAnnotate:
+    VCF = (
+        '##fileformat=VCFv4.2\n'
+        '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS\n'
+        'chr1\t100\tgridss1o\tN\tN[chr1:500[\t.\tPASS\tEVENT=gridss1;SVTYPE=BND\tGT\t0/1\n'
+    )
+
+    def test_annotated_vcf_written_and_returned(self, tmp_path, fake_pipeline, monkeypatch, tmpdir_root):
+        from svensemble._constants import SAMPLE_ID_COL
+        vcf = tmp_path / "g.vcf"
+        vcf.write_text(self.VCF)
+        calls = pd.DataFrame({"gridss_INFO_EVENT": ["gridss1"], SAMPLE_ID_COL: ["S"], "gridss_m_pred": [0.8]})
+        monkeypatch.setattr(api, "predict", lambda *a, **k: calls)
+        out = api.run(**_run_kwargs(tmp_path, annotate_vcfs=True))
+        path = out["gridss.annotated_vcf"]
+        assert path.parent == (tmp_path / "out").resolve()
+        assert path.read_text().splitlines()[-1].endswith("GT:SVENSSC\t0/1:0.8")
+        assert _provenance(tmp_path / "out")["parameters"]["annotate_vcfs"] is True
+
+    def test_unannotatable_input_fails_before_any_work(self, tmp_path, fake_pipeline, tmpdir_root):
+        vcf = tmp_path / "gt.vcf"
+        vcf.write_text(self.VCF)
+        with pytest.raises(KeyError, match="event-key rule|CALLSET_PARAM_DICT"):
+            api.run(**_run_kwargs(tmp_path, caller_vcfs={"gnomad": vcf}, training_set="gnomad", annotate_vcfs=True))
+        assert not (tmp_path / "out").exists()
+        assert list(tmpdir_root.iterdir()) == []
+
+    def test_mismatched_samples_fail_before_any_work(self, tmp_path, fake_pipeline, monkeypatch, tmpdir_root):
+        monkeypatch.setattr(sv_io, "parse_samples_from_vcf", lambda path: ["A"] if "g" in Path(path).name else ["B"])
+        with pytest.raises(ValueError, match="share one sample set"):
+            api.run(**_run_kwargs(tmp_path, caller_vcfs={"gridss": tmp_path / "g.vcf", "manta_diploid": tmp_path / "m.vcf"}))
+        assert not (tmp_path / "out").exists()
