@@ -3,7 +3,7 @@ General-purpose CLI for SVEnsemble2.
 
 The single command-line entry point for the package. Provides:
   * per-stage subcommands (preprocess-raw, preprocess, match, train, predict,
-    ground-truth, benchmark-callset, shap) that accept explicit file paths.
+    annotate, ground-truth, benchmark-callset, shap) that accept explicit file paths.
     These are the units invoked by Nextflow modules.
   * utilities: validation-set (preprocess a raw truth set into breakpoints)
     and model-id (print the hashed id for a preset or model config).
@@ -46,6 +46,7 @@ def main():
     _register_match(subparsers)
     _register_train(subparsers)
     _register_predict(subparsers)
+    _register_annotate(subparsers)
     _register_benchmark_callset(subparsers)
     _register_shap(subparsers)
     _register_ground_truth(subparsers)
@@ -290,6 +291,47 @@ def _cmd_predict(args):
 
     if args.verbose:
         print(f"Wrote {len(svensemble2_calls_df)} calls to {calls_csv}")
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: annotate
+# ---------------------------------------------------------------------------
+
+def _caller_vcfs_from_args(callers: list[str], caller_vcfs: list[Path]) -> dict[str, tuple[Path, ...]]:
+    """Pair --callers with --caller_vcfs; a repeated caller name collects several files."""
+    if len(callers) != len(caller_vcfs):
+        raise SystemExit(
+            f"--callers ({len(callers)}) and --caller_vcfs ({len(caller_vcfs)}) must be the same length."
+        )
+    out: dict[str, tuple[Path, ...]] = {}
+    for caller, vcf in zip(callers, caller_vcfs):
+        out[caller] = out.get(caller, ()) + (vcf,)
+    return out
+
+
+def _register_annotate(subparsers):
+    p = subparsers.add_parser(
+        "annotate",
+        help="Copy caller VCFs/BCFs with the ensemble score added as FORMAT SVENSSC (records otherwise untouched).",
+    )
+    p.add_argument("--calls", type=Path, required=True, help="Ensemble calls CSV (svensemble2_calls.csv).")
+    p.add_argument("--callers", type=str, nargs="+", required=True, help="Caller names (same order as --caller_vcfs); repeat a name for several files of one caller.")
+    p.add_argument("--caller_vcfs", type=Path, nargs="+", required=True, help="Caller VCFs/BCFs (same order as --callers).")
+    p.add_argument("--output_dir", type=Path, required=True, help="Output directory for the annotated files.")
+    _add_verbose_arg(p)
+    p.set_defaults(func=_cmd_annotate)
+
+
+def _cmd_annotate(args):
+    written = api.annotate(
+        sv_io.read_calls(args.calls),
+        _caller_vcfs_from_args(args.callers, args.caller_vcfs),
+        args.output_dir,
+    )
+    if args.verbose:
+        for caller, paths in written.items():
+            for path in paths:
+                print(f"{caller}: {path}")
 
 
 # ---------------------------------------------------------------------------

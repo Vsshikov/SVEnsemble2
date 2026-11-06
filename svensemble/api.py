@@ -11,9 +11,11 @@ or a fitted model; none of them read or write files. Pair them with
     X, model_fit = api.train(matched, ["manta_diploid"], "unbiased_xgb", "manta_diploid")
     calls = api.predict(model_fit, X, matched, "unbiased_xgb", "manta_diploid")
 
-Ground truth, validation sets, benchmarking and SHAP are file-to-file:
-they take input paths and an ``output_dir`` and write the fixed filenames
-named in ``svensemble.io``. Argument names match the CLI flags.
+Ground truth, validation sets, benchmarking, SHAP and annotation are
+file-to-file: they take input paths and an ``output_dir`` and write the
+fixed filenames named in ``svensemble.io``. Argument names match the CLI
+flags. ``annotate`` also takes the calls DataFrame and orchestrates
+``svensemble.io`` (reading and writing) around the pure ``svensemble.annotate``.
 
 ``run`` chains every step for one sample, as ``svensemble run`` does. It
 takes input paths, metadata and an ``output_dir``; intermediates go to a
@@ -27,7 +29,8 @@ import shutil
 import sys
 import tempfile
 import time
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
+from contextlib import ExitStack
 from pathlib import Path
 
 import numpy as np
@@ -35,6 +38,7 @@ import pandas as pd
 
 from . import _config as sv_config
 from . import _provenance
+from . import annotate as sv_annotate
 from . import breakpoints as bps_mod
 from . import callset_specific
 from . import chunk_match
@@ -43,16 +47,17 @@ from . import matched_breakpoints as mbps
 from . import models
 from ._caller_params import CALLSET_PARAM_DICT
 from ._config import list_preset_ids
-from ._constants import PRED_SUFFIX
+from ._constants import PRED_SUFFIX, SAMPLE_ID_COL
 from .benchmark import run_single_callset_benchmark as benchmark_callset
 from .ground_truth import preprocess_ground_truth
+from .utils import atomic_path
 from .validation_sets import preprocess_validation_set
 
 __all__ = [
     "generate_config", "model_id", "list_preset_ids",
     "preprocess_raw", "preprocess", "match", "train", "predict",
     "preprocess_ground_truth", "preprocess_validation_set", "benchmark_callset", "shap",
-    "run", "SAVE_ARTIFACTS",
+    "annotate", "check_sample_sets", "run", "SAVE_ARTIFACTS",
 ]
 
 
@@ -312,6 +317,127 @@ def shap(
         top_n=top_n,
         verbose=verbose,
     )
+
+
+# ---------------------------------------------------------------------------
+# Caller VCF inputs: sample checks and annotation
+# ---------------------------------------------------------------------------
+
+CallerVcfs = Mapping[str, Path | Sequence[Path]]
+"""Caller name -> one VCF/BCF path, or several (e.g. one per sample)."""
+
+_NA_LIKE_SAMPLES = frozenset({"", "NA", "N/A", "NaN", "nan", "None", "null", "NULL", "<NA>", "*"})
+
+
+def _as_path_tuples(caller_vcfs: CallerVcfs) -> dict[str, tuple[Path, ...]]:
+    """caller_vcfs with every value as a tuple of Paths."""
+    return {
+        caller: (Path(vcfs),) if isinstance(vcfs, (str, Path)) else tuple(Path(v) for v in vcfs)
+        for caller, vcfs in caller_vcfs.items()
+    }
+
+
+def _compare_sample_sets(sets_by_caller: Mapping[str, Collection[str]]) -> tuple[str, ...]:
+    """The one sample set shared by every caller that has samples.
+
+    Raises if callers differ, or if a name is one pandas would read back from
+    CSV as NaN (or the ground-truth placeholder '*'). Callers with no samples
+    are skipped. Returns the samples sorted.
+    """
+    with_samples = {caller: frozenset(s) for caller, s in sets_by_caller.items() if s}
+    bad = sorted({s for samples in with_samples.values() for s in samples} & _NA_LIKE_SAMPLES)
+    if bad:
+        raise ValueError(f"Sample names {bad} are reserved or read back as missing values; rename them")
+    distinct = set(with_samples.values())
+    if len(distinct) > 1:
+        detail = "; ".join(f"{caller}: {sorted(s)}" for caller, s in with_samples.items())
+        raise ValueError(f"Caller VCFs must share one sample set, got {detail}")
+    return tuple(sorted(next(iter(distinct)))) if distinct else ()
+
+
+def check_sample_sets(caller_vcfs: CallerVcfs) -> tuple[str, ...]:
+    """Samples shared by all caller VCFs, read from their #CHROM lines.
+
+    A caller's samples are the union over its files; a sample in two files of
+    one caller raises. Then _compare_sample_sets applies across callers.
+    """
+    sets_by_caller = {}
+    for caller, paths in _as_path_tuples(caller_vcfs).items():
+        per_file = {path: sv_io.parse_samples_from_vcf(path) for path in paths}
+        seen: dict[str, Path] = {}
+        for path, samples in per_file.items():
+            for sample in samples:
+                if sample in seen:
+                    raise ValueError(f"{caller}: sample {sample!r} in both {seen[sample]} and {path}")
+                seen[sample] = path
+        sets_by_caller[caller] = set(seen)
+    return _compare_sample_sets(sets_by_caller)
+
+
+def _calls_with_samples(calls: pd.DataFrame, samples: tuple[str, ...]) -> pd.DataFrame:
+    """Calls carrying SAMPLE_ID_COL, checked against the VCFs' samples.
+
+    Calls written before the sample key existed have no SAMPLE_ID_COL; they
+    come from single-sample runs, so they are accepted only when the VCFs have
+    exactly one sample, which they are then assigned to.
+    """
+    if SAMPLE_ID_COL not in calls.columns:
+        if len(samples) != 1:
+            raise ValueError(
+                f"Calls have no {SAMPLE_ID_COL} column, so they can only annotate single-sample "
+                f"VCFs; the VCFs have samples {list(samples)}"
+            )
+        return calls.assign(**{SAMPLE_ID_COL: samples[0]})
+    extra = sorted(set(calls[SAMPLE_ID_COL].dropna().astype(str)) - set(samples))
+    if extra:
+        raise ValueError(f"Calls have samples {extra} that are not in the caller VCFs {list(samples)}")
+    return calls
+
+
+def annotate(calls: pd.DataFrame, caller_vcfs: CallerVcfs, output_dir: Path) -> dict[str, tuple[Path, ...]]:
+    """Copies of the caller VCFs/BCFs with the ensemble score as FORMAT SVENSSC.
+
+    Records are edited as text or BCF bytes, never re-serialised, so each
+    output differs from its input only by the SVENSSC header line and field.
+    Everything is validated before anything is written, and the outputs are
+    all-or-nothing: if any file fails, none appears.
+
+    Args:
+        calls: Ensemble calls as predict returns them (or io.read_calls).
+        caller_vcfs: Caller name -> VCF/BCF path(s), as for run.
+        output_dir: Where io.ANNOTATED_VCF files go (created if missing).
+
+    Returns:
+        Caller name -> annotated paths, in input order.
+    """
+    paths = _as_path_tuples(caller_vcfs)
+    sv_annotate.pred_column(calls)
+    for caller in paths:
+        sv_annotate.event_key_fn(caller)
+        if f"{caller}_INFO_EVENT" not in calls.columns:
+            raise KeyError(f"Calls have no {caller}_INFO_EVENT column; was {caller!r} part of this model?")
+    samples = check_sample_sets(paths)
+    calls = _calls_with_samples(calls, samples)
+    out_paths = {
+        caller: tuple(Path(output_dir) / sv_io.annotated_vcf_name(caller, p) for p in vcfs)
+        for caller, vcfs in paths.items()
+    }
+    flat = [p for ps in out_paths.values() for p in ps]
+    if len(set(flat)) != len(flat):
+        raise ValueError(f"Annotated output names collide: {sorted(map(str, flat))}")
+    for caller, vcfs in paths.items():
+        for vcf in vcfs:
+            if not sv_io.parse_samples_from_vcf(vcf):
+                raise ValueError(f"{caller}: {vcf} is sites-only; a FORMAT field cannot be added")
+
+    with ExitStack() as stack:
+        for caller, vcfs in paths.items():
+            for vcf, out in zip(vcfs, out_paths[caller]):
+                tmp = stack.enter_context(atomic_path(out))
+                with sv_io.open_variant_file(vcf) as (kind, compressed, header, body):
+                    codec = sv_annotate.annotate_bcf if kind == "bcf" else sv_annotate.annotate_text
+                    sv_io.write_annotated(codec(header, body, caller, calls), tmp, compressed)
+    return out_paths
 
 
 # ---------------------------------------------------------------------------

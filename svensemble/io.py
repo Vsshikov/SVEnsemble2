@@ -30,16 +30,23 @@ File I/O for SVEnsemble2: every pipeline filename and every read/write.
 """
 
 import copy
+import gzip
 import json
 import pickle
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from io import TextIOWrapper
 from pathlib import Path
+from typing import BinaryIO, TextIO
 
 import numpy as np
 import pandas as pd
-from pysam import VariantFile
+from pysam import BGZFile, VariantFile
 
+from . import annotate as sv_annotate
 from . import vcfwrite
 from ._caller_params import CALLSET_PARAM_DICT
+from ._constants import SAMPLE_ID_COL
 from .utils import atomic_path
 from .vcfparse import parse_vcf_to_df
 
@@ -58,6 +65,7 @@ BENCHMARK_CSV = "{caller}.benchmark.csv"
 SHAP_SUMMARY = "shap_summary.csv"
 SHAP_VALUES = "shap_values.pkl"
 RUN_PROVENANCE = "svensemble_run.json"
+ANNOTATED_VCF = "{caller}.{stem}.svensemble2{ext}"
 
 REQUIRED_KEYS = {"sample_name"}
 
@@ -159,6 +167,97 @@ def write_calls(calls_df: pd.DataFrame, out_dir: Path, sample: str) -> tuple[Pat
         calls_df.to_csv(tmp, index=True)
     vcfwrite.write_vcf(calls_df, vcf_path, source="svensemble2", sample_name=sample)
     return csv_path, vcf_path
+
+
+def read_calls(path: Path) -> pd.DataFrame:
+    """Read CALLS_CSV with event and sample columns as text.
+
+    Text dtype keeps digit-only sample names and event IDs from turning into
+    numbers; event IDs already float-ified upstream ('21.0') are normalised by
+    annotate. NA-like sample names are rejected before any run, so default NA
+    handling is safe here.
+    """
+    cols = pd.read_csv(path, nrows=0).columns
+    text_cols = [c for c in cols if c.endswith("_INFO_EVENT") or c == SAMPLE_ID_COL]
+    return pd.read_csv(path, index_col=0, low_memory=False, dtype={c: str for c in text_cols})
+
+
+# -- Caller VCFs as raw text or BCF records (annotation) --------------------
+
+_VCF_EXTS = (".vcf.gz", ".vcf.bgz", ".vcf", ".bcf")
+
+
+def split_vcf_name(path: Path) -> tuple[str, str]:
+    """(stem, extension) of a VCF/BCF file name, e.g. ('s1.delly', '.vcf.gz')."""
+    name = Path(path).name
+    for ext in _VCF_EXTS:
+        if name.endswith(ext):
+            return name[: -len(ext)], ext
+    raise ValueError(f"{path}: expected one of {_VCF_EXTS}")
+
+
+def annotated_vcf_name(caller: str, path: Path) -> str:
+    """ANNOTATED_VCF for one input, keeping the input's extension."""
+    stem, ext = split_vcf_name(path)
+    return ANNOTATED_VCF.format(caller=caller, stem=stem, ext=ext)
+
+
+def _is_gzip(path: Path) -> bool:
+    with open(path, "rb") as fh:
+        return fh.read(2) == b"\x1f\x8b"
+
+
+def _read_text_header(fh: TextIO) -> list[str]:
+    """Header lines up to and including #CHROM; fh is left at the first record."""
+    lines = []
+    for line in fh:
+        lines.append(line)
+        if line.startswith("#CHROM"):
+            return lines
+        if not line.startswith("##"):
+            break
+    raise ValueError("No #CHROM line before the first record")
+
+
+@contextmanager
+def open_variant_file(path: Path) -> Iterator[tuple[str, bool, list[str], Iterable]]:
+    """Open a caller VCF/BCF for annotation without parsing records.
+
+    Yields (kind, compressed, header_lines, body): kind is 'vcf' or 'bcf';
+    body iterates raw text lines (endings kept, undecodable bytes preserved
+    via surrogateescape) or BCF (shared, per-sample) record blocks.
+    """
+    path = Path(path)
+    compressed = _is_gzip(path)
+    raw: BinaryIO = gzip.open(path, "rb") if compressed else open(path, "rb")
+    try:
+        kind = "bcf" if raw.peek(3)[:3] == b"BCF" else "vcf"
+        if kind == "bcf":
+            yield kind, compressed, sv_annotate.read_bcf_header(raw), sv_annotate.iter_bcf_records(raw)
+            return
+        text = TextIOWrapper(raw, encoding="utf-8", errors="surrogateescape", newline="")
+        yield kind, compressed, _read_text_header(text), text
+    finally:
+        raw.close()
+
+
+def parse_samples_from_vcf(path: Path) -> list[str]:
+    """Sample names from a VCF/BCF header (empty for a sites-only file)."""
+    with open_variant_file(path) as (_kind, _compressed, header, _body):
+        chrom = next(line for line in header if line.startswith("#CHROM"))
+        return sv_annotate.split_line_ending(chrom)[0].split("\t")[9:]
+
+
+def write_annotated(chunks: Iterable[str | bytes], path: Path, compress: bool) -> Path:
+    """Write annotated text lines or BCF bytes to *path*, BGZF-compressed if *compress*.
+
+    *path* is written directly: callers wrap it in utils.atomic_path.
+    """
+    opener = (lambda: BGZFile(str(path), "wb")) if compress else (lambda: open(path, "wb"))
+    with opener() as out:
+        for chunk in chunks:
+            out.write(chunk if isinstance(chunk, bytes) else chunk.encode("utf-8", "surrogateescape"))
+    return Path(path)
 
 # -- Tagged envelope (Kombu/Celery convention) ------------------------------
 
