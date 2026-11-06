@@ -38,3 +38,6 @@ INV_EVENT_SUFFIXES = (INV_EVENT1_SUFFIX, INV_EVENT2_SUFFIX)
 
 # Suffix of model prediction columns, {training_set}_{model}_pred
 PRED_SUFFIX = '_pred'
+
+# FORMAT field holding the SVEnsemble2 score in annotated caller VCFs
+SCORE_FIELD = 'SVENSSC'
