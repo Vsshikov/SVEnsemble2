@@ -318,7 +318,7 @@ def _run_kwargs(tmp_path, **over):
     if not gt.exists():
         gt.write_text("a\n1\n")
     kw = dict(
-        sample="S", caller_vcfs={"gridss": tmp_path / "g.vcf"}, ref=tmp_path / "ref.fa",
+        caller_vcfs={"gridss": tmp_path / "g.vcf"}, ref=tmp_path / "ref.fa",
         model="unbiased_xgb", training_set="gridss", output_dir=tmp_path / "out",
         ground_truth_bps=gt,
     )

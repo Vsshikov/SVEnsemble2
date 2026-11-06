@@ -54,7 +54,6 @@ def run_workdir(spec, tmp_path_factory):
     with pytest.MonkeyPatch.context() as mp:
         mp.chdir(base)
         api.run(
-            sample=spec["sample"],
             workdir=workdir,
             output_dir=workdir / "predict",
             ref=Path(spec["ref"]),

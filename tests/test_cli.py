@@ -261,7 +261,7 @@ class TestGroundTruthSubcommand:
 class TestRunSubcommand:
     def _argv(self, tmp_path, *extra):
         return [
-            "svensemble", "run", "--sample", "S",
+            "svensemble", "run",
             "--callers", "gridss", "manta_diploid",
             "--caller_vcfs", str(tmp_path / "g.vcf"), str(tmp_path / "m.vcf"),
             "--ref", str(tmp_path / "ref.fa"), "--model", "unbiased_xgb",
@@ -289,7 +289,7 @@ class TestRunSubcommand:
 
     def test_repeated_caller_and_annotate_flag(self, tmp_path, captured):
         sys.argv = [
-            "svensemble", "run", "--sample", "S",
+            "svensemble", "run",
             "--callers", "delly", "delly",
             "--caller_vcfs", str(tmp_path / "a.vcf"), str(tmp_path / "b.vcf"),
             "--ref", str(tmp_path / "ref.fa"), "--model", "unbiased_xgb",

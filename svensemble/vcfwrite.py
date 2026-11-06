@@ -305,8 +305,9 @@ def _one_row_per_event(
 
     Per-sample rows of one SV share their record (shared INFO); only the
     score is per sample (FORMAT). Rows of one event that disagree on a
-    record-defining column raise. Without SAMPLE_ID_COL every row is its own
-    record and scores go to *sample_name*.
+    record-defining column raise. The header samples are the data's
+    SAMPLE_ID_COL values; only without that column is *sample_name* used
+    (every row is then its own record and scores go to *sample_name*).
     """
     if SAMPLE_ID_COL not in bps_df.columns:
         samples = [sample_name] if (score_col and sample_name) else []
@@ -325,9 +326,9 @@ def _one_row_per_event(
     if conflicting:
         raise ValueError(f"Samples disagree on the record of SV(s) {conflicting[:10]}")
     record_df = bps_df.drop_duplicates('INFO_EVENT', keep='first').drop(columns=[SAMPLE_ID_COL])
-    if not score_col:
-        return record_df, [], {}
     samples = sorted(bps_df[SAMPLE_ID_COL].astype(str).unique())
+    if not score_col:
+        return record_df, samples, {}
     scores: dict[str, dict[str, float]] = {}
     for event, sample, score in zip(bps_df['INFO_EVENT'], bps_df[SAMPLE_ID_COL].astype(str), bps_df[score_col]):
         scores.setdefault(str(event), {})[sample] = score
