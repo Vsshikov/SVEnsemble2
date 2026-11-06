@@ -16,6 +16,7 @@ from ._constants import (
     FILTER_PREFIX,
     INFO_PREFIX,
     PRED_SUFFIX,
+    SAMPLE_ID_COL,
     SAMPLE_PREFIX,
     TOPOLOGY_PREFIX,
 )
@@ -220,8 +221,11 @@ def preprocess_matchedbps_for_pu(
     Returns:
         pd.DataFrame: Preprocessed DataFrame.
     """
-    # Set INFO_EVENT columns as index for easier filtering
+    # Set INFO_EVENT columns (and the sample, last) as index for easier
+    # filtering; as an index level the sample can never become a feature
     idx_cols = [col for col in joint_bp_df.columns if col.endswith('_INFO_EVENT')]
+    if SAMPLE_ID_COL in joint_bp_df.columns:
+        idx_cols.append(SAMPLE_ID_COL)
     joint_bp_df = joint_bp_df.set_index(idx_cols).sort_index()
 
     training_cols: list[str] = []
@@ -402,11 +406,14 @@ def get_svensemble2_calls(
     # Infer callset list based on prefixes of INFO_EVENT columns in pred_df
     callsets = [col.replace('_INFO_EVENT', '') for col in pred_df.columns if 'INFO_EVENT' in col]
 
-    # Merge the predictions into the matched breakpoints data using the INFO_EVENT columns as keys
-    matchedbps_df_copy = matchedbps_df_copy.merge(
-        pred_df,
-        on=[f'{callset}_INFO_EVENT' for callset in callsets]
-    )
+    # Merge the predictions into the matched breakpoints data on the
+    # INFO_EVENT columns, plus the sample when the predictions are per sample
+    merge_keys = [f'{callset}_INFO_EVENT' for callset in callsets]
+    if SAMPLE_ID_COL in pred_df.columns:
+        merge_keys.append(SAMPLE_ID_COL)
+        matchedbps_df_copy[SAMPLE_ID_COL] = matchedbps_df_copy[SAMPLE_ID_COL].astype(str)
+        pred_df = pred_df.assign(**{SAMPLE_ID_COL: pred_df[SAMPLE_ID_COL].astype(str)})
+    matchedbps_df_copy = matchedbps_df_copy.merge(pred_df, on=merge_keys)
 
     # Compute the combined (aggregate/max) insert size across all callsets and store in a new column
     matchedbps_df_copy['svensemble2_insert_size'] = get_combined_insert_size(
@@ -440,6 +447,7 @@ def get_svensemble2_calls(
         extra_cols=[
             'svensemble2_insert_size',
             'INFO_EVENT',
+            *([SAMPLE_ID_COL] if SAMPLE_ID_COL in matchedbps_df_copy.columns else []),
             f"{training_set_name}_{model_name}{PRED_SUFFIX}"
         ]
     )

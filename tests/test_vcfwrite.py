@@ -860,3 +860,49 @@ class TestWriteVcfAtomic:
         assert out == tmp_path / 'out.vcf.gz'
         assert out.read_bytes()[:2] == b'\x1f\x8b'
         assert len(_read_records(out)) == 1
+
+
+# ---------------------------------------------------------------------------
+# write_vcf — per-sample scores (calls VCF)
+# ---------------------------------------------------------------------------
+
+class TestWriteScores:
+    PRED = 'ts_model_pred'
+
+    def _calls(self, rows):
+        from svensemble._constants import SAMPLE_ID_COL
+        return pd.DataFrame([
+            _del_row(ev, pos, end) | {SAMPLE_ID_COL: sample, self.PRED: score}
+            for ev, pos, end, sample, score in rows
+        ])
+
+    def test_one_record_per_sv_with_per_sample_format(self, tmp_path):
+        df = self._calls([
+            ('sv1', 100, 500, 'S2', 0.25), ('sv1', 100, 500, 'S1', 0.9), ('sv2', 2000, 2600, 'S1', 0.5),
+        ])
+        write_vcf(df, tmp_path / 'out.vcf', score_col=self.PRED)
+        with pysam.VariantFile(str(tmp_path / 'out.vcf')) as vcf:
+            assert list(vcf.header.samples) == ['S1', 'S2']
+            recs = list(vcf)
+        assert [r.id for r in recs] == ['sv1', 'sv2']
+        assert recs[0].samples['S1']['SVENSSC'] == pytest.approx(0.9)
+        assert recs[0].samples['S2']['SVENSSC'] == pytest.approx(0.25)
+        assert recs[1].samples['S2']['SVENSSC'] is None
+
+    def test_samples_disagreeing_on_the_record_raise(self, tmp_path):
+        df = self._calls([('sv1', 100, 500, 'S1', 0.9), ('sv1', 110, 500, 'S2', 0.2)])
+        with pytest.raises(ValueError, match='disagree'):
+            write_vcf(df, tmp_path / 'out.vcf', score_col=self.PRED)
+
+    def test_without_sample_column_scores_go_to_sample_name(self, tmp_path):
+        df = pd.DataFrame([_del_row('sv1', 100, 500) | {self.PRED: 0.4}])
+        write_vcf(df, tmp_path / 'out.vcf', sample_name='NA12878', score_col=self.PRED)
+        with pysam.VariantFile(str(tmp_path / 'out.vcf')) as vcf:
+            assert list(vcf.header.samples) == ['NA12878']
+            assert next(vcf).samples['NA12878']['SVENSSC'] == pytest.approx(0.4)
+
+    def test_callset_rows_per_sample_written_once(self, tmp_path):
+        from svensemble._constants import SAMPLE_ID_COL
+        df = pd.DataFrame([_del_row('sv1', 100, 500) | {SAMPLE_ID_COL: s} for s in ('S1', 'S2')])
+        write_vcf(df, tmp_path / 'out.vcf', sample_name='S')
+        assert len(_read_records(tmp_path / 'out.vcf')) == 1

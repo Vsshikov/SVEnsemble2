@@ -17,9 +17,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from svensemble._constants import GROUND_TRUTH_SAMPLE, SAMPLE_ID_COL
 from svensemble.chunk_match import (
     dist_matrix_ref,
     get_pairwise_matches,
+    inner_join_bps,
+    mark_ground_truth,
+    outer_join_bps,
+    sample_vertex_mask,
+    split_graph_by_sample,
     _get_match_matrix,
     _get_triu_mask,
 )
@@ -30,7 +36,7 @@ from svensemble.chunk_match import (
 # ---------------------------------------------------------------------------
 
 def _row(source, event_id, pos_bnd1, pos_bnd2,
-         chrom='chr1', svtype='DEL', svlen=0, cipos=0):
+         chrom='chr1', svtype='DEL', svlen=0, cipos=0, sample='S1'):
     """
     Build a minimal breakpoint row dict.
 
@@ -41,6 +47,7 @@ def _row(source, event_id, pos_bnd1, pos_bnd2,
     return {
         'source': source,
         'INFO_EVENT': event_id,
+        SAMPLE_ID_COL: sample,
         'CHROM_bnd1': chrom,
         'CHROM_bnd2': chrom,
         'POS_bnd1': pos_bnd1,
@@ -200,7 +207,7 @@ class TestGetPairwiseMatches:
             _row('sniffles', 'ev3', 104, 504),
         )
         pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=False)
-        sniffles_events = {ev for s, ev in [p[0] for p in pairs] + [p[1] for p in pairs] if s == 'sniffles'}
+        sniffles_events = {ev for s, ev, _ in [p[0] for p in pairs] + [p[1] for p in pairs] if s == 'sniffles'}
         assert 'ev3' in sniffles_events
         for pair in pairs:
             assert _pair_sources(pair) == {'delly', 'sniffles'}
@@ -220,7 +227,7 @@ class TestGetPairwiseMatches:
 
     def test_empty_input_returns_empty(self):
         df = pd.DataFrame(columns=[
-            'source', 'INFO_EVENT', 'CHROM_bnd1', 'CHROM_bnd2',
+            'source', 'INFO_EVENT', SAMPLE_ID_COL, 'CHROM_bnd1', 'CHROM_bnd2',
             'POS_bnd1', 'POS_bnd2', 'ALT_bnd1', 'ALT_bnd2',
             'INFO_CIPOS_l_bnd1', 'INFO_CIPOS_r_bnd1',
             'INFO_CIPOS_l_bnd2', 'INFO_CIPOS_r_bnd2',
@@ -292,8 +299,8 @@ class TestGetPairwiseMatches:
         assert g.vcount() == 2
         assert g.ecount() == 1
         names = {v['name'] for v in g.vs}
-        assert ('delly', 'ev1') in names
-        assert ('sniffles', 'ev2') in names
+        assert ('delly', 'ev1', 'S1') in names
+        assert ('sniffles', 'ev2', 'S1') in names
 
     def test_return_unmatched_adds_isolated_vertices(self):
         """Unmatched breakpoints should appear as isolated vertices in the graph."""
@@ -312,4 +319,93 @@ class TestGetPairwiseMatches:
         assert g.vcount() == 3
         assert g.ecount() == 1
         names = {v['name'] for v in g.vs}
-        assert ('delly', 'ev3') in names
+        assert ('delly', 'ev3', 'S1') in names
+        assert all(len(name) == 3 for name in names)
+
+
+# ---------------------------------------------------------------------------
+# Samples: node names, per-sample split, joins
+# ---------------------------------------------------------------------------
+
+def _bps(*rows):
+    """Per-source breakpoint frames (without the 'source' column) from _row dicts."""
+    df = pd.DataFrame(list(rows))
+    return {src: g.drop(columns=['source']).reset_index(drop=True) for src, g in df.groupby('source', sort=False)}
+
+
+class TestSamples:
+
+    def test_missing_sample_column_rejected(self):
+        df = _df(_row('delly', 'ev1', 100, 500)).drop(columns=[SAMPLE_ID_COL])
+        with pytest.raises(ValueError, match=SAMPLE_ID_COL):
+            get_pairwise_matches(df, max_dist=10, ignore_size=True)
+
+    def test_mark_ground_truth(self):
+        gt = mark_ground_truth(pd.DataFrame({'INFO_EVENT': ['g1']}))
+        assert list(gt[SAMPLE_ID_COL]) == [GROUND_TRUTH_SAMPLE]
+        with pytest.raises(ValueError, match='sample-less'):
+            mark_ground_truth(gt)
+
+    def test_mask_and_split(self):
+        df = _df(
+            _row('delly', 'ev1', 100, 500, sample='S1'),
+            _row('delly', 'ev1', 100, 500, sample='S2'),
+            _row('sniffles', 'evA', 102, 502, sample='S1'),
+            _row('sniffles', 'evB', 102, 502, sample='S2'),
+            _row('gnomad', 'g1', 101, 501, sample=GROUND_TRUTH_SAMPLE),
+            _row('gnomad', 'g2', 104, 504, sample=GROUND_TRUTH_SAMPLE),
+        )
+        g = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=True)
+        mask = sample_vertex_mask(g, ['S1'])
+        assert {v['name'][2] for v, m in zip(g.vs, mask) if m} == {'S1', GROUND_TRUTH_SAMPLE}
+        assert not any(m for v, m in zip(g.vs, sample_vertex_mask(g, ['S1'], include_ground_truth=False))
+                       if v['name'][2] == GROUND_TRUTH_SAMPLE)
+        split = split_graph_by_sample(g)
+        assert list(split) == ['S1', 'S2']
+        for sample, sub in split.items():
+            assert {v['name'][2] for v in sub.vs} <= {sample, GROUND_TRUTH_SAMPLE}
+            # every edge stays inside one sample (or touches the ground truth)
+            assert all({sub.vs[e.source]['name'][2], sub.vs[e.target]['name'][2]} - {GROUND_TRUTH_SAMPLE}
+                       == {sample} for e in sub.es)
+        # cross-sample edges (delly S1 - sniffles S2, ...) are gone
+        assert sum(sub.ecount() for sub in split.values()) < g.ecount()
+
+    def test_outer_join_one_row_per_sample_with_shared_ground_truth(self):
+        bp_dict = _bps(
+            _row('delly', 'ev1', 100, 500, sample='S1'),
+            _row('delly', 'ev1', 100, 500, sample='S2'),
+            _row('sniffles', 'evA', 102, 502, sample='S1'),
+            _row('sniffles', 'evB', 102, 502, sample='S2'),
+            _row('gnomad', 'g1', 101, 501, sample=GROUND_TRUTH_SAMPLE),
+        )
+        out = outer_join_bps(bp_dict, ref_callset='gnomad', max_dist=10, ignore_size=True)
+        rows = sorted(zip(out[SAMPLE_ID_COL], out['delly_INFO_EVENT'], out['sniffles_INFO_EVENT'], out['gnomad_INFO_EVENT']))
+        assert rows == [('S1', 'ev1', 'evA', 'g1'), ('S2', 'ev1', 'evB', 'g1')]
+        assert 'delly_FORMAT_SAMPLE_ID' not in out.columns
+
+    def test_outer_join_keeps_unmatched_per_sample(self):
+        bp_dict = _bps(
+            _row('delly', 'ev1', 100, 500, sample='S1'),
+            _row('delly', 'ev9', 7000, 7500, sample='S2'),
+            _row('sniffles', 'evB', 102, 502, sample='S2'),
+            _row('gnomad', 'g1', 101, 501, sample=GROUND_TRUTH_SAMPLE),
+        )
+        out = outer_join_bps(bp_dict, ref_callset='gnomad', max_dist=10, ignore_size=True)
+        rows = sorted(
+            (smp, str(d), str(sn), str(gt))
+            for smp, d, sn, gt in zip(out[SAMPLE_ID_COL], out['delly_INFO_EVENT'], out['sniffles_INFO_EVENT'], out['gnomad_INFO_EVENT'])
+        )
+        # delly ev1 (S1) and sniffles evB (S2) are close but in different samples: never one row
+        assert rows == [('S1', 'ev1', '<NA>', 'g1'), ('S2', '<NA>', 'evB', 'g1'), ('S2', 'ev9', '<NA>', '<NA>')]
+
+    def test_single_sample_inner_join_unchanged_by_split(self):
+        bp_dict = _bps(
+            _row('delly', 'ev1', 100, 500),
+            _row('sniffles', 'evA', 102, 502),
+            _row('sniffles', 'evC', 3000, 3500),
+            _row('delly', 'ev3', 3001, 3501),
+            _row('gnomad', 'g1', 101, 501, sample=GROUND_TRUTH_SAMPLE),
+        )
+        out = inner_join_bps(bp_dict, ref_callset='gnomad', max_dist=10, ignore_size=True, ids_only=True)
+        assert list(out[SAMPLE_ID_COL]) == ['S1', 'S1']
+        assert sorted(zip(out['delly_INFO_EVENT'], out['sniffles_INFO_EVENT'])) == [('ev1', 'evA'), ('ev3', 'evC')]

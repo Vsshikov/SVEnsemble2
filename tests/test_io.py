@@ -310,3 +310,17 @@ class TestAtomicPath:
         with pytest.raises(TypeError):
             sv_io.write_model(Unpicklable(), tmp_path / sv_io.MODEL)
         assert list(tmp_path.iterdir()) == []
+
+
+def test_feature_matrix_round_trip_keeps_sample_index(tmp_path):
+    import pandas as pd
+
+    from svensemble import io as sv_io
+    from svensemble._constants import SAMPLE_ID_COL
+    X = pd.DataFrame(
+        {"f": [0.1, 0.2]},
+        index=pd.MultiIndex.from_tuples([("e1", "007"), ("e1", "S2")], names=["delly_INFO_EVENT", SAMPLE_ID_COL]),
+    )
+    back = sv_io.read_feature_matrix(sv_io.write_feature_matrix(X, tmp_path / "fm.csv"))
+    assert list(back.index.names) == ["delly_INFO_EVENT", SAMPLE_ID_COL]
+    assert list(back.index.get_level_values(SAMPLE_ID_COL)) == ["007", "S2"]

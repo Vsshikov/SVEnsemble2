@@ -21,6 +21,9 @@ TOPOLOGY_PREFIX = 'svensembletopology_'
 # VCF sample each parsed row was read from
 SAMPLE_ID_COL = 'FORMAT_SAMPLE_ID'
 
+# Placeholder sample of the ground truth (sites-only); matched within every sample
+GROUND_TRUTH_SAMPLE = '*'
+
 # Breakend labels
 BND1 = 'bnd1'
 BND2 = 'bnd2'
@@ -38,3 +41,6 @@ INV_EVENT_SUFFIXES = (INV_EVENT1_SUFFIX, INV_EVENT2_SUFFIX)
 
 # Suffix of model prediction columns, {training_set}_{model}_pred
 PRED_SUFFIX = '_pred'
+
+# FORMAT field holding the SVEnsemble2 score in annotated caller VCFs
+SCORE_FIELD = 'SVENSSC'

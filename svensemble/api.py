@@ -11,9 +11,11 @@ or a fitted model; none of them read or write files. Pair them with
     X, model_fit = api.train(matched, ["manta_diploid"], "unbiased_xgb", "manta_diploid")
     calls = api.predict(model_fit, X, matched, "unbiased_xgb", "manta_diploid")
 
-Ground truth, validation sets, benchmarking and SHAP are file-to-file:
-they take input paths and an ``output_dir`` and write the fixed filenames
-named in ``svensemble.io``. Argument names match the CLI flags.
+Ground truth, validation sets, benchmarking, SHAP and annotation are
+file-to-file: they take input paths and an ``output_dir`` and write the
+fixed filenames named in ``svensemble.io``. Argument names match the CLI
+flags. ``annotate`` also takes the calls DataFrame and orchestrates
+``svensemble.io`` (reading and writing) around the pure ``svensemble.annotate``.
 
 ``run`` chains every step for one sample, as ``svensemble run`` does. It
 takes input paths, metadata and an ``output_dir``; intermediates go to a
@@ -27,7 +29,8 @@ import shutil
 import sys
 import tempfile
 import time
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
+from contextlib import ExitStack
 from pathlib import Path
 
 import numpy as np
@@ -35,6 +38,7 @@ import pandas as pd
 
 from . import _config as sv_config
 from . import _provenance
+from . import annotate as sv_annotate
 from . import breakpoints as bps_mod
 from . import callset_specific
 from . import chunk_match
@@ -43,16 +47,17 @@ from . import matched_breakpoints as mbps
 from . import models
 from ._caller_params import CALLSET_PARAM_DICT
 from ._config import list_preset_ids
-from ._constants import PRED_SUFFIX
+from ._constants import PRED_SUFFIX, SAMPLE_ID_COL
 from .benchmark import run_single_callset_benchmark as benchmark_callset
 from .ground_truth import preprocess_ground_truth
+from .utils import atomic_path
 from .validation_sets import preprocess_validation_set
 
 __all__ = [
     "generate_config", "model_id", "list_preset_ids",
     "preprocess_raw", "preprocess", "match", "train", "predict",
     "preprocess_ground_truth", "preprocess_validation_set", "benchmark_callset", "shap",
-    "run", "SAVE_ARTIFACTS",
+    "annotate", "check_sample_sets", "run", "SAVE_ARTIFACTS",
 ]
 
 
@@ -166,19 +171,27 @@ def match(
     """Outer-join the callers' breakpoints with the ground truth.
 
     Args:
-        caller_bps: Processed breakpoints per caller name; not modified.
-        ground_truth_bps: Ground truth breakpoints (from preprocess_ground_truth).
+        caller_bps: Processed breakpoints per caller name; not modified. Each
+            must carry SAMPLE_ID_COL, and all must share one sample set.
+        ground_truth_bps: Ground truth breakpoints (from preprocess_ground_truth);
+            sample-less, given the GROUND_TRUTH_SAMPLE placeholder here.
         ground_truth_name: Ground truth set name; becomes its column prefix.
         model, model_config: Only the ``add_topology`` training param is used.
         max_dist: Maximum breakpoint distance for a match.
         insert_delta_threshold: Insert-size similarity threshold for a match.
         verbose: Print the callsets being matched.
     """
+    without_sample = [caller for caller, df in caller_bps.items() if SAMPLE_ID_COL not in df.columns]
+    if without_sample:
+        raise ValueError(f"Caller breakpoints without a {SAMPLE_ID_COL} column: {without_sample}")
+    _compare_sample_sets({
+        caller: set(df[SAMPLE_ID_COL].dropna().astype(str)) for caller, df in caller_bps.items()
+    })
     workflow_config = _workflow_config_anonymous_sample(
         callers=list(caller_bps), model_name=model, model_config=model_config,
         ground_truth_name=ground_truth_name,
     )
-    bp_df_dict = {**caller_bps, ground_truth_name: ground_truth_bps}
+    bp_df_dict = {**caller_bps, ground_truth_name: chunk_match.mark_ground_truth(ground_truth_bps)}
     if verbose:
         print(f"Matching breakpoints: {list(bp_df_dict.keys())}")
     return chunk_match.outer_join_bps(
@@ -315,6 +328,140 @@ def shap(
 
 
 # ---------------------------------------------------------------------------
+# Caller VCF inputs: sample checks and annotation
+# ---------------------------------------------------------------------------
+
+CallerVcfs = Mapping[str, Path | Sequence[Path]]
+"""Caller name -> one VCF/BCF path, or several (e.g. one per sample)."""
+
+_NA_LIKE_SAMPLES = frozenset({"", "NA", "N/A", "NaN", "nan", "None", "null", "NULL", "<NA>", "*"})
+
+
+def _as_path_tuples(caller_vcfs: CallerVcfs) -> dict[str, tuple[Path, ...]]:
+    """caller_vcfs with every value as a tuple of Paths."""
+    return {
+        caller: (Path(vcfs),) if isinstance(vcfs, (str, Path)) else tuple(Path(v) for v in vcfs)
+        for caller, vcfs in caller_vcfs.items()
+    }
+
+
+def _compare_sample_sets(sets_by_caller: Mapping[str, Collection[str]]) -> tuple[str, ...]:
+    """The one sample set shared by every caller that has samples.
+
+    Raises if callers differ, or if a name is one pandas would read back from
+    CSV as NaN (or the ground-truth placeholder '*'). Callers with no samples
+    are skipped. Returns the samples sorted.
+    """
+    with_samples = {caller: frozenset(s) for caller, s in sets_by_caller.items() if s}
+    bad = sorted({s for samples in with_samples.values() for s in samples} & _NA_LIKE_SAMPLES)
+    if bad:
+        raise ValueError(f"Sample names {bad} are reserved or read back as missing values; rename them")
+    distinct = set(with_samples.values())
+    if len(distinct) > 1:
+        detail = "; ".join(f"{caller}: {sorted(s)}" for caller, s in with_samples.items())
+        raise ValueError(f"Caller VCFs must share one sample set, got {detail}")
+    return tuple(sorted(next(iter(distinct)))) if distinct else ()
+
+
+def check_sample_sets(caller_vcfs: CallerVcfs) -> tuple[str, ...]:
+    """Samples shared by all caller VCFs, read from their #CHROM lines.
+
+    A caller's samples are the union over its files; a sample in two files of
+    one caller raises. Then _compare_sample_sets applies across callers.
+    """
+    sets_by_caller = {}
+    for caller, paths in _as_path_tuples(caller_vcfs).items():
+        per_file = {path: sv_io.parse_samples_from_vcf(path) for path in paths}
+        seen: dict[str, Path] = {}
+        for path, samples in per_file.items():
+            for sample in samples:
+                if sample in seen:
+                    raise ValueError(f"{caller}: sample {sample!r} in both {seen[sample]} and {path}")
+                seen[sample] = path
+        sets_by_caller[caller] = set(seen)
+    return _compare_sample_sets(sets_by_caller)
+
+
+def _calls_with_samples(calls: pd.DataFrame, samples: tuple[str, ...]) -> pd.DataFrame:
+    """Calls carrying SAMPLE_ID_COL, checked against the VCFs' samples.
+
+    Calls written before the sample key existed have no SAMPLE_ID_COL; they
+    come from single-sample runs, so they are accepted only when the VCFs have
+    exactly one sample, which they are then assigned to.
+    """
+    if SAMPLE_ID_COL not in calls.columns:
+        if len(samples) != 1:
+            raise ValueError(
+                f"Calls have no {SAMPLE_ID_COL} column, so they can only annotate single-sample "
+                f"VCFs; the VCFs have samples {list(samples)}"
+            )
+        return calls.assign(**{SAMPLE_ID_COL: samples[0]})
+    extra = sorted(set(calls[SAMPLE_ID_COL].dropna().astype(str)) - set(samples))
+    if extra:
+        raise ValueError(f"Calls have samples {extra} that are not in the caller VCFs {list(samples)}")
+    return calls
+
+
+def _check_annotatable(
+    paths: Mapping[str, tuple[Path, ...]], output_dir: Path,
+) -> tuple[tuple[str, ...], dict[str, tuple[Path, ...]]]:
+    """(run samples, output paths) after the checks that need only the VCFs.
+
+    Every caller needs an event-key rule, no input may be sites-only, sample
+    sets must agree (check_sample_sets) and output names must not collide.
+    """
+    for caller in paths:
+        sv_annotate.event_key_fn(caller)
+    samples = check_sample_sets(paths)
+    for caller, vcfs in paths.items():
+        for vcf in vcfs:
+            if not sv_io.parse_samples_from_vcf(vcf):
+                raise ValueError(f"{caller}: {vcf} is sites-only; a FORMAT field cannot be added")
+    out_paths = {
+        caller: tuple(Path(output_dir) / sv_io.annotated_vcf_name(caller, p) for p in vcfs)
+        for caller, vcfs in paths.items()
+    }
+    flat = [p for ps in out_paths.values() for p in ps]
+    if len(set(flat)) != len(flat):
+        raise ValueError(f"Annotated output names collide: {sorted(map(str, flat))}")
+    return samples, out_paths
+
+
+def annotate(calls: pd.DataFrame, caller_vcfs: CallerVcfs, output_dir: Path) -> dict[str, tuple[Path, ...]]:
+    """Copies of the caller VCFs/BCFs with the ensemble score as FORMAT SVENSSC.
+
+    Records are edited as text or BCF bytes, never re-serialised, so each
+    output differs from its input only by the SVENSSC header line and field.
+    Everything is validated before anything is written, and the outputs are
+    all-or-nothing: if any file fails, none appears.
+
+    Args:
+        calls: Ensemble calls as predict returns them (or io.read_calls).
+        caller_vcfs: Caller name -> VCF/BCF path(s), as for run.
+        output_dir: Where io.ANNOTATED_VCF files go (created if missing).
+
+    Returns:
+        Caller name -> annotated paths, in input order.
+    """
+    paths = _as_path_tuples(caller_vcfs)
+    sv_annotate.pred_column(calls)
+    for caller in paths:
+        if f"{caller}_INFO_EVENT" not in calls.columns:
+            raise KeyError(f"Calls have no {caller}_INFO_EVENT column; was {caller!r} part of this model?")
+    samples, out_paths = _check_annotatable(paths, output_dir)
+    calls = _calls_with_samples(calls, samples)
+
+    with ExitStack() as stack:
+        for caller, vcfs in paths.items():
+            for vcf, out in zip(vcfs, out_paths[caller]):
+                tmp = stack.enter_context(atomic_path(out))
+                with sv_io.open_variant_file(vcf) as (kind, compressed, header, body):
+                    codec = sv_annotate.annotate_bcf if kind == "bcf" else sv_annotate.annotate_text
+                    sv_io.write_annotated(codec(header, body, caller, calls), tmp, compressed)
+    return out_paths
+
+
+# ---------------------------------------------------------------------------
 # End-to-end run
 # ---------------------------------------------------------------------------
 
@@ -324,7 +471,7 @@ SAVE_ARTIFACTS = frozenset({"model", "feature_matrix", "matched_bps", "ground_tr
 
 def run(
     sample: str,
-    caller_vcfs: Mapping[str, Path],
+    caller_vcfs: CallerVcfs,
     ref: Path,
     model: str,
     output_dir: Path,
@@ -340,6 +487,7 @@ def run(
     save: Collection[str] = (),
     workdir: Path | None = None,
     keep_workdir: bool = False,
+    annotate_vcfs: bool = False,
     command: str | None = None,
     verbose: bool = False,
 ) -> dict[str, Path]:
@@ -364,7 +512,9 @@ def run(
 
     Args:
         sample: Sample name; used in the VCF outputs.
-        caller_vcfs: Caller name -> caller VCF.
+        caller_vcfs: Caller name -> caller VCF, or several (e.g. one per
+            sample); each caller's files are parsed and concatenated. Sample
+            names must agree across callers (check_sample_sets).
         ref: Reference FASTA. Reserved for VCF writing; currently unused
             apart from the provenance record.
         model, training_set, model_config: As for train/predict.
@@ -381,6 +531,9 @@ def run(
         max_dist, insert_delta_threshold: Passed to match.
         save: Subset of SAVE_ARTIFACTS to write to output_dir.
             ``"ground_truth"`` requires ground_truth_vcf.
+        annotate_vcfs: Also write each caller VCF annotated with the ensemble
+            score (see annotate) to output_dir. Inputs are checked for this
+            before any other work.
         command: The invoking command line, recorded in the provenance record
             (the CLI passes it; API callers usually leave it None).
         verbose: Print progress messages.
@@ -388,9 +541,14 @@ def run(
     Returns:
         ``calls_csv`` and ``calls_vcf``, plus for each saved artifact
         ``model``, ``feature_matrix``, ``matched_bps``, ``ground_truth`` and
-        ``<caller>.bps`` / ``<caller>.vcf``.
+        ``<caller>.bps`` / ``<caller>.vcf``; with *annotate_vcfs*,
+        ``<caller>.annotated_vcf`` (``<caller>.annotated_vcf.<k>`` when the
+        caller has several files).
     """
-    caller_vcfs = {caller: Path(vcf).resolve() for caller, vcf in dict(caller_vcfs).items()}
+    caller_vcfs = {
+        caller: tuple(p.resolve() for p in paths)
+        for caller, paths in _as_path_tuples(caller_vcfs).items()
+    }
     if not caller_vcfs:
         raise ValueError("caller_vcfs is empty; give at least one caller VCF.")
     save = frozenset(save)
@@ -404,6 +562,10 @@ def run(
 
     ref = Path(ref).resolve()
     output_dir = Path(output_dir).resolve()
+    if annotate_vcfs:
+        samples, _ = _check_annotatable(caller_vcfs, output_dir)
+    else:
+        samples = check_sample_sets(caller_vcfs)
     ground_truth_vcf = Path(ground_truth_vcf).resolve() if ground_truth_vcf is not None else None
     ground_truth_bps = Path(ground_truth_bps).resolve() if ground_truth_bps is not None else None
     resolved_model = _resolve_model(model, model_config)
@@ -429,9 +591,11 @@ def run(
             "workdir": scratch,
             "workdir_is_tmp": owned,
             "keep_workdir": keep_workdir,
+            "annotate_vcfs": annotate_vcfs,
+            "samples": list(samples),
         },
         inputs={
-            "caller_vcfs": {c: _provenance.file_info(v) for c, v in caller_vcfs.items()},
+            "caller_vcfs": {c: [_provenance.file_info(v) for v in vs] for c, vs in caller_vcfs.items()},
             "ref": _provenance.file_info(ref),
             "ground_truth_vcf": _provenance.file_info(ground_truth_vcf),
             "ground_truth_bps": _provenance.file_info(ground_truth_bps),
@@ -453,7 +617,8 @@ def run(
             ground_truth_bps=ground_truth_bps, ground_truth_name=ground_truth_name,
             force_preprocess_ground_truth=force_preprocess_ground_truth,
             model_config=model_config, max_dist=max_dist,
-            insert_delta_threshold=insert_delta_threshold, save=save, verbose=verbose,
+            insert_delta_threshold=insert_delta_threshold, save=save,
+            annotate_vcfs=annotate_vcfs, verbose=verbose,
         )
         return outputs
     except BaseException as e:
@@ -478,7 +643,7 @@ def _run_in(
     output_dir: Path,
     *,
     sample: str,
-    caller_vcfs: dict[str, Path],
+    caller_vcfs: dict[str, tuple[Path, ...]],
     ref: Path,
     model: str,
     training_set: str,
@@ -490,6 +655,7 @@ def _run_in(
     max_dist: int,
     insert_delta_threshold: float,
     save: frozenset[str],
+    annotate_vcfs: bool,
     verbose: bool,
 ) -> dict[str, Path]:
     """The body of run: every step, reading each artifact back from its file.
@@ -502,9 +668,10 @@ def _run_in(
 
     published = {}
     caller_bps = {}
-    for caller, vcf in caller_vcfs.items():
+    for caller, vcfs in caller_vcfs.items():
+        vcf_df = pd.concat([sv_io.read_vcf(vcf, caller) for vcf in vcfs], ignore_index=True)
         raw_path = sv_io.write_bps(
-            preprocess_raw(sv_io.read_vcf(vcf, caller), caller, verbose=verbose),
+            preprocess_raw(vcf_df, caller, verbose=verbose),
             scratch / "preprocess_raw" / sv_io.RAW_BPS.format(caller=caller),
         )
         bps_path, vcf_path = sv_io.write_callset(
@@ -557,6 +724,12 @@ def _run_in(
         print(f"[run] done. calls -> {calls_csv}")
 
     outputs = {"calls_csv": calls_csv, "calls_vcf": calls_vcf, **published}
+    if annotate_vcfs:
+        for caller, paths in annotate(calls, caller_vcfs, output_dir).items():
+            if len(paths) == 1:
+                outputs[f"{caller}.annotated_vcf"] = paths[0]
+            else:
+                outputs.update({f"{caller}.annotated_vcf.{k}": path for k, path in enumerate(paths)})
     for artifact, path in (("matched_bps", matched_path), ("model", model_path),
                            ("feature_matrix", fm_path)):
         if artifact in save:

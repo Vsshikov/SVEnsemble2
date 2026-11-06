@@ -30,16 +30,23 @@ File I/O for SVEnsemble2: every pipeline filename and every read/write.
 """
 
 import copy
+import gzip
 import json
 import pickle
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from io import TextIOWrapper
 from pathlib import Path
+from typing import BinaryIO, TextIO
 
 import numpy as np
 import pandas as pd
-from pysam import VariantFile
+from pysam import BGZFile, VariantFile
 
+from . import annotate as sv_annotate
 from . import vcfwrite
 from ._caller_params import CALLSET_PARAM_DICT
+from ._constants import SAMPLE_ID_COL
 from .utils import atomic_path
 from .vcfparse import parse_vcf_to_df
 
@@ -58,13 +65,14 @@ BENCHMARK_CSV = "{caller}.benchmark.csv"
 SHAP_SUMMARY = "shap_summary.csv"
 SHAP_VALUES = "shap_values.pkl"
 RUN_PROVENANCE = "svensemble_run.json"
+ANNOTATED_VCF = "{caller}.{stem}.svensemble2{ext}"
 
 REQUIRED_KEYS = {"sample_name"}
 
 
 # -- Pipeline artifacts -----------------------------------------------------
 
-def read_vcf(path: Path, caller: str, sample_name: str | None = None) -> pd.DataFrame:
+def read_vcf(path: Path, caller: str, sample_names: str | list[str] | None = None) -> pd.DataFrame:
     """Parse a caller's VCF/BCF into a DataFrame (the input to api.preprocess_raw).
 
     Columns are chosen by the caller's CALLSET_PARAM_DICT entry.
@@ -72,21 +80,26 @@ def read_vcf(path: Path, caller: str, sample_name: str | None = None) -> pd.Data
     Args:
         path: VCF/BCF path.
         caller: Callset name (a key of _caller_params.CALLSET_PARAM_DICT).
-        sample_name: Sample whose FORMAT fields to read, for callers that
-            parse FORMAT. Defaults to the first sample in the header.
+        sample_names: Sample(s) to read, one row per (record, sample).
+            Defaults to every sample in the header.
     """
     try:
         params = copy.deepcopy(CALLSET_PARAM_DICT[caller])
     except KeyError:
         raise KeyError(f"Unknown caller {caller!r}: no CALLSET_PARAM_DICT entry") from None
     with VariantFile(str(path)) as vcf:
-        vcf_df, _ = parse_vcf_to_df(vcf, params, sample_name=sample_name)
+        vcf_df, _ = parse_vcf_to_df(vcf, params, sample_names=sample_names)
     return vcf_df
 
 
 def read_bps(path: Path) -> pd.DataFrame:
-    """Read any breakpoint CSV: raw, processed, matched or ground truth."""
-    return pd.read_csv(path, low_memory=False)
+    """Read any breakpoint CSV: raw, processed, matched or ground truth.
+
+    Sample columns are read as text, so digit-only sample names stay names.
+    """
+    cols = pd.read_csv(path, nrows=0).columns
+    sample_cols = {c: str for c in cols if c.endswith(SAMPLE_ID_COL)}
+    return pd.read_csv(path, low_memory=False, dtype=sample_cols)
 
 
 def write_bps(bp_df: pd.DataFrame, path: Path) -> Path:
@@ -110,12 +123,12 @@ def write_callset(bp_df: pd.DataFrame, out_dir: Path, caller: str, sample: str) 
 
 
 def read_feature_matrix(path: Path) -> pd.DataFrame:
-    """Read a feature matrix and restore its ``<callset>_INFO_EVENT`` index.
+    """Read a feature matrix and restore its ``<callset>_INFO_EVENT`` (+ sample) index.
 
     The index columns map each row back to its matched breakpoints, so a
     matrix without them is rejected rather than silently re-indexed.
     """
-    X = pd.read_csv(path, low_memory=False)
+    X = pd.read_csv(path, low_memory=False, dtype={SAMPLE_ID_COL: str})
     index_cols = [c for c in X.columns if c.endswith("_INFO_EVENT")]
     if not index_cols:
         raise ValueError(
@@ -124,6 +137,8 @@ def read_feature_matrix(path: Path) -> pd.DataFrame:
             f"written by the training step; their absence indicates a broken or truncated "
             f"feature matrix. Found columns: {list(X.columns)[:20]}{'...' if len(X.columns) > 20 else ''}"
         )
+    if SAMPLE_ID_COL in X.columns:
+        index_cols.append(SAMPLE_ID_COL)
     return X.set_index(index_cols)
 
 
@@ -150,15 +165,113 @@ def write_model(model_fit, path: Path) -> Path:
 
 
 def write_calls(calls_df: pd.DataFrame, out_dir: Path, sample: str) -> tuple[Path, Path]:
-    """Write ensemble calls as CALLS_CSV (with index) plus CALLS_VCF in *out_dir*."""
+    """Write ensemble calls as CALLS_CSV (with index) plus CALLS_VCF in *out_dir*.
+
+    The VCF has one record per SV and the score as FORMAT SVENSSC for each
+    sample in FORMAT_SAMPLE_ID (*sample* names the column of calls without one).
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / CALLS_CSV
     vcf_path = out_dir / CALLS_VCF
     with atomic_path(csv_path) as tmp:
         calls_df.to_csv(tmp, index=True)
-    vcfwrite.write_vcf(calls_df, vcf_path, source="svensemble2", sample_name=sample)
+    vcfwrite.write_vcf(
+        calls_df, vcf_path, source="svensemble2", sample_name=sample,
+        score_col=sv_annotate.pred_column(calls_df),
+    )
     return csv_path, vcf_path
+
+
+def read_calls(path: Path) -> pd.DataFrame:
+    """Read CALLS_CSV with event and sample columns as text.
+
+    Text dtype keeps digit-only sample names and event IDs from turning into
+    numbers; event IDs already float-ified upstream ('21.0') are normalised by
+    annotate. NA-like sample names are rejected before any run, so default NA
+    handling is safe here.
+    """
+    cols = pd.read_csv(path, nrows=0).columns
+    text_cols = [c for c in cols if c.endswith("_INFO_EVENT") or c == SAMPLE_ID_COL]
+    return pd.read_csv(path, index_col=0, low_memory=False, dtype={c: str for c in text_cols})
+
+
+# -- Caller VCFs as raw text or BCF records (annotation) --------------------
+
+_VCF_EXTS = (".vcf.gz", ".vcf.bgz", ".vcf", ".bcf")
+
+
+def split_vcf_name(path: Path) -> tuple[str, str]:
+    """(stem, extension) of a VCF/BCF file name, e.g. ('s1.delly', '.vcf.gz')."""
+    name = Path(path).name
+    for ext in _VCF_EXTS:
+        if name.endswith(ext):
+            return name[: -len(ext)], ext
+    raise ValueError(f"{path}: expected one of {_VCF_EXTS}")
+
+
+def annotated_vcf_name(caller: str, path: Path) -> str:
+    """ANNOTATED_VCF for one input, keeping the input's extension."""
+    stem, ext = split_vcf_name(path)
+    return ANNOTATED_VCF.format(caller=caller, stem=stem, ext=ext)
+
+
+def _is_gzip(path: Path) -> bool:
+    with open(path, "rb") as fh:
+        return fh.read(2) == b"\x1f\x8b"
+
+
+def _read_text_header(fh: TextIO) -> list[str]:
+    """Header lines up to and including #CHROM; fh is left at the first record."""
+    lines = []
+    for line in fh:
+        lines.append(line)
+        if line.startswith("#CHROM"):
+            return lines
+        if not line.startswith("##"):
+            break
+    raise ValueError("No #CHROM line before the first record")
+
+
+@contextmanager
+def open_variant_file(path: Path) -> Iterator[tuple[str, bool, list[str], Iterable]]:
+    """Open a caller VCF/BCF for annotation without parsing records.
+
+    Yields (kind, compressed, header_lines, body): kind is 'vcf' or 'bcf';
+    body iterates raw text lines (endings kept, undecodable bytes preserved
+    via surrogateescape) or BCF (shared, per-sample) record blocks.
+    """
+    path = Path(path)
+    compressed = _is_gzip(path)
+    raw: BinaryIO = gzip.open(path, "rb") if compressed else open(path, "rb")
+    try:
+        kind = "bcf" if raw.peek(3)[:3] == b"BCF" else "vcf"
+        if kind == "bcf":
+            yield kind, compressed, sv_annotate.read_bcf_header(raw), sv_annotate.iter_bcf_records(raw)
+            return
+        text = TextIOWrapper(raw, encoding="utf-8", errors="surrogateescape", newline="")
+        yield kind, compressed, _read_text_header(text), text
+    finally:
+        raw.close()
+
+
+def parse_samples_from_vcf(path: Path) -> list[str]:
+    """Sample names from a VCF/BCF header (empty for a sites-only file)."""
+    with open_variant_file(path) as (_kind, _compressed, header, _body):
+        chrom = next(line for line in header if line.startswith("#CHROM"))
+        return sv_annotate.split_line_ending(chrom)[0].split("\t")[9:]
+
+
+def write_annotated(chunks: Iterable[str | bytes], path: Path, compress: bool) -> Path:
+    """Write annotated text lines or BCF bytes to *path*, BGZF-compressed if *compress*.
+
+    *path* is written directly: callers wrap it in utils.atomic_path.
+    """
+    opener = (lambda: BGZFile(str(path), "wb")) if compress else (lambda: open(path, "wb"))
+    with opener() as out:
+        for chunk in chunks:
+            out.write(chunk if isinstance(chunk, bytes) else chunk.encode("utf-8", "surrogateescape"))
+    return Path(path)
 
 # -- Tagged envelope (Kombu/Celery convention) ------------------------------
 

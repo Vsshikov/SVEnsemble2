@@ -308,7 +308,7 @@ def manta_preprocess_common(manta_df: pd.DataFrame, caller_params: dict|None = N
     # Drop INFO_POS2 as it does not contain information
     manta_df_ = manta_df_.drop(columns=['INFO_POS2'])
 
-    if caller_params['parse_format']:
+    if caller_params.get('format_cols'):
         # SAMPLE_SR and SAMPLE_PE are both columns of tuples with 2 values
         # First value corresponds to evidence of REF, second to evidence of ALT
         # We want to split these into 2 columns:

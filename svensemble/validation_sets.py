@@ -18,6 +18,7 @@ from . import io as sv_io
 from . import utils as sv_utils
 from . import _caller_params as caller_params
 from . import vcfparse as vcfp
+from ._constants import SAMPLE_ID_COL
 
 
 def load_truth_variants(ref_path):
@@ -108,7 +109,7 @@ def preprocess_hg002_val_set(raw_path, output_path, overwrite=False, long_val=Fa
         # Parse the input VCF file using the predefined caller parameters
         hg002_val_vcf = pysam.VariantFile(raw_path)
         hg002_val_vcf_df, hg002_val_vcf_meta = vcfp.parse_vcf_to_df(
-            hg002_val_vcf, caller_params=caller_params.HG002_PARAMS
+            hg002_val_vcf, caller_params=caller_params.HG002_PARAMS, sample_names=()
         )
 
         # Filter out entries with missing SVTYPE
@@ -264,7 +265,7 @@ def preprocess_hg00514_val_set(raw_path, output_path, overwrite=False):
     if not out_path.exists() or overwrite:
         hg00514_vcf = pysam.VariantFile(raw_path)
         hg00514_vcf_df, _ = vcfp.parse_vcf_to_df(
-            hg00514_vcf, caller_params=caller_params.HG00514_PARAMS
+            hg00514_vcf, caller_params=caller_params.HG00514_PARAMS, sample_names=()
         )
 
         # Filter to HG00514 sample and canonical SV types only
@@ -325,8 +326,10 @@ def preprocess_hgsvc2_val_set(raw_path, output_path, overwrite=False, sample_nam
         hgsvc2_df, _ = vcfp.parse_vcf_to_df(
             hgsvc2_vcf,
             caller_params=caller_params.HGSVC2_PARAMS,
-            sample_name=sample_name
+            sample_names=sample_name
         )
+        # A validation set is a sample-less truth reference
+        hgsvc2_df = hgsvc2_df.drop(columns=[SAMPLE_ID_COL])
 
         # Filter to records where the sample carries at least one ALT allele
         hgsvc2_df = hgsvc2_df[
@@ -371,7 +374,9 @@ def preprocess_huddleston_val_set(raw_path, output_path, overwrite=False):
     out_path = Path(output_path)
 
     if not out_path.exists() or overwrite:
-        huddleston_vcf_df, huddleston_vcf_df_meta  = vcfp.parse_vcf_to_df(pysam.VariantFile(raw_path), caller_params=caller_params.HUDDLESTON_PARAMS, sample_name='huddleston')
+        huddleston_vcf_df, huddleston_vcf_df_meta  = vcfp.parse_vcf_to_df(pysam.VariantFile(raw_path), caller_params=caller_params.HUDDLESTON_PARAMS, sample_names='huddleston')
+        # A validation set is a sample-less truth reference
+        huddleston_vcf_df = huddleston_vcf_df.drop(columns=[SAMPLE_ID_COL])
         huddleston_vcf_df.loc[:, 'INFO_SVLEN'] = huddleston_vcf_df['INFO_SVLEN'].str[0]
         # Replace all strings in INFO_SVTYPE using the mapping dictionary from caller_params.HUDDLESTON_PARAMS
         mapping = caller_params.HUDDLESTON_PARAMS['svtype_mapping']
