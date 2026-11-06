@@ -9,7 +9,7 @@ import re
 from typing import List
 
 from . import utils
-from ._constants import BND1, BND2
+from ._constants import BND1, BND2, SAMPLE_ID_COL
 
 _BND_PATTERN = re.compile(
         r'(?P<inserted_seq1>[ACGTN]+)?'  # Optional inserted sequence before breakend
@@ -78,6 +78,8 @@ def bnd_to_bp(
             - CHROM: Chromosome name
             - POS: Position
             - INFO_EVENT: Event ID linking breakend pairs
+            - SAMPLE_ID_COL (optional): with it, breakends pair within one
+              sample, so a joint-called record yields one breakpoint per sample
             - Other columns will be preserved and renamed with _bnd1/_bnd2 suffixes
         force_diff_cols: Optional list of column names to treat as different between
             breakend pairs, even if values are identical. These columns will always
@@ -100,10 +102,11 @@ def bnd_to_bp(
     # Generate chromosome keys for sorting
     chrom_key_dict = utils.generate_chrom_key_dict(bnd_df['CHROM'])
 
-    # Split into first/second breakends
-    grsizes = bnd_df.groupby('INFO_EVENT').transform('size')
+    # Split into first/second breakends; a pair shares its event and sample
+    pair_keys = ['INFO_EVENT'] + ([SAMPLE_ID_COL] if SAMPLE_ID_COL in bnd_df.columns else [])
+    grsizes = bnd_df.groupby(pair_keys)['INFO_EVENT'].transform('size')
     sorted_bnds = (bnd_df[grsizes == 2]
-                   .sort_values(['INFO_EVENT', 'CHROM', 'POS'],
+                   .sort_values(pair_keys + ['CHROM', 'POS'],
                               key=lambda x: utils.get_chrom_keys(x, chrom_keys=chrom_key_dict))
                    .reset_index(drop=True))
 
@@ -119,6 +122,8 @@ def bnd_to_bp(
 
     same_cols = bnd1.columns[same_cols_mask]
     diff_cols = bnd1.columns[~same_cols_mask]
+    if SAMPLE_ID_COL in bnd1.columns and len(bnd1) and SAMPLE_ID_COL not in same_cols:
+        raise AssertionError(f"Breakend pairs disagree on {SAMPLE_ID_COL}")
 
     # Rename columns to indicate which breakend they came from
     bnd1_col_rename = {
