@@ -16,8 +16,7 @@ SVEnsemble2 combines the structural variant (SV) calls of several short-read cal
 or more samples into a single scored callset. No pretrained model is shipped. A model is
 trained on the run's own calls and then scores those same calls.
 
-1. **Parse.** Each caller's VCF is parsed into breakpoint pairs and normalised, one row per
-   record and sample (see [Samples](#samples)).
+1. **Parse.** Each caller's VCF is parsed into breakpoint pairs and normalised.
 2. **Label.** A population SV reference (gnomAD-SV) is filtered to breakpoints.
 3. **Match.** Breakpoints from all callers and the reference are joined by position and
    insert-size similarity, within each sample. A call that matches the reference is
@@ -34,7 +33,7 @@ trained on the run's own calls and then scores those same calls.
 |---|---|
 | `unbiased_rf` | Random forest trained with PU class weights |
 | `unbiased_xgb` | XGBoost trained with PU class weights, with native missing-value handling |
-| `consensus` | Simple majority voting. |
+| `consensus` | Simple majority voting |
 
 The `unbiased_*` models first estimate the label frequency c = p(labelled | real SV) on a
 held-out 20% split, using the estimator of Elkan & Noto (2008). They then weight the classes
@@ -53,7 +52,7 @@ Requires Python >= 3.12 on Linux or macOS.
   (Singularity/Apptainer: https://depot.galaxyproject.org/singularity/<name>:<version>)
 -->
 
-## With Nix
+### With Nix
 
 This repository is a flake, so SVEnsemble2 can be run with
 
@@ -102,10 +101,9 @@ svensemble run \
   --annotate_vcfs
 ```
 
-The scored calls are written to `results/svensemble2_calls.csv` and `.vcf`. The two caller
-VCFs must name their sample column the same (see [Samples](#samples)). To get only the calls
-VCF at a path of your choice, replace `--output_dir results/` with
-`--output_vcf results/calls.svensemble2.vcf.gz`.
+The scored calls are written to `results/svensemble2_calls.csv` and `.vcf`, and copies of the
+two caller VCFs with the score added to `results/`. To write only the calls VCF, to a path of
+your choice:
 
 ```bash
 svensemble run \
@@ -130,7 +128,7 @@ Inputs to `svensemble run`:
 | `--ground_truth_bps` | one of these two | Ground truth already processed by `svensemble ground-truth`, to reuse across samples |
 | `--model` | yes | `unbiased_rf`, `unbiased_xgb` or `consensus`, see [Models](#models) |
 | `--output_dir` | one or both of these two | Directory for the calls CSV and VCF, the provenance record and any `--save_*` / `--annotate_vcfs` outputs; created if missing |
-| `--output_vcf` | one or both of these two | Write the calls VCF to exactly this path (`.vcf` or `.vcf.gz`). With it alone, nothing else is written |
+| `--output_vcf` | one or both of these two | Write the calls VCF to exactly this path (`.vcf` or `.vcf.gz`) |
 | `--annotate_vcfs` | no | Also write a copy of each caller VCF with the score added, see [Output](#output). Needs `--output_dir` |
 | `--save_model`, `--save_feature_matrix`, `--save_matched_bps`, `--save_ground_truth`, `--save_callsets` | no | Also write that intermediate to `--output_dir` |
 | `--workdir` | no | Keep intermediates in this directory. By default they go to a temporary directory that is deleted after a successful run |
@@ -151,32 +149,9 @@ Inputs to `svensemble run`:
 
 ### Samples
 
-Every caller VCF is read per sample: each record gives one row per sample column, keyed by
-the sample's name in the `#CHROM` line, so the samples are taken from the VCF headers. One run can score one sample or several, from
-joint-called multi-sample VCFs or from one file per sample.
-
-Requirements:
-
-- **Header.** Every caller VCF has a `FORMAT` column and at least one sample column
-  (`#CHROM ... INFO FORMAT S1 [S2 ...]`). Sites-only caller VCFs are rejected.
-- **Same names.** All callers in a run carry the same set of sample names, compared exactly.
-  Callers often name the same sample differently (in our test data Delly writes
-  `NA12878.sorted` and Manta `SAMPLE1`), so rename the columns first, e.g. with
-  `bcftools reheader --samples`. The Nextflow pipeline does this in its
-  `FORCESAMPLENAMES` step.
-- **One file per sample.** When a caller is given several files, each sample appears in only
-  one of them.
-- **Reserved names.** Sample names that read back as missing values (`NA`, `nan`, `None`,
-  `null`, ...) and `*` are rejected.
-- **FORMAT fields.** The per-sample features of each caller (e.g. Delly `GT`, `GQ`, `RC`,
-  `DR`, `DV`; Manta `FT`, `GQ`, `PR`, `SR`) are read from the row's own sample. A field
-  missing from a record is a missing value. duphold's `DHFC`, `DHBFC` and `DHFFC` FORMAT
-  fields and its `GCF` INFO field are also read per sample when the header defines them.
-- **Ground truth.** The ground truth is a sample-less sites set (gnomAD-SV) and applies to
-  every sample. It must not have a sample column.
-
-Breakpoints are paired, matched and turned into features within each sample. One model is
-trained on the rows of all samples, and every SV gets a score in each sample.
+Samples are read from the caller VCFs. Each sample must be named in the `#CHROM` header line
+and have its own column after `FORMAT`. Sample names must be the same in every caller VCF of
+a run.
 
 ## Output
 
@@ -194,34 +169,19 @@ not also given, it is the only file written.
 The score column is named `{training_set}_{model_id}_pred`, where `training_set` is the
 callers sorted and joined with `+` (e.g. `delly+manta_diploid`).
 
-The calls VCF:
+In the calls VCF, DEL, DUP, INS and INV are written as symbolic-allele records (`SVTYPE`,
+`END`, `SVLEN`, `CIPOS`/`CIEND`), other SVs as BND pairs linked by `MATEID` and `EVENT`. INFO
+is shared by all samples; `SVENSSC` is `.` for a sample without the SV. The header records
+`##svensemble_version`, `##svensemble_model_id` and `##svensemble_command`.
 
-- **Records.** DEL, DUP, INS and INV are symbolic-allele records (`SVTYPE`, `END`, `SVLEN`,
-  and `CIPOS`/`CIEND` when known). Other SVs are BND pairs linked by `MATEID` and `EVENT`.
-- **INFO and FORMAT.** INFO is shared by all samples. `SVENSSC` is per sample, and is missing
-  (`.`) for a sample without that SV.
-- **Header.** It records `##svensemble_version`, `##svensemble_model_id` and
-  `##svensemble_command`.
-
-`--annotate_vcfs` also writes, to `--output_dir`, a copy of each input caller VCF/BCF named
-`{caller}.{input file name without extension}.svensemble2.{vcf,vcf.gz,bcf}` (same format
-as the input):
-
-- **What changes.** A per-sample FORMAT field `SVENSSC` holds the record's score in that
-  sample. Records are edited as text, or as bytes for BCF, never re-encoded, so nothing else
-  in the file changes.
-- **Records without a score** get `.`. These are records the pipeline dropped, e.g.
-  single-sided BNDs.
-- **Inversions** that SVEnsemble2 splits into two events get the mean of the two scores.
-- **Separately.** The same is available on its own with
-  `svensemble annotate --calls svensemble2_calls.csv --callers ... --caller_vcfs ... --output_dir ...`.
+`--annotate_vcfs` also writes a copy of each caller VCF/BCF,
+`{caller}.{input name}.svensemble2.{vcf,vcf.gz,bcf}`, with the score added as FORMAT
+`SVENSSC`; nothing else in the file changes. Records SVEnsemble2 dropped (e.g. single-sided
+BNDs) get `.`, and inversions split into two events get the mean of their scores.
+`svensemble annotate` does the same for an existing calls CSV.
 
 <!-- TODO: how to choose a score threshold; the key output columns / INFO fields. -->
 We recommend
-
-Intermediate files (parsed and normalised breakpoints per caller, matched breakpoints,
-trained model and feature matrix) are kept under `--workdir` when it is given, and can be
-copied to `--output_dir` with the `--save_*` flags.
 
 ## Usage
 
