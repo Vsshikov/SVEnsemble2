@@ -19,11 +19,12 @@ from . import utils as sv_utils
 from ._constants import PRED_SUFFIX, SAMPLE_ID_COL
 
 
-def _select_sample(bps_df: pd.DataFrame, sample: str | None) -> pd.DataFrame:
-    """The rows of one sample, so a benchmark never mixes samples.
+def _select_sample(bps_df: pd.DataFrame, sample: str | None) -> tuple[pd.DataFrame, str | None]:
+    """The rows of one sample and its name, so a benchmark never mixes samples.
 
-    With *sample* None the callset must hold exactly one sample; with a
-    sample given it must be present. Raises otherwise.
+    With *sample* None the callset must hold at most one sample; with a
+    sample given it must be present. Raises otherwise. The name is None only
+    for an empty callset.
     """
     if SAMPLE_ID_COL not in bps_df.columns:
         raise ValueError(f"Callset has no {SAMPLE_ID_COL} column; regenerate it with this version")
@@ -31,10 +32,24 @@ def _select_sample(bps_df: pd.DataFrame, sample: str | None) -> pd.DataFrame:
     if sample is None:
         if len(samples) > 1:
             raise ValueError(f"Callset has samples {samples}; choose one with sample=")
-        return bps_df
+        return bps_df, (samples[0] if samples else None)
     if sample not in samples:
         raise ValueError(f"Sample {sample!r} not in callset samples {samples}")
-    return bps_df[bps_df[SAMPLE_ID_COL].astype(str) == sample]
+    return bps_df[bps_df[SAMPLE_ID_COL].astype(str) == sample], sample
+
+
+def _as_sample(val_set: pd.DataFrame, sample: str) -> pd.DataFrame:
+    """Copy of val_set with SAMPLE_ID_COL set to *sample*.
+
+    The matcher only pairs breakpoints that share a sample name, and the
+    validation set's own name (if any) need not equal the callset's. Raises
+    if val_set names more than one sample.
+    """
+    if SAMPLE_ID_COL in val_set.columns:
+        val_samples = sorted(val_set[SAMPLE_ID_COL].dropna().astype(str).unique())
+        if len(val_samples) > 1:
+            raise ValueError(f"Validation set has samples {val_samples}; it must hold at most one")
+    return val_set.assign(**{SAMPLE_ID_COL: sample})
 
 
 def get_truth_count(
@@ -68,11 +83,11 @@ def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_mat
     FILTER_PASS column is returned only if it is present in the callset
     val_name is the validation set's CALLSET_PARAM_DICT key
     sample selects one sample of a multi-sample callset (see _select_sample);
-    the validation set is a sample-less truth reference matched within it.
+    the validation set is relabelled with that sample for matching (see _as_sample).
     """
     qual_metric = caller_params.CALLSET_PARAM_DICT[callset_name]['qual_metric']
-    callset_bps_ = _select_sample(callset_bps, sample).copy()
-    val_set_ = chunk_match.mark_ground_truth(val_set)
+    callset_bps_, sample = _select_sample(callset_bps, sample)
+    callset_bps_ = callset_bps_.copy()
 
     # Caller-specific operations go here
     if callset_name == 'manta_candidate':
@@ -100,17 +115,20 @@ def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_mat
             if i > 1000000:
                 raise ValueError(f'Too many temporary validation set names generated for {val_key}')
 
-    matched_ids = chunk_match.inner_join_bps(
-        bp_df_dict={
-            callset_name: callset_bps_,
-            val_key: val_set_
-        },
-        max_dist=val_match_margin,
-        insert_delta_threshold=val_match_insert_delta_threshold,
-        ids_only=True,
-        ignore_size=False
-    )
-    callset_bps_.loc[:, 'is_in_val'] = callset_bps_['INFO_EVENT'].astype(str).isin(matched_ids[f'{callset_name}_INFO_EVENT'])
+    matched = []
+    if not callset_bps_.empty:  # an empty callset has no sample to name the validation set with
+        matched_ids = chunk_match.inner_join_bps(
+            bp_df_dict={
+                callset_name: callset_bps_,
+                val_key: _as_sample(val_set, sample)
+            },
+            max_dist=val_match_margin,
+            insert_delta_threshold=val_match_insert_delta_threshold,
+            ids_only=True,
+            ignore_size=False
+        )
+        matched = matched_ids[f'{callset_name}_INFO_EVENT']
+    callset_bps_.loc[:, 'is_in_val'] = callset_bps_['INFO_EVENT'].astype(str).isin(matched)
     cols_to_keep = ['INFO_EVENT', qual_metric, 'is_in_val']
     if 'FILTER_PASS' in callset_bps_.columns:
         cols_to_keep.append('FILTER_PASS')
@@ -124,8 +142,8 @@ def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_mat
 
 
 def validate_svensemble2_predictions(svensemble2_bps, val_set, val_name, training_set_name=None, model_name=None, pred_col=None, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True, sample: str | None = None):
-    svens_calls_ = _select_sample(svensemble2_bps, sample).copy()
-    val_set_ = chunk_match.mark_ground_truth(val_set)
+    svens_calls_, sample = _select_sample(svensemble2_bps, sample)
+    svens_calls_ = svens_calls_.copy()
 
     # Resolve the single prediction column. Callers may pass it explicitly,
     # supply training_set_name + model_name to reconstruct it, or rely on
@@ -160,18 +178,20 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, val_name, trainin
             if i > 1000000:
                 raise ValueError(f'Too many temporary validation set names generated for {val_key}')
 
-    matched_ids = chunk_match.inner_join_bps(
-        bp_df_dict={
-            'svensemble2': svens_calls_,
-            val_key: val_set_
-        },
-        max_dist=val_match_margin,
-        insert_delta_threshold=val_match_insert_delta_threshold,
-        ids_only=True,
-        ignore_size=False
-    )
-
-    svens_calls_.loc[:, 'is_in_val'] = svens_calls_['INFO_EVENT'].astype(str).isin(matched_ids['svensemble2_INFO_EVENT'])
+    matched = []
+    if not svens_calls_.empty:  # an empty callset has no sample to name the validation set with
+        matched_ids = chunk_match.inner_join_bps(
+            bp_df_dict={
+                'svensemble2': svens_calls_,
+                val_key: _as_sample(val_set, sample)
+            },
+            max_dist=val_match_margin,
+            insert_delta_threshold=val_match_insert_delta_threshold,
+            ids_only=True,
+            ignore_size=False
+        )
+        matched = matched_ids['svensemble2_INFO_EVENT']
+    svens_calls_.loc[:, 'is_in_val'] = svens_calls_['INFO_EVENT'].astype(str).isin(matched)
     cols_to_keep = ['INFO_EVENT', pred_col, 'is_in_val']
     if 'INFO_INFERRED_SVTYPE' in svens_calls_.columns:
         cols_to_keep.append('INFO_INFERRED_SVTYPE')
