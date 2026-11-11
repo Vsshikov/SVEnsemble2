@@ -29,6 +29,7 @@ import pytest
 
 from svensemble.vcfwrite import (
     _build_header,
+    _alt_insert_lengths,
     _get_ins_svlen,
     _has_ci,
     _strip_inv_event_suffix,
@@ -223,27 +224,33 @@ class TestHasCi:
 # _get_ins_svlen
 # ---------------------------------------------------------------------------
 
+def _ins_svlen(row: dict):
+    """Call _get_ins_svlen with the ALT insert length parsed as write_vcf parses it."""
+    return _get_ins_svlen(row, int(_alt_insert_lengths(pd.Series([row['ALT_bnd1']]))[0]))
+
+
 class TestGetInsSvlen:
     def test_uses_info_svlen_when_positive(self):
-        row = pd.Series({'INFO_SVLEN': 250, 'ALT_bnd1': 'N[chr1:101['})
-        assert _get_ins_svlen(row) == 250
+        assert _ins_svlen({'INFO_SVLEN': 250, 'ALT_bnd1': 'N[chr1:101['}) == 250
 
     def test_converts_negative_info_svlen_to_positive(self):
-        row = pd.Series({'INFO_SVLEN': -250, 'ALT_bnd1': 'N[chr1:101['})
-        assert _get_ins_svlen(row) == 250
+        assert _ins_svlen({'INFO_SVLEN': -250, 'ALT_bnd1': 'N[chr1:101['}) == 250
 
     def test_returns_none_when_svlen_missing(self):
-        row = pd.Series({'ALT_bnd1': 'N[chr1:101['})
-        assert _get_ins_svlen(row) is None
+        assert _ins_svlen({'ALT_bnd1': 'N[chr1:101['}) is None
 
     def test_returns_none_when_svlen_is_zero(self):
-        row = pd.Series({'INFO_SVLEN': 0, 'ALT_bnd1': 'N[chr1:101['})
-        assert _get_ins_svlen(row) is None
+        assert _ins_svlen({'INFO_SVLEN': 0, 'ALT_bnd1': 'N[chr1:101['}) is None
 
     def test_returns_none_when_svlen_is_nan(self):
         import numpy as np
-        row = pd.Series({'INFO_SVLEN': np.nan, 'ALT_bnd1': 'N[chr1:101['})
-        assert _get_ins_svlen(row) is None
+        assert _ins_svlen({'INFO_SVLEN': np.nan, 'ALT_bnd1': 'N[chr1:101['}) is None
+
+    def test_falls_back_on_alt_insert_sequence(self):
+        assert _ins_svlen({'INFO_SVLEN': 0, 'ALT_bnd1': 'NACGT[chr1:101['}) == 4
+
+    def test_alt_insert_lengths_zero_for_missing_or_plain_alts(self):
+        assert _alt_insert_lengths(pd.Series(['NACGT[chr1:101[', ']chr1:5]TTN', 'N[chr1:101[', None])).tolist() == [4, 2, 0, 0]
 
 
 # ---------------------------------------------------------------------------

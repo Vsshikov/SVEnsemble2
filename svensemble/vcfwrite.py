@@ -165,7 +165,7 @@ def _has_ci(bps_df: pd.DataFrame) -> bool:
     return all(col in bps_df.columns for col in _CI_COLS)
 
 
-def _set_ci(record, row: pd.Series, bnd_label: str, info_key: str = 'CIPOS') -> None:
+def _set_ci(record, row: Mapping, bnd_label: str, info_key: str = 'CIPOS') -> None:
     """Set CIPOS or CIEND on a pysam record and flag IMPRECISE if nonzero."""
     ci_l = int(row[f'INFO_CIPOS_l_{bnd_label}'])
     ci_r = int(row[f'INFO_CIPOS_r_{bnd_label}'])
@@ -174,24 +174,30 @@ def _set_ci(record, row: pd.Series, bnd_label: str, info_key: str = 'CIPOS') -> 
         record.info['IMPRECISE'] = True
 
 
-def _get_ins_svlen(row: pd.Series) -> int | None:
-    """
-    Determine SVLEN for an insertion from INFO_SVLEN or the ALT insert sequence.
+def _get_ins_svlen(row: Mapping, alt_insert_len: int) -> int | None:
+    """Take an insertion's SVLEN from INFO_SVLEN, falling back on the length of the ALT insert sequence.
 
-    Returns None if no insert length can be determined.
+    *alt_insert_len* is the length of the sequence inserted in ALT_bnd1, which
+    _alt_insert_lengths parses for all rows at once. Returns None if neither
+    gives a positive length.
     """
-    if 'INFO_SVLEN' in row.index and pd.notna(row['INFO_SVLEN']):
+    if 'INFO_SVLEN' in row and pd.notna(row['INFO_SVLEN']):
         val = abs(int(row['INFO_SVLEN']))
         if val > 0:
             return val
-    try:
-        insert_info = bnds.process_breakend_alt(pd.Series([row['ALT_bnd1']]))
-        seq = insert_info['insert_seq'].iloc[0]
-        if seq:
-            return len(seq)
-    except (KeyError, IndexError, ValueError, TypeError):
-        pass
-    return None
+    return alt_insert_len if alt_insert_len > 0 else None
+
+
+def _alt_insert_lengths(alts: pd.Series) -> np.ndarray:
+    """Measure the sequence each ALT string inserts at its breakend, with one vectorised parse.
+
+    Parsing every ALT in one call (breakends.process_breakend_alt) replaces a
+    per-record parse that cost milliseconds per insertion. Returns 0 where an
+    ALT inserts nothing or does not parse.
+    """
+    if alts.empty:
+        return np.zeros(0, dtype=np.int64)
+    return bnds.process_breakend_alt(alts)['insert_seq'].fillna('').str.len().to_numpy(dtype=np.int64)
 
 
 def _strip_inv_event_suffix(event_id: str) -> str:
@@ -211,18 +217,20 @@ def _set_scores(record, scores: Mapping[str, float] | None) -> None:
 
 def _write_symbolic_record(
     vcf_out: VariantFile,
-    row: pd.Series,
+    row: Mapping,
     svtype: str,
     has_ci: bool,
     record_id: str | None = None,
     scores: Mapping[str, float] | None = None,
+    alt_insert_len: int = 0,
 ) -> None:
     """
     Write a symbolic allele VCF record for a classified SV (DEL/DUP/INS/INV).
 
     POS is taken from POS_bnd1 and END is set to POS_bnd2.
     The stop/END field is assigned before INFO fields to avoid
-    transient END < POS warnings from htslib.
+    transient END < POS warnings from htslib. An INS takes its SVLEN from
+    _get_ins_svlen, with *alt_insert_len* as the fallback.
     """
     rec = vcf_out.new_record()
     rec.contig = str(row['CHROM_bnd1'])
@@ -241,7 +249,7 @@ def _write_symbolic_record(
     if svtype == 'DEL':
         rec.info['SVLEN'] = span
     elif svtype == 'INS':
-        svlen = _get_ins_svlen(row)
+        svlen = _get_ins_svlen(row, alt_insert_len)
         if svlen is not None:
             rec.info['SVLEN'] = svlen
     else:
@@ -257,7 +265,7 @@ def _write_symbolic_record(
 
 def _write_bnd_records(
     vcf_out: VariantFile,
-    row: pd.Series,
+    row: Mapping,
     has_ci: bool,
     scores: Mapping[str, float] | None = None,
 ) -> None:
@@ -556,18 +564,24 @@ def write_vcf(
         chrom_keys = utils.generate_chrom_key_dict(
             pd.concat([bps_df['CHROM_bnd1'], bps_df['CHROM_bnd2']])
         )
-        sorted_idx = bps_df.sort_values(
+        # Row positions in record order; the rows become plain dicts, which are
+        # much cheaper to read per record than a Series built from each row
+        order = bps_df.reset_index(drop=True).sort_values(
             ['CHROM_bnd1', 'POS_bnd1'],
             key=lambda x: utils.get_chrom_keys(x, chrom_keys=chrom_keys)
-        ).index
+        ).index.to_numpy()
+        rows = bps_df.iloc[order].to_dict('records')
+        svtypes = svtypes.to_numpy()[order]
+        # Parse the insert sequence of every insertion's ALT at once
+        is_ins = svtypes == 'INS'
+        alt_insert_len = np.zeros(len(order), dtype=np.int64)
+        alt_insert_len[is_ins] = _alt_insert_lengths(bps_df['ALT_bnd1'].iloc[order[is_ins]])
 
         symbolic_non_inv = _SYMBOLIC_SVTYPES - {'INV'}
         written_inv_events: set[str] = set()
 
         with VariantFile(str(tmp_path), write_mode, header=header) as vcf_out:
-            for idx in sorted_idx:
-                row = bps_df.loc[idx]
-                svtype = svtypes.loc[idx]
+            for row, svtype, ins_len in zip(rows, svtypes, alt_insert_len.tolist()):
                 row_scores = scores.get(str(row['INFO_EVENT']))
 
                 if svtype == 'INV':
@@ -582,7 +596,9 @@ def write_vcf(
                             vcf_out, row, 'INV', has_ci, record_id=base_event, scores=row_scores,
                         )
                 elif svtype in symbolic_non_inv:
-                    _write_symbolic_record(vcf_out, row, svtype, has_ci, scores=row_scores)
+                    _write_symbolic_record(
+                        vcf_out, row, svtype, has_ci, scores=row_scores, alt_insert_len=ins_len,
+                    )
                 else:
                     _write_bnd_records(vcf_out, row, has_ci, row_scores)
 
