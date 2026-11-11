@@ -26,50 +26,53 @@ from ._constants import (
 )
 
 def generate_svensemble2_ids(matchedbps_df: pd.DataFrame, callsets: list[str], prefix: str = 'svensemble2_') -> pd.Series:
+    """Number each distinct combination of the callsets' event IDs and prefix the number.
+
+    Joins each row's <callset>_INFO_EVENT values as text and numbers the
+    distinct joins in order of first appearance, so rows with the same events
+    share an ID: '<prefix>0', '<prefix>1', ...
     """
-    Generate svensemble IDs for a matched breakpoints DataFrame.
-    """
-    svensemble2_id = pd.Series(index=matchedbps_df.index, dtype=str)
-    svensemble2_id = matchedbps_df[[f'{callset}_INFO_EVENT' for callset in callsets]].astype(str).agg('|'.join, axis=1)
-    svensemble2_id = prefix + pd.factorize(svensemble2_id)[0].astype(str)
-    return svensemble2_id
+    events = matchedbps_df[[f'{callset}_INFO_EVENT' for callset in callsets]].astype(str)
+    joined = events.iloc[:, 0]
+    if len(callsets) > 1:
+        joined = joined.str.cat([events[col] for col in events.columns[1:]], sep='|')
+    return prefix + pd.factorize(joined)[0].astype(str)
 
 def get_combined_insert_size(matchedbps_df: pd.DataFrame, matchedbps_callsets: list[str], inplace: bool = False) -> pd.DataFrame:
-    """
-    Compute the max insert size for each callset and aggregate into a single column.
+    """Compute every callset's insert size per row and keep the largest.
+
+    Reads each callset's insert size from its own prefixed columns
+    (breakpoints.get_insert_size), skips the callsets without an event in the
+    row, and takes the largest of the rest, rounded to an integer.
 
     Args:
-        matchedbps_df (pd.DataFrame): DataFrame containing matched breakpoints.
-        callset_config_dict (dict): Dictionary of callset configurations.
+        matchedbps_df (pd.DataFrame): Matched breakpoints with <callset>_ columns.
+        matchedbps_callsets (list[str]): Callsets whose insert sizes to compare.
+        inplace (bool): Also add each <callset>_insert_size and the maximum, as
+            'svensemble_insert_size', to *matchedbps_df*. Defaults to False.
 
     Returns:
-        pd.DataFrame: DataFrame with an added 'svensemble_insert_size' column.
+        np.ndarray | pd.DataFrame: The per-row maxima as integers; with
+            inplace, *matchedbps_df* itself.
     """
-    if not inplace:
-        matchedbps_df = matchedbps_df.copy()
-
-    for callset in matchedbps_callsets:
-        matchedbps_no_prefix = matchedbps_df.rename(
-            columns=lambda col: col[len(f"{callset}_"):] if col.startswith(f"{callset}_") else col
-        )
-        matchedbps_df[f"{callset}_insert_size"] = bps.get_insert_size(
-            pd.concat(
-                [
-                    matchedbps_no_prefix,
-                    pd.DataFrame({"source": [callset] * len(matchedbps_no_prefix)})
-                ],
-                axis=1
-            )
-        )
-
+    # Each callset's insert sizes come from its own columns, prefix stripped,
+    # so no step copies the whole frame
     insert_size_cols = [f"{callset}_insert_size" for callset in matchedbps_callsets]
-    insert_sizes = matchedbps_df[insert_size_cols].copy()
+    per_callset = {}
+    for callset, insert_size_col in zip(matchedbps_callsets, insert_size_cols):
+        prefix = f"{callset}_"
+        own = matchedbps_df[[col for col in matchedbps_df.columns if col.startswith(prefix)]]
+        own = own.rename(columns=lambda col: col[len(prefix):]).assign(source=callset)
+        per_callset[insert_size_col] = bps.get_insert_size(own)
+    if inplace:
+        for col, sizes in per_callset.items():
+            matchedbps_df[col] = sizes
 
-    for callset in matchedbps_callsets:
-        info_event_col = f"{callset}_INFO_EVENT"
-        insert_size_col = f"{callset}_insert_size"
-        mask = matchedbps_df[info_event_col].isna()
-        insert_sizes.loc[mask, insert_size_col] = np.nan
+    # Rows without the callset's event take no insert size from it
+    insert_sizes = pd.DataFrame({
+        col: sizes.where(matchedbps_df[f"{callset}_INFO_EVENT"].notna())
+        for callset, (col, sizes) in zip(matchedbps_callsets, per_callset.items())
+    }, index=matchedbps_df.index)
 
     if inplace:
         matchedbps_df.loc[:, "svensemble_insert_size"] = np.round(
@@ -161,18 +164,18 @@ def matchedbps_to_bps(
 
         # Assign chromosome from the first non-null value among callsets
         chrom_cols = [f"{callset}_CHROM_{bnd_label}" for callset in callsets]
-        def _first_chrom(row):
-            vals = row.dropna()
-            if vals.empty:
-                raise ValueError(
-                    f"All callsets have NaN for CHROM_{bnd_label} "
-                    f"at index {row.name!r}; cannot determine chromosome"
-                )
-            return vals.iloc[0]
-        merged_coords_matched_bps.loc[:, f"CHROM_{bnd_label}"] = (
-            merged_coords_matched_bps.loc[:, chrom_cols]
-            .apply(_first_chrom, axis=1)
-        )
+        chroms = merged_coords_matched_bps[chrom_cols].to_numpy(dtype=object)
+        present = pd.notna(chroms)
+        if not present.any(axis=1).all():
+            row = merged_coords_matched_bps.index[np.flatnonzero(~present.any(axis=1))[0]]
+            raise ValueError(
+                f"All callsets have NaN for CHROM_{bnd_label} "
+                f"at index {row!r}; cannot determine chromosome"
+            )
+        merged_coords_matched_bps.loc[:, f"CHROM_{bnd_label}"] = pd.Series(
+            chroms[np.arange(len(chroms)), present.argmax(axis=1)],
+            index=merged_coords_matched_bps.index,
+        ).infer_objects()
 
         # Using callset priorty list from caller_params, assign ALT_bnd1 and ALT_bnd2
         merged_coords_matched_bps.loc[:, f"ALT_{bnd_label}"] = np.nan
@@ -230,7 +233,8 @@ def preprocess_matchedbps_for_pu(
     idx_cols = [col for col in joint_bp_df.columns if col.endswith('_INFO_EVENT')]
     if SAMPLE_ID_COL in joint_bp_df.columns:
         idx_cols.append(SAMPLE_ID_COL)
-    joint_bp_df = joint_bp_df.set_index(idx_cols).sort_index()
+    # Pick the columns first, so the index is set and sorted on them alone
+    columns = [col for col in joint_bp_df.columns if col not in idx_cols]
 
     training_cols: list[str] = []
     cols_to_retain: list[str] = []
@@ -260,20 +264,20 @@ def preprocess_matchedbps_for_pu(
             training_cols.append(f'{callset_name}_{callset_params["qual_metric"]}')
 
     if workflow_config['model'].get('training_params', {}).get('add_topology', False):
-        training_cols.extend(col for col in joint_bp_df.columns if col.startswith(TOPOLOGY_PREFIX))
+        training_cols.extend(col for col in columns if col.startswith(TOPOLOGY_PREFIX))
 
 
     # Find all columns in joint_bp_df that start with any of the training_col names
     for col in training_cols:
         cols_to_retain.extend(
-            [c for c in joint_bp_df.columns if c.startswith(col)]
+            [c for c in columns if c.startswith(col)]
         )
     # Remove duplicates while preserving order
     seen = set()
     cols_to_retain = [x for x in cols_to_retain if not (x in seen or seen.add(x))]
 
     # Subset the DataFrame to relevant columns
-    training_df = joint_bp_df.loc[:, cols_to_retain]
+    training_df = joint_bp_df[idx_cols + cols_to_retain].set_index(idx_cols).sort_index()
 
     # Retain rows where at least one callset's INFO_EVENT index level is not null
     info_event_cols = [f'{callset}_INFO_EVENT' for callset in workflow_config['training_sets'][training_set_name]]
@@ -367,8 +371,8 @@ def get_X_y_from_training_df(
         X (pd.DataFrame): Feature matrix after one-hot encoding and optional NaN filling.
         y (pd.Series): Target vector (reference match indicator).
     """
-    training_df_copy = training_df.copy()
-    X = pd.get_dummies(training_df_copy.drop(columns=[match_col]))
+    # drop and get_dummies build new frames, so training_df stays unchanged without a copy
+    X = pd.get_dummies(training_df.drop(columns=[match_col]))
 
     if fillna is not None:
         X = X.fillna(fillna)
@@ -385,7 +389,7 @@ def get_X_y_from_training_df(
         else:
             X[column] = X[column].astype(float)
 
-    y = training_df_copy[match_col]
+    y = training_df[match_col].copy()
 
     return X, y
 
@@ -464,7 +468,7 @@ _MATE_IN_ALT = re.compile(r'([\[\]])([^\[\]:]+):(\d+)([\[\]])')
 
 
 def _set_alt_mate_pos(alt: pd.Series, mate_pos: pd.Series) -> pd.Series:
-    """BND ALT strings with the mate position replaced; other ALTs unchanged."""
+    """Write *mate_pos* into each BND ALT string as its mate position; leave other ALTs unchanged."""
     return pd.Series(
         [
             _MATE_IN_ALT.sub(lambda m, p=p: f'{m[1]}{m[2]}:{int(p)}{m[4]}', a) if isinstance(a, str) else a

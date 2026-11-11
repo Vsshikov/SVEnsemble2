@@ -274,17 +274,6 @@ def train_unbiased_rf_for_split(
     }
     _model_kwargs.update(model_kwargs)
 
-    estimation_params, weight_dict = _estimate_duplessis_weights(
-        training_set_train_test_split,
-        _model_kwargs,
-        clpr=clpr,
-        estimator='rf',
-    )
-
-    X_train = training_set_train_test_split['X_train']
-    y_train = training_set_train_test_split['y_train']
-    X = training_set_train_test_split['X']
-
     duplessis_kwargs = _model_kwargs.copy()
     if 'n_jobs' not in duplessis_kwargs:
         try:
@@ -292,6 +281,19 @@ def train_unbiased_rf_for_split(
         except AttributeError:
             n_jobs = os.cpu_count() or 1
         duplessis_kwargs['n_jobs'] = n_jobs
+
+    # The label-frequency forest gets the same n_jobs; with random_state fixed,
+    # its trees do not depend on it
+    estimation_params, weight_dict = _estimate_duplessis_weights(
+        training_set_train_test_split,
+        duplessis_kwargs,
+        clpr=clpr,
+        estimator='rf',
+    )
+
+    X_train = training_set_train_test_split['X_train']
+    y_train = training_set_train_test_split['y_train']
+    X = training_set_train_test_split['X']
 
     rf = RF(
         max_features=int(np.sqrt(X.shape[1])),

@@ -5,7 +5,7 @@ matrices to the one used by Truvari
 """
 import itertools
 from collections.abc import Iterable
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from functools import lru_cache
 
 import igraph as ig
@@ -30,11 +30,11 @@ _INS_DUP_CODES: frozenset[int] = frozenset([
 ])
 
 def mark_ground_truth(bp_df: pd.DataFrame) -> pd.DataFrame:
-    """Ground-truth breakpoints with the GROUND_TRUTH_SAMPLE placeholder sample.
+    """Give ground-truth breakpoints the GROUND_TRUTH_SAMPLE placeholder as their sample.
 
     The ground truth is sites-only, so it has no sample of its own; the
-    placeholder lets it match within every sample. A frame that already
-    carries SAMPLE_ID_COL is rejected rather than silently relabelled.
+    placeholder lets it match within every sample. Rejects a frame that
+    already carries SAMPLE_ID_COL rather than silently relabelling it.
     """
     if SAMPLE_ID_COL in bp_df.columns:
         raise ValueError(
@@ -44,11 +44,11 @@ def mark_ground_truth(bp_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def concat_bp_dfs(bp_df_dict: dict[str, pd.DataFrame]):
-    """
-    Concatenates multiple breakpoints dataframes into one, with a new column 'source'
-    indicating the source of each breakpoint
-    Sorts the resulting dataframe by chromosome, orientation, and positions of breakends.
-    This is necessary for the chunker function to work correctly.
+    """Stack the non-empty breakpoint frames into one, labelling each row with its source in 'source'.
+
+    Sorts the rows by chromosome pair, then by breakend positions, so that
+    get_pairwise_matches can cut them into chunks of neighbouring breakpoints
+    (_chunk_bounds).
     """
     bp_df = pd.concat([
         df.assign(source=name)
@@ -57,92 +57,65 @@ def concat_bp_dfs(bp_df_dict: dict[str, pd.DataFrame]):
     ]).sort_values(by=['CHROM_bnd1', 'CHROM_bnd2', 'POS_bnd1', 'POS_bnd2'])
     return bp_df
 
-def chunker(bp_df: pd.DataFrame, chunk_size: int = 10000, chunk_max_n: int|None = None, chunk_max_n_dist: int|None = None):
+def _chunk_bounds(
+    chrom1: np.ndarray,
+    chrom2: np.ndarray,
+    pos1: np.ndarray,
+    chunk_size: int = 10000,
+    chunk_max_n: int | None = None,
+    chunk_max_n_dist: int | None = None,
+) -> list[tuple[int, int]]:
+    """Split rows into chunks of nearby breakpoints; return each chunk's [start, end) row range.
+
+    Takes the rows grouped by chromosome pair and, within a pair, in POS_bnd1
+    order. Starts a new chunk at every new chromosome pair and wherever
+    POS_bnd1 rises by more than chunk_size over the previous row's. Once a
+    chunk holds chunk_max_n rows, also starts one wherever POS_bnd1 rises by
+    more than chunk_max_n_dist, a soft cap on chunk size. Walks plain lists of
+    numbers, so it costs well under a microsecond per row.
+
+    Raises:
+        ValueError: If only one of chunk_max_n and chunk_max_n_dist is given,
+            or either is not positive.
     """
-    Splits a breakpoints DataFrame into chunks based on chromosome, orientation, and proximity.
-
-    This function groups breakpoints that are:
-    1. On the same chromosome pair with the same relative orientation
-    2. Spatially proximate (within chunk_size base pairs)
-
-    Args:
-        df (pd.DataFrame): Breakpoints DataFrame that must be pre-sorted by:
-                          - chromosome pair
-                          - relative orientation of breakends
-                          - position of breakend1 and breakend2
-        chunk_size (int, optional): Maximum distance in base pairs between
-                                   breakpoints to group them together. Defaults to 10000.
-        chunk_max_n (int, optional): Requires chunk_max_n_dist to be set. Soft upper limit on the number of breakpoints in a chunk. Defaults to 100.
-                                    If the number of breakpoints in a chunk exceeds this value,
-                                    and the next element is more than chunk_max_n_dist base pairs away,
-                                    the chunk is yielded.
-        chunk_max_n_dist (int, optional): Requires chunk_max_n to be set. Soft upper limit on the distance in base pairs between breakpoints in a chunk. Defaults to None.
-                                    If the number of breakpoints in a chunk exceeds chunk_max_n,
-                                    and the next element is more than chunk_max_n_dist base pairs away,
-                                    the chunk is yielded.
-    Yields:
-        list: Lists of pandas Series representing chunked breakpoints.
-              Each chunk contains breakpoints where bnd1 position is within
-              chunk_size of the previous breakpoint's bnd2 position.
-
-    Note:
-        A breakpoint is grouped with the previous one if:
-        row['POS_bnd1'] <= previous_row['POS_bnd1'] + chunk_size
-    """
-    if (chunk_max_n is not None and chunk_max_n_dist is None) or (chunk_max_n is None and chunk_max_n_dist is not None):
+    if (chunk_max_n is None) != (chunk_max_n_dist is None):
         raise ValueError("chunk_max_n and chunk_max_n_dist must be set together")
-    if chunk_max_n is not None and chunk_max_n_dist is not None:
-        if chunk_max_n_dist <= 0:
-            raise ValueError("chunk_max_n_dist must be greater than 0")
-        if chunk_max_n <= 0:
-            raise ValueError("chunk_max_n must be greater than 0")
+    if chunk_max_n is not None and (chunk_max_n <= 0 or chunk_max_n_dist <= 0):
+        raise ValueError("chunk_max_n and chunk_max_n_dist must be greater than 0")
+    n = len(pos1)
+    if n == 0:
+        return []
+    new_pair = np.ones(n, dtype=bool)
+    new_pair[1:] = (chrom1[1:] != chrom1[:-1]) | (chrom2[1:] != chrom2[:-1])
+    new_pair, pos = new_pair.tolist(), pos1.tolist()
+    capped = chunk_max_n is not None
+    bounds, start = [], 0
+    for i in range(1, n):
+        gap = pos[i] - pos[i - 1]
+        # 'not gap <= chunk_size' also splits at a missing position
+        if new_pair[i] or (capped and i - start >= chunk_max_n and gap > chunk_max_n_dist) or not gap <= chunk_size:
+            bounds.append((start, i))
+            start = i
+    bounds.append((start, n))
+    return bounds
 
-    # Get chromosome and orientation identifiers for grouping
-    # chrom_orientation_labels = bps.get_bp_chroms_orientations(bp_df)
 
-    n_chunks = 0
-    for _, group in bp_df.groupby(['CHROM_bnd1', 'CHROM_bnd2']):
-        current_chunk = []
+def _interval_dists(ref_lo: np.ndarray, ref_hi: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
+    """Measure the gap between reference interval i and interval j, for every (i, j).
 
-        # Iterate through each breakpoint in the current group
-        for _, breakpoint_row in group.iterrows():
-            # Start a new chunk if this is the first breakpoint
-            if len(current_chunk) == 0:
-                current_chunk.append(breakpoint_row)
-                continue
+    Returns 0 where the two intervals overlap or a bound is missing.
+    """
+    ref_right = np.subtract.outer(ref_lo, hi)         # reference interval lies right of the other
+    other_right = np.subtract.outer(lo, ref_hi).T     # other interval lies right of the reference
+    return np.where(other_right > 0, other_right, np.where(ref_right > 0, ref_right, 0))
 
-            # Check if the chunk has reached the maximum number of breakpoints and can be yielded
-            if chunk_max_n is not None:
-                if len(current_chunk) >= chunk_max_n:
-                    if breakpoint_row['POS_bnd1'] > current_chunk[-1]['POS_bnd1'] + chunk_max_n_dist:
-                        n_chunks += 1
-                        yield current_chunk
-                        current_chunk = [breakpoint_row]
-                        continue
-
-            # Check if current breakpoint is within proximity of the last one in chunk
-            if breakpoint_row['POS_bnd1'] <= current_chunk[-1]['POS_bnd1'] + chunk_size:
-                # Add to current chunk if within proximity threshold
-                current_chunk.append(breakpoint_row)
-            else:
-                n_chunks += 1
-                # Yield completed chunk and start a new one with the current breakpoint added
-                yield current_chunk
-                current_chunk = [breakpoint_row]
-        # Yield the last chunk if it exists
-        if len(current_chunk) > 0:
-            n_chunks += 1
-            yield current_chunk
-    print(f'Number of chunks: {n_chunks}')
 
 def dist_matrix_ref(ref_bp_df: pd.DataFrame, bp_df: pd.DataFrame, which_bnd: str) -> np.ndarray:
-    """
-    Calculate distance matrix between reference breakpoints and other breakpoints.
+    """Measure how far each reference breakpoint lies from each other breakpoint at one breakend.
 
-    This function computes the minimum distance between confidence intervals
-    of breakpoints from reference data and breakpoints from other sources.
-    The distance is 0 if intervals overlap, otherwise it's the minimum
-    separation between the intervals.
+    Widens each breakend position by its confidence interval (POS + CIPOS) and
+    measures the gap between the reference and the other interval
+    (_interval_dists): 0 where they overlap, otherwise the bases between them.
 
     Args:
         ref_bp_df (pd.DataFrame): DataFrame containing reference breakpoint data
@@ -155,49 +128,32 @@ def dist_matrix_ref(ref_bp_df: pd.DataFrame, bp_df: pd.DataFrame, which_bnd: str
                    if intervals overlap, otherwise it's the minimum separation
                    between the intervals.
     """
-    # Extract position and confidence interval data for reference breakpoints
-    ref_bnd_pos = ref_bp_df[f'POS_{which_bnd}'].values
-    ref_bnd_cipos_l = ref_bp_df[f'INFO_CIPOS_l_{which_bnd}'].values
-    ref_bnd_cipos_r = ref_bp_df[f'INFO_CIPOS_r_{which_bnd}'].values
-
-    # Extract position and confidence interval data for other breakpoints
-    bnd_pos = bp_df[f'POS_{which_bnd}'].values
-    bnd_cipos_l = bp_df[f'INFO_CIPOS_l_{which_bnd}'].values
-    bnd_cipos_r = bp_df[f'INFO_CIPOS_r_{which_bnd}'].values
-
-    # Initialize distance matrix with zeros (overlapping intervals)
-    dists = np.zeros((len(ref_bp_df), len(bp_df)))
-
-    # Calculate distances between interval boundaries
-    # Distance from left edge of ref interval to right edge of other interval
-    bnd_dist_v1 = np.subtract.outer(
-        ref_bnd_pos + ref_bnd_cipos_l,
-        bnd_pos + bnd_cipos_r
-    )
-
-    # Distance from left edge of other interval to right edge of ref interval
-    bnd_dist_v2 = np.subtract.outer(
-        bnd_pos + bnd_cipos_l,
-        ref_bnd_pos + ref_bnd_cipos_r
-    ).T
-
-    # Create boolean masks for non-overlapping intervals
-    mask_v1 = bnd_dist_v1 > 0  # Ref interval is to the right of other interval
-    mask_v2 = bnd_dist_v2 > 0  # Other interval is to the right of ref interval
-
-    # Assign distances only where intervals don't overlap
-    dists[mask_v1] = bnd_dist_v1[mask_v1]
-    dists[mask_v2] = bnd_dist_v2[mask_v2]
-
-    return dists
+    def bounds(df):
+        pos = df[f'POS_{which_bnd}'].to_numpy(dtype=np.float64)
+        return (pos + df[f'INFO_CIPOS_l_{which_bnd}'].to_numpy(dtype=np.float64),
+                pos + df[f'INFO_CIPOS_r_{which_bnd}'].to_numpy(dtype=np.float64))
+    return _interval_dists(*bounds(ref_bp_df), *bounds(bp_df))
 
 
 def rel_insert_delta_matrix_ref(ref_bp_df, bp_df, insert_delta_margin=30, ignore_size=False):
+    """Compare the 'insert_delta' of every reference breakpoint with every other one
+    (_insert_delta_similarity); with ignore_size, rate every pair 1."""
     if ignore_size:
         return np.ones((len(ref_bp_df), len(bp_df)))
+    return _insert_delta_similarity(
+        ref_bp_df['insert_delta'].to_numpy(np.float64), bp_df['insert_delta'].to_numpy(np.float64),
+        insert_delta_margin,
+    )
 
-    ref_deltas = ref_bp_df['insert_delta'].to_numpy(np.float64)[:, np.newaxis]
-    comp_deltas = bp_df['insert_delta'].to_numpy(np.float64)[np.newaxis, :]
+
+def _insert_delta_similarity(ref: np.ndarray, comp: np.ndarray, insert_delta_margin: float = 30) -> np.ndarray:
+    """Rate how alike in size every (ref, comp) pair of insert deltas is.
+
+    Divides the smaller delta by the larger, so 1 means equal sizes; rates a
+    pair 1 when both deltas are at most insert_delta_margin.
+    """
+    ref_deltas = ref[:, np.newaxis]
+    comp_deltas = comp[np.newaxis, :]
 
     with np.errstate(divide='ignore', invalid='ignore'):
         ratio = np.where(comp_deltas > 0, ref_deltas / comp_deltas, 0.0)
@@ -226,12 +182,11 @@ def _extract_relative_pos(alt_series: pd.Series) -> np.ndarray:
 
 
 def alt_match_matrix(chunk_df: pd.DataFrame, ins_dup_match: bool = False, match_dist: int = 30) -> np.ndarray:
-    """
-    Generate a match matrix for breakpoints based on their ALT strings.
+    """Mark which pairs of breakpoints share an orientation, reading it from their ALT strings.
 
-    Each (bnd1, bnd2) orientation pair is encoded as a single integer so that the
-    orientation check is a single O(n²) outer-equality on integers rather than two
-    outer-equalities on strings combined with a bitwise AND.
+    Codes each row's (bnd1, bnd2) orientation pair as one integer
+    (_orientation_codes), so one O(n²) equality on integers compares the
+    pairs, rather than two equalities on strings joined by a bitwise AND.
 
     Args:
         chunk_df (pd.DataFrame): DataFrame containing breakpoint data.
@@ -240,19 +195,29 @@ def alt_match_matrix(chunk_df: pd.DataFrame, ins_dup_match: bool = False, match_
     Returns:
         np.ndarray: Boolean match matrix of shape (n, n).
     """
-    rel1 = _extract_relative_pos(chunk_df['ALT_bnd1'])
-    rel2 = _extract_relative_pos(chunk_df['ALT_bnd2'])
+    return _orientation_match(_orientation_codes(chunk_df), ins_dup_match)
 
-    enc1 = pd.Series(rel1).map(_ORIENT_ENCODE).to_numpy(dtype=np.int8, na_value=-1)
-    enc2 = pd.Series(rel2).map(_ORIENT_ENCODE).to_numpy(dtype=np.int8, na_value=-1)
-    combined = enc1 * 4 + enc2
 
-    orientation_mask = np.equal.outer(combined, combined)
+def _orientation_codes(bp_df: pd.DataFrame) -> np.ndarray:
+    """Code each row's (bnd1, bnd2) orientation pair as enc(bnd1) * 4 + enc(bnd2) (_ORIENT_ENCODE),
+    taking enc = -1 for an ALT without a bracket."""
+    enc1, enc2 = (
+        pd.Series(_extract_relative_pos(bp_df[col])).map(_ORIENT_ENCODE).to_numpy(dtype=np.int8, na_value=-1)
+        for col in ('ALT_bnd1', 'ALT_bnd2')
+    )
+    return enc1 * 4 + enc2
 
+
+def _orientation_match(codes: np.ndarray, ins_dup_match: bool = False) -> np.ndarray:
+    """Mark, in an (n, n) boolean matrix, which rows i and j share an orientation code.
+
+    With ins_dup_match, also marks every pair whose rows are both insertion-
+    or duplication-like, so the two SV types can match each other.
+    """
+    orientation_mask = np.equal.outer(codes, codes)
     if ins_dup_match:
-        ins_dup_arr = np.isin(combined, list(_INS_DUP_CODES))
+        ins_dup_arr = np.isin(codes, list(_INS_DUP_CODES))
         orientation_mask |= np.logical_and.outer(ins_dup_arr, ins_dup_arr)
-
     return orientation_mask
 
 
@@ -272,12 +237,31 @@ def _get_match_matrix(
     triu_mask: np.ndarray,
     cross_source_mask: np.ndarray
 ) -> np.ndarray:
+    """Match rows i and j where every mask agrees and i > j, so each pair appears once.
+
+    Combines the position, size, orientation and source masks, and removes the
+    diagonal and everything above it (*triu_mask*).
+    """
     # delta_matrix may arrive as float (all-ones sentinel) or bool (threshold result);
     # cast to bool so bitwise-and works uniformly under NumPy 2.x
     return pos_match_matrix & delta_matrix.astype(bool) & alt_match_matrix & ~triu_mask & cross_source_mask
 
+_MATCH_COLS = [
+    'source', 'INFO_EVENT', SAMPLE_ID_COL, 'CHROM_bnd1', 'CHROM_bnd2', 'POS_bnd1', 'POS_bnd2',
+    'ALT_bnd1', 'ALT_bnd2', 'INFO_CIPOS_l_bnd1', 'INFO_CIPOS_r_bnd1', 'INFO_CIPOS_l_bnd2',
+    'INFO_CIPOS_r_bnd2', 'INFO_SVTYPE',
+]
+_OPTIONAL_MATCH_COLS = ['INFO_SVLEN', 'svensemble2_insert_size']
+
+
+def _match_columns(bp_df: pd.DataFrame) -> list[str]:
+    """List the columns get_pairwise_matches reads: _MATCH_COLS plus whichever optional ones *bp_df* has."""
+    return _MATCH_COLS + [c for c in _OPTIONAL_MATCH_COLS if c in bp_df.columns]
+
+
 @lru_cache(maxsize=100)
 def _get_triu_mask(n: int) -> np.ndarray:
+    """Build, and cache by size, a read-only (n, n) mask of the diagonal and everything above it."""
     mask = np.triu(np.ones(n, dtype=bool))
     mask.setflags(write=False)
     return mask
@@ -332,103 +316,74 @@ def get_pairwise_matches(
             f"Every breakpoint needs a {SAMPLE_ID_COL}; give the ground truth one with mark_ground_truth"
         )
 
-    # First, minimize the number of columns in the input dataframe
-    # by removing columns that are not needed for matching
-    col_retain_list = ['source', 'INFO_EVENT', SAMPLE_ID_COL, 'CHROM_bnd1', 'CHROM_bnd2', 'POS_bnd1', 'POS_bnd2', 'ALT_bnd1', 'ALT_bnd2', 'INFO_CIPOS_l_bnd1', 'INFO_CIPOS_r_bnd1', 'INFO_CIPOS_l_bnd2', 'INFO_CIPOS_r_bnd2', 'INFO_SVTYPE']
-    if 'INFO_SVLEN' in zipped_bp_df.columns:
-        col_retain_list.append('INFO_SVLEN')
-    if 'svensemble2_insert_size' in zipped_bp_df.columns:
-        col_retain_list.append('svensemble2_insert_size')
+    col_retain_list = _match_columns(zipped_bp_df)
     if not set(col_retain_list).issubset(zipped_bp_df.columns):
         raise ValueError(f"Some of the required columns are missing from the input dataframe: {set(col_retain_list) - set(zipped_bp_df.columns)}")
-    zipped_bp_df_ = zipped_bp_df[col_retain_list].copy()
+    # Rows missing a chromosome match nothing. Group the rest by chromosome
+    # pair, in sorted pair order, keeping each pair's rows in input order
+    bp_df = zipped_bp_df[col_retain_list]
+    bp_df = bp_df[bp_df['CHROM_bnd1'].notna() & bp_df['CHROM_bnd2'].notna()]
+    bp_df = bp_df.sort_values(['CHROM_bnd1', 'CHROM_bnd2'], kind='stable')
 
-    raw_insert_size = bps.get_insert_size(zipped_bp_df_)
-
-    same_chrom = zipped_bp_df_['CHROM_bnd1'] == zipped_bp_df_['CHROM_bnd2']
-    pos_diff = zipped_bp_df_['POS_bnd2'] - zipped_bp_df_['POS_bnd1']
-
-    insert_delta = raw_insert_size.copy()
-    insert_delta[same_chrom] = np.abs(
-        raw_insert_size[same_chrom] - (pos_diff[same_chrom] - 1)
-    )
-    zipped_bp_df_.loc[:, 'insert_delta'] = insert_delta
+    # Read every per-row value once; each chunk below is a slice of these arrays
+    same_chrom = (bp_df['CHROM_bnd1'] == bp_df['CHROM_bnd2']).to_numpy()
+    pos_diff = (bp_df['POS_bnd2'] - bp_df['POS_bnd1']).to_numpy(dtype=np.float64)
+    insert_delta = bps.get_insert_size(bp_df).to_numpy(dtype=np.float64)
+    insert_delta[same_chrom] = np.abs(insert_delta[same_chrom] - (pos_diff[same_chrom] - 1))
+    lo, hi = {}, {}
+    for bnd in (BND1, BND2):
+        pos = bp_df[f'POS_{bnd}'].to_numpy(dtype=np.float64)
+        lo[bnd] = pos + bp_df[f'INFO_CIPOS_l_{bnd}'].to_numpy(dtype=np.float64)
+        hi[bnd] = pos + bp_df[f'INFO_CIPOS_r_{bnd}'].to_numpy(dtype=np.float64)
+    orientation = _orientation_codes(bp_df)
+    source = bp_df['source'].to_numpy()
+    source_code = pd.factorize(source)[0]
+    no_self = np.isin(source, list(no_self_match or []))
+    nodes = list(zip(source.tolist(), bp_df['INFO_EVENT'].tolist(), bp_df[SAMPLE_ID_COL].astype(str).tolist()))
+    skip_all = skip_single_source_for == 'all'
+    skip = set(skip_single_source_for) if isinstance(skip_single_source_for, list) else set()
 
     matched_pairs = []
     unmatched = []
-
-    chunk_max_n = 100
-    chunk_max_n_dist = max_dist
-    for chunk in chunker(zipped_bp_df_, chunk_max_n=chunk_max_n, chunk_max_n_dist=chunk_max_n_dist):
-        # Skip chunks with insufficient breakpoints or single source
-        if len(chunk) <= 1:
-            if (skip_single_source_for == "all") or (isinstance(skip_single_source_for, list) and (chunk[0]['source'] in skip_single_source_for)):
-                continue
+    bounds = _chunk_bounds(
+        bp_df['CHROM_bnd1'].to_numpy(), bp_df['CHROM_bnd2'].to_numpy(), bp_df['POS_bnd1'].to_numpy(),
+        chunk_max_n=100, chunk_max_n_dist=max_dist,
+    )
+    print(f'Number of chunks: {len(bounds)}')
+    for start, end in bounds:
+        n = end - start
+        chunk_nodes = nodes[start:end]
+        codes = source_code[start:end]
+        # Skip lone breakpoints, and chunks of one source, of the skipped sources
+        if (codes == codes[0]).all() and (skip_all or chunk_nodes[0][0] in skip):
+            continue
+        if n == 1:
             if return_unmatched:
-                unmatched.append((chunk[0]['source'], chunk[0]['INFO_EVENT'], str(chunk[0][SAMPLE_ID_COL])))
+                unmatched.append(chunk_nodes[0])
             continue
 
-
-        chunk_df = pd.DataFrame(chunk)
-        if chunk_df['source'].nunique() == 1:
-            single_source = chunk_df['source'].values[0]
-            if (skip_single_source_for == "all") or (isinstance(skip_single_source_for, list) and (single_source in skip_single_source_for)):
-                continue
-
-        n = len(chunk_df)
-
-        # Build cross-source mask: False where row i and column j both come from one
-        # no_self_match source. Uses the outer-product subtraction trick: start from
-        # all-ones and zero out each listed source's self-pair block.
-        cross_source_mask = np.ones((n, n), dtype=float)
-        for source in np.intersect1d(chunk_df['source'].values, no_self_match or []):
-            m = chunk_df['source'].values == source
-            cross_source_mask -= np.outer(m, m)
-        cross_source_mask = cross_source_mask.astype(bool)
-
-        # Calculate distance matrices
-        bp1_matrix = dist_matrix_ref(chunk_df, chunk_df, BND1)
-        bp2_matrix = dist_matrix_ref(chunk_df, chunk_df, BND2)
-
-        # Create position match matrix
-        pos_match_matrix = (bp1_matrix <= max_dist) & (bp2_matrix <= max_dist)
-
-        # Calculate insert delta similarity
+        rows = slice(start, end)
+        pos_match_matrix = (
+            (_interval_dists(lo[BND1][rows], hi[BND1][rows], lo[BND1][rows], hi[BND1][rows]) <= max_dist)
+            & (_interval_dists(lo[BND2][rows], hi[BND2][rows], lo[BND2][rows], hi[BND2][rows]) <= max_dist)
+        )
         if ignore_size:
-            delta_matrix = np.ones((n, n))
+            delta_matrix = np.ones((n, n), dtype=bool)
         else:
-            delta_matrix = (
-                rel_insert_delta_matrix_ref(chunk_df, chunk_df)
-                >= insert_delta_threshold
-            )
+            delta_matrix = _insert_delta_similarity(insert_delta[rows], insert_delta[rows]) >= insert_delta_threshold
+        alt_mask = _orientation_match(orientation[rows], ins_dup_match=ins_dup_match)
+        # False where rows i and j both come from one no_self_match source
+        in_no_self = no_self[rows]
+        cross_source_mask = ~(np.logical_and.outer(in_no_self, in_no_self) & np.equal.outer(codes, codes))
+        match_matrix = _get_match_matrix(pos_match_matrix, delta_matrix, alt_mask, _get_triu_mask(n), cross_source_mask)
 
-        alt_mask = alt_match_matrix(chunk_df, ins_dup_match=ins_dup_match)
-
-
-        # Use cached triu mask; cross_source_mask already filters no_self_match pairs
-        triu_mask = _get_triu_mask(n)
-
-        # Create final match matrix (cross-source filter applied inside the matrix)
-        match_matrix = _get_match_matrix(pos_match_matrix, delta_matrix, alt_mask, triu_mask, cross_source_mask)
-
-        nodes = list(zip(
-            chunk_df['source'].values,
-            chunk_df['INFO_EVENT'].values,
-            chunk_df[SAMPLE_ID_COL].astype(str).values,
-        ))
-
-        # Check if any matches exist in the matrix
-        matched_indices = np.zeros(n, dtype=int)
-        if np.any(match_matrix):
-            i_indices, j_indices = np.where(match_matrix)
-
-            matched_indices[i_indices] = 1
-            matched_indices[j_indices] = 1
-
-            matched_pairs.extend((nodes[i], nodes[j]) for i, j in zip(i_indices, j_indices))
-
+        i_indices, j_indices = np.nonzero(match_matrix)
+        matched_pairs.extend((chunk_nodes[i], chunk_nodes[j]) for i, j in zip(i_indices.tolist(), j_indices.tolist()))
         if return_unmatched:
-            unmatched.extend(nodes[i] for i in np.where(matched_indices == 0)[0])
+            matched = np.zeros(n, dtype=bool)
+            matched[i_indices] = True
+            matched[j_indices] = True
+            unmatched.extend(chunk_nodes[i] for i in np.flatnonzero(~matched).tolist())
 
     if isinstance(skip_single_source_for, list):
         unmatched = [node for node in unmatched if node[0] not in skip_single_source_for]
@@ -455,12 +410,12 @@ def get_pairwise_matches(
     return out
 
 def _node_samples(graph: ig.Graph) -> list[str]:
-    """The sample of every node of *graph*, in node order."""
+    """Read the sample of every node of *graph* from its name, in node order."""
     return [name[2] for name in graph.vs['name']] if graph.vcount() else []
 
 
 def _wildcard_mask(graph: ig.Graph, wildcard_sample: str | None) -> np.ndarray:
-    """Boolean mask over graph.vs: nodes whose sample is *wildcard_sample* (none if it is None)."""
+    """Mark, over graph.vs, the nodes whose sample is *wildcard_sample*; mark none if it is None."""
     return np.array([s == wildcard_sample for s in _node_samples(graph)], dtype=bool)
 
 
@@ -469,9 +424,9 @@ def sample_vertex_mask(
     samples: Iterable[str],
     wildcard_sample: str | None = None,
 ) -> np.ndarray:
-    """Boolean mask over graph_in.vs: nodes whose sample is in *samples*.
+    """Mark, over graph_in.vs, the nodes whose sample is in *samples*.
 
-    Also selects the nodes whose sample is *wildcard_sample*, since those
+    Also marks the nodes whose sample is *wildcard_sample*, since those
     belong to every sample.
     """
     wanted = set(samples) | ({wildcard_sample} if wildcard_sample is not None else set())
@@ -479,7 +434,7 @@ def sample_vertex_mask(
 
 
 def split_graph_by_sample(graph_in: ig.Graph, wildcard_sample: str | None = None) -> dict[str, ig.Graph]:
-    """One subgraph per sample: that sample's nodes plus the wildcard nodes.
+    """Split the graph into one subgraph per sample, holding that sample's nodes and the wildcard nodes.
 
     Induces each subgraph from the sample's nodes and the nodes whose sample is
     *wildcard_sample* (as sample_vertex_mask selects them), which drops every
@@ -501,7 +456,10 @@ def split_graph_by_sample(graph_in: ig.Graph, wildcard_sample: str | None = None
 
 
 def component_sample(component: list[tuple], wildcard_sample: str | None = None) -> str:
-    """The sample of a per-sample component: its one sample other than *wildcard_sample*."""
+    """Find the one sample, other than *wildcard_sample*, that a per-sample component's nodes come from.
+
+    Raises ValueError if the component spans several samples.
+    """
     samples = {node[2] for node in component} - {wildcard_sample}
     if len(samples) != 1:
         raise ValueError(f"Component spans samples {sorted(samples)}; split the graph by sample first")
@@ -756,16 +714,24 @@ def _merge_on_event_and_sample(
     """
     event_col = f'{source}_INFO_EVENT'
     source_sample_col = f'{source}_{SAMPLE_ID_COL}'
-    left = left.copy()
-    source_df = source_df.copy()
-    for df, cols in ((left, (event_col, SAMPLE_ID_COL)), (source_df, (event_col, source_sample_col))):
-        for col in cols:
-            df[col] = df[col].astype('string')
-    merged = left.merge(
-        source_df, left_on=[event_col, SAMPLE_ID_COL], right_on=[event_col, source_sample_col], how=how,
+
+    def with_text_keys(df: pd.DataFrame, cols: tuple[str, str]) -> pd.DataFrame:
+        # Replace only the key columns that are not text yet, on a shallow copy:
+        # the caller's frame stays unchanged and no data is duplicated
+        cast = [col for col in cols if df[col].dtype != 'string']
+        if cast:
+            df = df.copy(deep=False)
+            for col in cast:
+                df[col] = df[col].astype('string')
+        return df
+
+    merged = with_text_keys(left, (event_col, SAMPLE_ID_COL)).merge(
+        with_text_keys(source_df, (event_col, source_sample_col)),
+        left_on=[event_col, SAMPLE_ID_COL], right_on=[event_col, source_sample_col], how=how,
     )
     merged[SAMPLE_ID_COL] = merged[SAMPLE_ID_COL].fillna(merged[source_sample_col])
-    return merged.drop(columns=[source_sample_col])
+    del merged[source_sample_col]
+    return merged
 
 
 def _kept_view(graph: ig.Graph, dropped: set[int]) -> ig.Graph:
@@ -775,7 +741,9 @@ def _kept_view(graph: ig.Graph, dropped: set[int]) -> ig.Graph:
     igraph carries the tags through subgraphs, so cut edges map straight back to
     *graph*. subgraph_edges keeps the edges in ID order, which matches *kept*.
     """
-    kept = [e for e in range(graph.ecount()) if e not in dropped]
+    keep = np.ones(graph.ecount(), dtype=bool)
+    keep[list(dropped)] = False
+    kept = np.flatnonzero(keep).tolist()
     view = graph.subgraph_edges(kept, delete_vertices=False)
     view.es['eid'] = kept
     view.vs['vid'] = list(range(view.vcount()))
@@ -789,17 +757,78 @@ def _edge_costs(graph: ig.Graph, is_wild: np.ndarray) -> list[int]:
     among those cuts, as few other edges as it can, so breakpoints stay with the
     wildcard (ground-truth) site they match.
     """
-    heavy = graph.ecount() + 1
-    return [heavy if is_wild[u] or is_wild[v] else 1 for u, v in graph.get_edgelist()]
+    ends = np.asarray(graph.get_edgelist(), dtype=np.int64).reshape(-1, 2)
+    is_wild = np.asarray(is_wild, dtype=bool)
+    return np.where(is_wild[ends[:, 0]] | is_wild[ends[:, 1]], graph.ecount() + 1, 1).tolist()
 
 
-def _most_separating(cuts: list, conflicts: list[tuple[int, int]], cost: list[float]):
-    """The cut that separates the most conflicting vertex pairs per unit of edge *cost*
-    it removes; the first wins ties."""
+def _most_separating(cuts: list, groups: list[list[int]], cost: list[float]):
+    """Pick the cut that separates the most conflicting vertex pairs per unit of edge *cost*
+    it removes; the first wins ties.
+
+    Every two vertices of one group conflict, so a cut that leaves k of a group's
+    n vertices on one side separates k * (n - k) of its pairs; counting them
+    this way avoids listing the n * (n - 1) / 2 pairs.
+    """
     def separated_per_cost(cut):
         side = set(cut.partition[0])
-        return sum((a in side) != (b in side) for a, b in conflicts) / sum(cost[e] for e in cut.cut)
+        separated = 0
+        for group in groups:
+            k = sum(v in side for v in group)
+            separated += k * (len(group) - k)
+        return separated / sum(cost[e] for e in cut.cut)
     return max(cuts, key=separated_per_cost)
+
+
+def _members(membership: np.ndarray, components: np.ndarray) -> list[np.ndarray]:
+    """Gather the vertex IDs of each of *components* from every vertex's component number.
+
+    Takes *components* in ascending order and returns one array per component,
+    its IDs ascending, as connected_components() lists them.
+    """
+    order = np.argsort(membership, kind='stable')
+    lo, hi = np.searchsorted(membership[order], np.stack([components, components + 1]))
+    return [order[a:b] for a, b in zip(lo, hi)]
+
+
+def _components_with_repeats(graph: ig.Graph, keys: np.ndarray) -> list[np.ndarray]:
+    """Find the components of *graph* in which two vertices share a key; return their vertex IDs.
+
+    Counts (component, key) pairs with numpy, so a graph of mostly lone
+    breakpoints costs no Python work per component. Returns the components in
+    component order.
+    """
+    if graph.vcount() == 0:
+        return []
+    membership = np.asarray(graph.connected_components().membership, dtype=np.int64)
+    n_keys = int(np.max(keys)) + 1
+    values, counts = np.unique(membership * n_keys + np.asarray(keys, dtype=np.int64), return_counts=True)
+    return _members(membership, np.unique(values[counts > 1] // n_keys))
+
+
+def _same_caller_cut(sub: ig.Graph, wildcard_sample: str | None) -> list[int]:
+    """Choose which edges to cut in *sub*, a component holding some source twice; return their IDs in *sub*.
+
+    Computes one candidate cut per duplicated source and picks one
+    (_most_separating), as same_caller_split_edges describes.
+    """
+    names = sub.vs['name']
+    by_source = defaultdict(list)
+    for i, name in enumerate(names):
+        by_source[name[0]].append(i)
+    duplicated = sorted(s for s, members in by_source.items() if len(members) > 1)
+    cost = _edge_costs(sub, _wildcard_mask(sub, wildcard_sample))
+    cost_arr = np.asarray(cost, dtype=np.float64)
+    ends = np.asarray(sub.get_edgelist(), dtype=np.int64).reshape(-1, 2)
+    degree = sub.degree()
+    cuts = []
+    for s in duplicated:
+        # Cut between the source's two best-connected breakpoints, adding eps to the kept one's edges
+        kept, other = sorted(by_source[s], key=lambda i: (-degree[i], str(names[i][1])))[:2]
+        eps = 1 / (2 * (degree[kept] + 1))
+        capacity = np.where((ends == kept).any(axis=1), cost_arr + eps, cost_arr)
+        cuts.append(sub.mincut(source=kept, target=other, capacity=capacity.tolist()))
+    return _most_separating(cuts, [by_source[s] for s in duplicated], cost).cut
 
 
 def same_caller_split_edges(
@@ -807,11 +836,14 @@ def same_caller_split_edges(
 ) -> np.ndarray:
     """Collect edges whose removal leaves no source twice in a per-sample component.
 
-    Each round, removes the marked edges from a copy of the graph, splits it by
-    sample (split_graph_by_sample, with the wildcard nodes in every sample they
-    match), and in every component that holds two breakpoints of one source,
-    separates them with a minimum cut and marks the cut edges. Stops when no
-    component holds a source twice. Wildcard (ground-truth) breakpoints
+    Removes the marked edges from a copy of the graph and splits it by sample
+    (split_graph_by_sample, with the wildcard nodes in every sample they
+    match). In every component that holds two breakpoints of one source,
+    separates them with a minimum cut and marks the cut edges, then repeats on
+    the pieces of that component until none holds a source twice. Components
+    never share edges, so each one is split on its own; its pieces keep their
+    vertices in ID order and get igraph's canonical edge order, as
+    split_graph_by_sample's subgraphs do. Wildcard (ground-truth) breakpoints
     conflict like any other source's.
 
     Within a component, computes one candidate cut per duplicated source,
@@ -836,36 +868,63 @@ def same_caller_split_edges(
     """
     graph = idg.graph
     dropped = {int(e) for e in dropped}
-    while True:
-        view = _kept_view(graph, dropped)
-        new = []
-        for sample_graph in split_graph_by_sample(view, wildcard_sample).values():
-            for component in sample_graph.connected_components():
-                sub = sample_graph.subgraph(component)
-                names = sub.vs['name']
-                by_source = defaultdict(list)
-                for i, name in enumerate(names):
-                    by_source[name[0]].append(i)
-                duplicated = sorted(s for s, members in by_source.items() if len(members) > 1)
-                if not duplicated:
-                    continue
-                # Every two breakpoints of one source conflict
-                conflicts = [p for s in duplicated for p in itertools.combinations(by_source[s], 2)]
-                # One candidate cut per duplicated source, between its two best-connected
-                # breakpoints, adding eps to the kept one's edges
-                cost = _edge_costs(sub, _wildcard_mask(sub, wildcard_sample))
-                edges = sub.get_edgelist()
-                degree = sub.degree()
-                cuts = []
-                for s in duplicated:
-                    kept, other = sorted(by_source[s], key=lambda i: (-degree[i], str(names[i][1])))[:2]
-                    eps = 1 / (2 * (degree[kept] + 1))
-                    capacity = [c + eps if kept in e else c for c, e in zip(cost, edges)]
-                    cuts.append(sub.mincut(source=kept, target=other, capacity=capacity))
-                new.extend(sub.es[_most_separating(cuts, conflicts, cost).cut]['eid'])
-        if not new:
-            return np.array(sorted(dropped), dtype=np.int64)
-        dropped.update(new)
+    if graph.vcount() == 0:
+        return np.array(sorted(dropped), dtype=np.int64)
+    _, source_code = np.unique([name[0] for name in graph.vs['name']], return_inverse=True)
+
+    def split(g: ig.Graph) -> list[ig.Graph]:
+        """Extract, as subgraphs, the components of *g* that hold some source twice."""
+        return [
+            g.induced_subgraph(component, implementation='create_from_scratch')
+            for component in _components_with_repeats(g, source_code[g.vs['vid']])
+        ]
+
+    view = _kept_view(graph, dropped)
+    pending = [sub for sample_graph in split_graph_by_sample(view, wildcard_sample).values()
+               for sub in split(sample_graph)]
+    while pending:
+        current, pending = pending, []
+        for sub in current:
+            cut = _same_caller_cut(sub, wildcard_sample)
+            dropped.update(sub.es[cut]['eid'])
+            sub.delete_edges(cut)
+            pending.extend(split(sub))
+    return np.array(sorted(dropped), dtype=np.int64)
+
+
+_TreeCut = namedtuple('_TreeCut', ['partition', 'cut'])
+
+
+def _gomory_hu_cuts(graph: ig.Graph, cost: list[float], pairs: list[tuple[int, int]]) -> list[_TreeCut]:
+    """Find a cheapest cut between the vertices of every pair from one Gomory-Hu tree of *graph*.
+
+    Builds the tree with n - 1 maximum flows for n vertices, where cutting each
+    pair directly would take one per pair. The lightest tree edge on the path
+    between a pair's vertices splits the tree into two sides that the pair's
+    minimum cut separates at the same cost. Returns one cut per distinct tree
+    edge, in the order the pairs first pick it; each cut carries the two
+    vertex sides (partition) and the IDs of the *graph* edges crossing them
+    (cut), as igraph's Cut does.
+    """
+    # Loops never cross a cut and parallel edges add up, so build the tree on a simple copy
+    simple = graph.copy()
+    simple.es['cost'] = cost
+    simple.simplify(multiple=True, loops=True, combine_edges={'cost': 'sum'})
+    tree = simple.gomory_hu_tree(capacity='cost')
+    flow = tree.es['flow']
+    picked = {}
+    for a, b in pairs:
+        picked.setdefault(min(tree.get_shortest_path(a, b, output='epath'), key=flow.__getitem__), None)
+    ends = np.asarray(graph.get_edgelist(), dtype=np.int64).reshape(-1, 2)
+    cuts = []
+    for e in picked:
+        rest = tree.copy()
+        rest.delete_edges([e])
+        side = np.zeros(graph.vcount(), dtype=bool)
+        side[rest.subcomponent(tree.es[e].source)] = True
+        crossing = np.flatnonzero(side[ends[:, 0]] != side[ends[:, 1]]).tolist()
+        cuts.append(_TreeCut([np.flatnonzero(side).tolist(), np.flatnonzero(~side).tolist()], crossing))
+    return cuts
 
 
 def same_sample_split_edges(
@@ -883,10 +942,12 @@ def same_sample_split_edges(
     breakpoints belong to no single sample, so they never conflict. Stops
     when no SV holds a sample twice.
 
-    Within an SV, computes one candidate cut per pair of same-sample
-    components and applies the candidate that separates the most such pairs
-    per unit of cost cut (ties: alphabetically first sample, then
-    lowest-numbered components). Prices every edge at 1, and an edge to a
+    Within an SV, finds a cheapest cut for every pair of same-sample
+    components from one Gomory-Hu tree (_gomory_hu_cuts), and applies the
+    candidate that separates the most such pairs per unit of cost cut (ties:
+    alphabetically first sample, then lowest-numbered components). Where
+    several cuts are equally cheap for a pair, the tree may pick a different
+    one than a direct minimum cut between the pair would. Prices every edge at 1, and an edge to a
     wildcard node above all edges together (_edge_costs), so the cut keeps
     every sample's breakpoints with the wildcard site they match whenever
     other edges can separate the conflict.
@@ -905,6 +966,10 @@ def same_sample_split_edges(
     sample_of = _node_samples(graph)
     is_wild = _wildcard_mask(graph, wildcard_sample)
     dropped = {int(e) for e in dropped}
+    if graph.vcount() == 0:
+        return np.array(sorted(dropped), dtype=np.int64)
+    _, sample_code = np.unique(np.asarray(sample_of, dtype=object), return_inverse=True)
+    tame = np.flatnonzero(~is_wild)
     while True:
         view = _kept_view(graph, dropped)
         # Per-sample component of every non-wildcard breakpoint; each wildcard
@@ -918,15 +983,18 @@ def same_sample_split_edges(
             n_components += len(components)
         component_of[is_wild] = n_components + np.arange(is_wild.sum())
 
+        # Find, with numpy, the SVs that hold two per-sample components of one sample
+        membership = np.asarray(view.connected_components().membership, dtype=np.int64)
+        triples = np.unique(np.column_stack([membership[tame], sample_code[tame], component_of[tame]]), axis=0)
+        pairs, counts = np.unique(triples[:, :2], axis=0, return_counts=True)
         new = []
-        for sv in view.connected_components():
+        for sv in _members(membership, np.unique(pairs[counts > 1, 0])):
+            sv = sv.tolist()
             per_sample = defaultdict(set)
             for v in sv:
                 if not is_wild[v]:
                     per_sample[sample_of[v]].add(component_of[v])
             conflicting = sorted(s for s, comps in per_sample.items() if len(comps) > 1)
-            if not conflicting:
-                continue
             # Price the SV's edges, then merge each per-sample component (and
             # wildcard breakpoint) into one vertex, keeping every edge between them
             quotient = view.subgraph(sv)
@@ -942,8 +1010,9 @@ def same_sample_split_edges(
                 for sample in conflicting
                 for a, b in itertools.combinations(sorted(per_sample[sample]), 2)
             ]
-            cuts = [quotient.mincut(source=a, target=b, capacity=cost) for a, b in conflicts]
-            new.extend(quotient.es[_most_separating(cuts, conflicts, cost).cut]['eid'])
+            cuts = _gomory_hu_cuts(quotient, cost, conflicts)
+            groups = [[index[c] for c in sorted(per_sample[sample])] for sample in conflicting]
+            new.extend(quotient.es[_most_separating(cuts, groups, cost).cut]['eid'])
         if not new:
             return np.array(sorted(dropped), dtype=np.int64)
         dropped.update(new)
@@ -1118,8 +1187,12 @@ def join_calls(
             sources side by side, one row per per-sample component; and the
             pruned ID graph, whose nodes carry their SV ID (common_id_name).
     """
-    # Combine all breakpoint dataframes into one with source labels
-    zipped_bp_df = concat_bp_dfs(bp_df_dict)
+    # Combine the matching columns of all breakpoint frames into one with source
+    # labels; the other columns join back per source at the end
+    zipped_bp_df = concat_bp_dfs({
+        name: df[[c for c in df.columns if c in _MATCH_COLS or c in _OPTIONAL_MATCH_COLS]]
+        for name, df in bp_df_dict.items()
+    })
 
     if workflow_config is not None:
         add_topology = workflow_config['model']['training_params'].get('add_topology', False)
@@ -1178,8 +1251,8 @@ def join_calls(
         for source, bp_df in bp_df_dict.items():
             if source == ref_callset:
                 continue
-            prefixed = bp_df.assign(INFO_EVENT=bp_df['INFO_EVENT'].astype('string')).add_prefix(f'{source}_')
-            matched_df = _merge_on_event_and_sample(matched_df, prefixed, source, how='left')
+            # The merge turns the event and sample keys into text itself
+            matched_df = _merge_on_event_and_sample(matched_df, bp_df.add_prefix(f'{source}_'), source, how='left')
 
     if not add_common_id:
         matched_df = matched_df.drop(columns=common_id_name)
