@@ -338,7 +338,7 @@ def _run_kwargs(tmp_path, **over):
     if not gt.exists():
         gt.write_text("a\n1\n")
     kw = dict(
-        caller_vcfs={"gridss": tmp_path / "g.vcf"}, ref=tmp_path / "ref.fa",
+        caller_vcfs=[tmp_path / "g.vcf"], callers=["gridss"], ref=tmp_path / "ref.fa",
         model="unbiased_xgb", training_set="gridss", output_dir=tmp_path / "out",
         ground_truth_bps=gt,
     )
@@ -420,13 +420,54 @@ class TestRunScratch:
         assert all(c["output_dir"] == tmp_path / "out" for c in calls)
 
 
+CALLER_HEADERS = Path(__file__).parent / "data" / "caller_headers"
+
+
+class TestResolveCallerVcfs:
+    def test_names_read_from_headers(self):
+        vcfs = [CALLER_HEADERS / "delly.vcf", CALLER_HEADERS / "manta_diploid.vcf"]
+        assert api._resolve_caller_vcfs(vcfs) == {"delly": (vcfs[0],), "manta_diploid": (vcfs[1],)}
+
+    def test_given_names_kept_and_none_read(self):
+        vcfs = [CALLER_HEADERS / "delly.vcf", CALLER_HEADERS / "gridss.vcf"]
+        assert api._resolve_caller_vcfs(vcfs, ["survivor_short", None]) == {
+            "survivor_short": (vcfs[0],), "gridss": (vcfs[1],),
+        }
+
+    def test_same_caller_files_group_in_order(self, tmp_path):
+        a, b = tmp_path / "a.vcf", tmp_path / "b.vcf"
+        for path in (a, b):
+            path.write_text((CALLER_HEADERS / "delly.vcf").read_text())
+        assert api._resolve_caller_vcfs([b, a]) == {"delly": (b, a)}
+
+    def test_single_path(self):
+        vcf = CALLER_HEADERS / "svaba.vcf"
+        assert api._resolve_caller_vcfs(vcf) == {"svaba": (vcf,)}
+
+    def test_unidentified_files_listed(self, tmp_path):
+        unknown = [tmp_path / "x.vcf", tmp_path / "y.vcf"]
+        for path in unknown:
+            path.write_text("##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n")
+        with pytest.raises(ValueError, match="x.vcf.*y.vcf"):
+            api._resolve_caller_vcfs([*unknown, CALLER_HEADERS / "delly.vcf"])
+
+    def test_length_mismatch_raises(self):
+        with pytest.raises(ValueError, match="same length"):
+            api._resolve_caller_vcfs([CALLER_HEADERS / "delly.vcf"], ["delly", "gridss"])
+
+    def test_mapping_rejected(self):
+        with pytest.raises(TypeError, match="list of paths"):
+            api._resolve_caller_vcfs({"delly": CALLER_HEADERS / "delly.vcf"})
+
+
 class TestRunValidation:
     @pytest.mark.parametrize("over, match", [
         ({"save": {"plots"}}, "Unknown save artifacts"),
         ({"ground_truth_bps": None}, "exactly one"),
         ({"ground_truth_vcf": "gt.vcf"}, "exactly one"),
         ({"save": {"ground_truth"}}, "needs ground_truth_vcf"),
-        ({"caller_vcfs": {}}, "caller_vcfs is empty"),
+        ({"caller_vcfs": [], "callers": None}, "caller_vcfs is empty"),
+        ({"callers": ["gridss", "delly"]}, "same length"),
     ])
     def test_rejected_before_any_work(self, tmp_path, fake_pipeline, tmpdir_root, over, match):
         with pytest.raises(ValueError, match=match):
@@ -494,14 +535,15 @@ class TestRunAnnotate:
         vcf = tmp_path / "gt.vcf"
         vcf.write_text(self.VCF)
         with pytest.raises(KeyError, match="event-key rule|CALLSET_PARAM_DICT"):
-            api.run(**_run_kwargs(tmp_path, caller_vcfs={"gnomad": vcf}, training_set="gnomad", annotate_vcfs=True))
+            api.run(**_run_kwargs(tmp_path, caller_vcfs=[vcf], callers=["gnomad"], training_set="gnomad", annotate_vcfs=True))
         assert not (tmp_path / "out").exists()
         assert list(tmpdir_root.iterdir()) == []
 
     def test_mismatched_samples_fail_before_any_work(self, tmp_path, fake_pipeline, monkeypatch, tmpdir_root):
         monkeypatch.setattr(sv_io, "parse_samples_from_vcf", lambda path: ["A"] if "g" in Path(path).name else ["B"])
         with pytest.raises(ValueError, match="share one sample set"):
-            api.run(**_run_kwargs(tmp_path, caller_vcfs={"gridss": tmp_path / "g.vcf", "manta_diploid": tmp_path / "m.vcf"}))
+            api.run(**_run_kwargs(tmp_path, caller_vcfs=[tmp_path / "g.vcf", tmp_path / "m.vcf"],
+                                  callers=["gridss", "manta_diploid"]))
         assert not (tmp_path / "out").exists()
 
 
@@ -599,7 +641,7 @@ class TestRunTwoSamples:
 
         files, gt_path = self._inputs(tmp_path)
         outputs = api.run(
-            caller_vcfs={"delly": (files["S1"], files["S2"])}, ref=tmp_path / "ref.fa", model="consensus",
+            caller_vcfs=[files["S1"], files["S2"]], ref=tmp_path / "ref.fa", model="consensus",
             output_dir=tmp_path / "out", ground_truth_bps=gt_path, workdir=tmp_path / "wd",
             save={"id_graph", "callsets", "matched_bps"},
         )

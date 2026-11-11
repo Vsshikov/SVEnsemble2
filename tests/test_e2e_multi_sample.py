@@ -99,7 +99,8 @@ def multi_run(tmp_path_factory):
 
     out = base / "out"
     outputs = api.run(
-        caller_vcfs={"delly": (delly_s1, delly_s2), "manta_diploid": manta},
+        caller_vcfs=[delly_s1, delly_s2, manta],
+        callers=["delly", "delly", "manta_diploid"],
         ref=Path(spec["ref"]),
         model=spec["model"],
         output_dir=out,

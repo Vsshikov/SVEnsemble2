@@ -1,0 +1,40 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=Severus_v1.7
+##contig=<ID=chr1,length=248956422>
+##ALT=<ID=DEL,Description="Deletion">
+##ALT=<ID=INS,Description="Insertion">
+##ALT=<ID=DUP,Description="Duplication">
+##ALT=<ID=INV,Description="Reciprocal Inversion">
+##ALT=<ID=BND,Description="Breakend">
+##FILTER=<ID=FAIL_LOWSUPP,Description="Less number of support, but ok in other samples">
+##FILTER=<ID=FAIL_MAP_CONS,Description="Majority of variant reads have unreliable mappability">
+##FILTER=<ID=FAIL_CONN_CONS,Description="Majority of variant reads have unreliable connections">
+##FILTER=<ID=FAIL_LOWCOV_OTHER,Description="Low variant coverage in other samples">
+##INFO=<ID=PRECISE,Number=0,Type=Flag,Description="SV with precise breakpoints coordinates and length">
+##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description="SV with imprecise breakpoints coordinates and length">
+##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">
+##INFO=<ID=SVLEN,Number=1,Type=Integer,Description="Length of the SV">
+##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the SV">
+##INFO=<ID=STRANDS,Number=1,Type=String,Description="Breakpoint strandedness">
+##INFO=<ID=DETAILED_TYPE,Number=1,Type=String,Description="Detailed type of the SV">
+##INFO=<ID=INSLEN,Number=1,Type=Integer,Description="Length of the unmapped sequence between breakpoint">
+##INFO=<ID=MAPQ,Number=1,Type=Integer,Description="Median mapping quality of supporting reads">
+##INFO=<ID=PHASESETID,Number=1,Type=String,Description="Matching phaseset ID for phased SVs">
+##INFO=<ID=HP,Number=1,Type=String,Description="Matching haplotype ID for phased SVs">
+##INFO=<ID=SUPP_READS,Number=1,Type=String,Description="Number of support reads">
+##INFO=<ID=REF_READS,Number=1,Type=String,Description="Number of reference reads">
+##INFO=<ID=CLUSTERID,Number=1,Type=String,Description="Cluster ID in breakpoint_graph">
+##INFO=<ID=INSSEQ,Number=1,Type=String,Description="Insertion sequence between breakpoints">
+##INFO=<ID=MATE_ID,Number=1,Type=String,Description="MATE ID for breakends">
+##INFO=<ID=INSIDE_VNTR,Number=1,Type=String,Description="True if an indel is inside a VNTR">
+##INFO=<ID=ALIGNED_POS,Number=1,Type=String,Description="Position in the reference">
+##INFO=<ID=BND_TYPE,Number=1,Type=String,Description="Junction type">
+##INFO=<ID=LOW_COV_IN,Number=1,Type=String,Description="Samples that has low coverage in that region">
+##INFO=<ID=INSIDE_WHITELIST,Number=1,Type=String,Description="SVs within the whitelist bed file">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=DR,Number=1,Type=Integer,Description="Number of reference reads">
+##FORMAT=<ID=DV,Number=1,Type=Integer,Description="Number of variant reads">
+##FORMAT=<ID=VAF,Number=1,Type=Float,Description="Variant allele frequency">
+##FORMAT=<ID=hVAF,Number=3,Type=Float,Description="Haplotype specific variant Allele frequency (H0,H1,H2)">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	SAMPLE

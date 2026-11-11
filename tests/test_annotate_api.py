@@ -22,16 +22,21 @@ HEADER = (
     '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n'
     '##FORMAT=<ID=DV,Number=1,Type=Integer,Description="Variant reads">\n'
 )
+DELLY_SIGNATURE = (
+    '##INFO=<ID=CT,Number=1,Type=String,Description="Connection type">\n'
+    '##FORMAT=<ID=RDCN,Number=1,Type=Integer,Description="Read-depth CN">\n'
+    '##FORMAT=<ID=RCL,Number=1,Type=Integer,Description="Raw read counts left">\n'
+)
 
 
-def _vcf_text(samples=('S1',), ids=('DEL1', 'DEL2')):
+def _vcf_text(samples=('S1',), ids=('DEL1', 'DEL2'), header=HEADER):
     chrom = '\t'.join(['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT', *samples])
     body = ''.join(
         '\t'.join(['chr1', str(100 + 300 * i), id_, 'N', '<DEL>', '12.5', 'PASS',
                    f'SVTYPE=DEL;END={200 + 300 * i};AF=0.33333334', 'GT:DV', *(['0/1:5'] * len(samples))]) + '\n'
         for i, id_ in enumerate(ids)
     )
-    return HEADER + chrom + '\n' + body
+    return header + chrom + '\n' + body
 
 
 def _calls(rows):
@@ -75,7 +80,7 @@ def _assert_only_score_added(orig: str, out: str):
 class TestAnnotate:
     def test_text_vcf_byte_level(self, tmp_path):
         vcf = _write(tmp_path / 's.delly.vcf', _vcf_text())
-        out = api.annotate(_calls([['DEL1', 'S1', 0.9]]), {'delly': vcf}, tmp_path / 'out')
+        out = api.annotate(_calls([['DEL1', 'S1', 0.9]]), [vcf], tmp_path / 'out', callers=['delly'])
         (path,) = out['delly']
         assert path.name == 'delly.s.delly.svensemble2.vcf'
         text = path.read_text()
@@ -85,7 +90,7 @@ class TestAnnotate:
     def test_gz_in_bgzf_out(self, tmp_path):
         plain = _write(tmp_path / 'p.vcf', _vcf_text())
         gz = _bgzip(plain, tmp_path / 's.vcf.gz')
-        (path,) = api.annotate(_calls([['DEL2', 'S1', 0.5]]), {'delly': gz}, tmp_path / 'out')['delly']
+        (path,) = api.annotate(_calls([['DEL2', 'S1', 0.5]]), [gz], tmp_path / 'out', callers=['delly'])['delly']
         raw = path.read_bytes()
         assert raw[:4] == b'\x1f\x8b\x08\x04' and raw[12:14] == b'BC'
         assert raw.endswith(bytes.fromhex('1f8b08040000000000ff0600424302001b0003000000000000000000'))
@@ -94,7 +99,7 @@ class TestAnnotate:
     def test_bcf_in_bcf_out(self, tmp_path):
         bcf = _to_bcf(_write(tmp_path / 'p.vcf', _vcf_text(samples=('S1', 'S2'))), tmp_path / 's.bcf')
         calls = _calls([['DEL1', 'S2', 0.75]])
-        (path,) = api.annotate(calls, {'delly': bcf}, tmp_path / 'out')['delly']
+        (path,) = api.annotate(calls, [bcf], tmp_path / 'out', callers=['delly'])['delly']
         assert path.suffix == '.bcf'
         with pysam.VariantFile(str(path)) as vf:
             recs = list(vf)
@@ -107,7 +112,7 @@ class TestAnnotate:
         b = _write(tmp_path / 'b.vcf', _vcf_text(samples=('S2',)))
         other = _write(tmp_path / 'm.vcf', _vcf_text(samples=('S1', 'S2')))
         calls = _calls([['DEL1', 'S1', 0.1], ['DEL1', 'S2', 0.2]]).assign(manta_diploid_INFO_EVENT='DEL1')
-        out = api.annotate(calls, {'delly': [a, b], 'manta_diploid': other}, tmp_path / 'out')
+        out = api.annotate(calls, [a, b, other], tmp_path / 'out', callers=['delly', 'delly', 'manta_diploid'])
         assert [p.name for p in out['delly']] == ['delly.a.svensemble2.vcf', 'delly.b.svensemble2.vcf']
         assert out['delly'][1].read_text().splitlines()[-2].endswith(':0.2')
 
@@ -115,28 +120,28 @@ class TestAnnotate:
         a = _write(tmp_path / 'a.vcf', _vcf_text(samples=('S1',)))
         b = _write(tmp_path / 'b.vcf', _vcf_text(samples=('S1',)))
         with pytest.raises(ValueError, match='both'):
-            api.annotate(_calls([['DEL1', 'S1', 0.1]]), {'delly': [a, b]}, tmp_path / 'out')
+            api.annotate(_calls([['DEL1', 'S1', 0.1]]), [a, b], tmp_path / 'out', callers=['delly', 'delly'])
 
     def test_callers_with_different_samples_raise(self, tmp_path):
         a = _write(tmp_path / 'a.vcf', _vcf_text(samples=('S1',)))
         b = _write(tmp_path / 'b.vcf', _vcf_text(samples=('SAMPLE1',)))
         calls = _calls([['DEL1', 'S1', 0.1]]).assign(manta_diploid_INFO_EVENT='DEL1')
         with pytest.raises(ValueError, match='share one sample set'):
-            api.annotate(calls, {'delly': a, 'manta_diploid': b}, tmp_path / 'out')
+            api.annotate(calls, [a, b], tmp_path / 'out', callers=['delly', 'manta_diploid'])
 
     def test_calls_sample_missing_from_vcfs_raises(self, tmp_path):
         a = _write(tmp_path / 'a.vcf', _vcf_text(samples=('S1',)))
         with pytest.raises(ValueError, match='not in the caller VCFs'):
-            api.annotate(_calls([['DEL1', 'S9', 0.1]]), {'delly': a}, tmp_path / 'out')
+            api.annotate(_calls([['DEL1', 'S9', 0.1]]), [a], tmp_path / 'out', callers=['delly'])
 
     def test_legacy_calls_without_sample_column(self, tmp_path):
         a = _write(tmp_path / 'a.vcf', _vcf_text(samples=('S1',)))
         legacy = pd.DataFrame({'delly_INFO_EVENT': ['DEL1'], PRED: [0.4]})
-        (path,) = api.annotate(legacy, {'delly': a}, tmp_path / 'out')['delly']
+        (path,) = api.annotate(legacy, [a], tmp_path / 'out', callers=['delly'])['delly']
         assert path.read_text().splitlines()[-2].endswith(':0.4')
         two = _write(tmp_path / 'two.vcf', _vcf_text(samples=('S1', 'S2')))
         with pytest.raises(ValueError, match='single-sample'):
-            api.annotate(legacy, {'delly': two}, tmp_path / 'out2')
+            api.annotate(legacy, [two], tmp_path / 'out2', callers=['delly'])
 
     def test_sites_only_raises_before_writing(self, tmp_path):
         sites = HEADER + '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\nchr1\t100\tDEL1\tN\t<DEL>\t.\tPASS\tSVTYPE=DEL\n'
@@ -144,7 +149,7 @@ class TestAnnotate:
         bad = _write(tmp_path / 'bad.vcf', sites)
         calls = _calls([['DEL1', 'S1', 0.1]]).assign(survivor_short_INFO_EVENT='DEL1')
         with pytest.raises(ValueError, match='sites-only'):
-            api.annotate(calls, {'delly': good, 'survivor_short': bad}, tmp_path / 'out')
+            api.annotate(calls, [good, bad], tmp_path / 'out', callers=['delly', 'survivor_short'])
         assert not (tmp_path / 'out').exists() or not any((tmp_path / 'out').iterdir())
 
     def test_failure_mid_write_leaves_nothing(self, tmp_path):
@@ -153,20 +158,32 @@ class TestAnnotate:
         out_dir = tmp_path / 'out'
         calls = _calls([['DEL1', 'S1', 0.1]]).assign(manta_diploid_INFO_EVENT='DEL1')
         with pytest.raises(ValueError, match='columns'):
-            api.annotate(calls, {'delly': good, 'manta_diploid': broken}, out_dir)
+            api.annotate(calls, [good, broken], out_dir, callers=['delly', 'manta_diploid'])
         assert list(out_dir.iterdir()) == []
 
     def test_caller_missing_from_calls_raises_before_writing(self, tmp_path):
         a = _write(tmp_path / 'a.vcf', _vcf_text())
         b = _write(tmp_path / 'b.vcf', _vcf_text())
         with pytest.raises(KeyError, match='manta_diploid_INFO_EVENT'):
-            api.annotate(_calls([['DEL1', 'S1', 0.1]]), {'delly': a, 'manta_diploid': b}, tmp_path / 'out')
+            api.annotate(_calls([['DEL1', 'S1', 0.1]]), [a, b], tmp_path / 'out', callers=['delly', 'manta_diploid'])
         assert not (tmp_path / 'out').exists()
+
+    def test_callers_read_from_headers(self, tmp_path):
+        a = _write(tmp_path / 'a.vcf', _vcf_text(samples=('S1',), header=HEADER + DELLY_SIGNATURE))
+        b = _write(tmp_path / 'b.vcf', _vcf_text(samples=('S2',), header=HEADER + DELLY_SIGNATURE))
+        calls = _calls([['DEL1', 'S1', 0.1], ['DEL1', 'S2', 0.2]])
+        out = api.annotate(calls, [a, b], tmp_path / 'out')
+        assert [p.name for p in out['delly']] == ['delly.a.svensemble2.vcf', 'delly.b.svensemble2.vcf']
+
+    def test_unidentified_header_raises(self, tmp_path):
+        a = _write(tmp_path / 'a.vcf', _vcf_text())
+        with pytest.raises(ValueError, match='Cannot identify'):
+            api.annotate(_calls([['DEL1', 'S1', 0.1]]), [a], tmp_path / 'out', callers=[None])
 
     def test_unknown_caller_raises(self, tmp_path):
         a = _write(tmp_path / 'a.vcf', _vcf_text())
         with pytest.raises(KeyError):
-            api.annotate(_calls([['DEL1', 'S1', 0.1]]), {'nope': a}, tmp_path / 'out')
+            api.annotate(_calls([['DEL1', 'S1', 0.1]]), [a], tmp_path / 'out', callers=['nope'])
 
 
 class TestSampleSets:
@@ -190,12 +207,12 @@ def test_read_calls_keeps_text(tmp_path):
 
 def test_cli_annotate(tmp_path, monkeypatch):
     a = _write(tmp_path / 'a.vcf', _vcf_text(samples=('S1',)))
-    b = _write(tmp_path / 'b.vcf', _vcf_text(samples=('S2',)))
+    b = _write(tmp_path / 'b.vcf', _vcf_text(samples=('S2',), header=HEADER + DELLY_SIGNATURE))
     calls_csv = tmp_path / 'calls.csv'
     _calls([['DEL1', 'S1', 0.1], ['DEL2', 'S2', 0.2]]).to_csv(calls_csv)
     monkeypatch.setattr(sys, 'argv', [
         'svensemble', 'annotate', '--calls', str(calls_csv),
-        '--callers', 'delly', 'delly', '--caller_vcfs', str(a), str(b),
+        '--callers', 'delly', '.', '--caller_vcfs', str(a), str(b),
         '--output_dir', str(tmp_path / 'out'),
     ])
     cli.main()

@@ -40,6 +40,9 @@ BASE_COLS = ['CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL']
 #   name, each with 'format'/'info' field names. Parsed into ANNOT_<field> columns only when the VCF
 #   header defines all of an annotator's fields. Never used as features
 #   directly; expose them through custom_cols_pred.
+# - 'header_signature': Dict[str, List[str]] | None - header IDs, keyed by section ('INFO',
+#   'FORMAT', 'FILTER'), that together identify the callset's VCFs (vcfparse.get_callset_name).
+#   None for callsets never identified from a header (variants, reference and validation sets).
 # Example:
 # GRIDSS_PARAMS = {
 #     'base_cols': BASE_COLS,
@@ -71,6 +74,7 @@ DEFAULT_PARAMS = {
     'bnd2_pos': 'svlen',
     'svlens': DEFAULT_SV_LENS,
     'annotator_cols': ANNOTATOR_COLS,
+    'header_signature': None,
 }
 # Default params for evnet notation in VCF
 DEFAULT_EVENT_PARAMS = DEFAULT_PARAMS | {
@@ -203,7 +207,8 @@ GRIDSS_PARAMS = DEFAULT_PARAMS | {
     'info_cols_mandatory': GRIDSS_INFO_MANDATORY_COLS,
     'info_cols_pred': GRIDSS_INFO_PRED_COLS,
     'svlen_source': 'alt',
-    'bnd2_pos': None
+    'bnd2_pos': None,
+    'header_signature': {'INFO': ['ANRP', 'ASRP', 'BASSR']},
 }
 
 GNOMAD_PARAMS = DEFAULT_PARAMS | {
@@ -260,7 +265,8 @@ MANTA_CANDIDATE_PARAMS = DEFAULT_PARAMS | {
     'info_cols_pred': ['IMPRECISE', 'HOMLEN', 'BND_DEPTH', 'SVLEN', 'PAIR_COUNT', 'UPSTREAM_PAIR_COUNT', 'DOWNSTREAM_PAIR_COUNT', 'BND_PAIR_COUNT'],
     'svlen_source': 'svlen',
     'qual_metric': 'INFO_TOTAL_PAIR_COUNT',
-    'bnd2_pos': 'end'
+    'bnd2_pos': 'end',
+    'header_signature': {'INFO': ['PAIR_COUNT', 'UPSTREAM_PAIR_COUNT', 'DOWNSTREAM_PAIR_COUNT']},
 }
 
 MANTA_DIPLOID_PARAMS = DEFAULT_PARAMS | {
@@ -271,7 +277,8 @@ MANTA_DIPLOID_PARAMS = DEFAULT_PARAMS | {
     'info_cols_pred': ['IMPRECISE', 'HOMLEN', 'BND_DEPTH', 'SVLEN'],
     'format_cols': ['FT', 'GQ', 'PR', 'SR'],
     'svlen_source': 'svlen',
-    'bnd2_pos': 'end'
+    'bnd2_pos': 'end',
+    'header_signature': {'INFO': ['JUNCTION_QUAL'], 'FORMAT': ['PR'], 'FILTER': ['MinGQ']},
 }
 
 DELLY_PARAMS = DEFAULT_PARAMS | {
@@ -282,7 +289,9 @@ DELLY_PARAMS = DEFAULT_PARAMS | {
     'info_cols_pred': ['PE', 'MAPQ', 'SRMAPQ', 'SR', 'SRQ', 'CE', 'CT', 'SVLEN', 'IMPRECISE', 'SVTYPE', 'SVMETHOD', 'HOMLEN'],
     'format_cols': ['GT', 'GQ', 'RC', 'RCL', 'RCR', 'RDCN', 'DR', 'DV', 'RR', 'RV'],
     'svlen_source': 'svlen',
-    'bnd2_pos': 'end'
+    'bnd2_pos': 'end',
+    # Not SVMETHOD: SURVIVOR declares it too.
+    'header_signature': {'INFO': ['CT'], 'FORMAT': ['RDCN', 'RCL']},
 }
 
 SURVIVOR_PARAMS = DEFAULT_EVENT_PARAMS | {
@@ -350,7 +359,9 @@ HGSVC2_PARAMS = DEFAULT_PARAMS | {
     'svlens': (50, np.inf)
 }
 
-GRIDSS_H_PARAMS = GRIDSS_PARAMS.copy()
+# Variants share their base callset's parsing but are never identified from a
+# header: a shared signature would make every base-callset VCF ambiguous.
+GRIDSS_H_PARAMS = GRIDSS_PARAMS | {'header_signature': None}
 
 # Parameters for Sniffles2 (long-read SV caller)
 # Filter entries expected from Sniffles2
@@ -418,11 +429,12 @@ SNIFFLES_PARAMS = DEFAULT_PARAMS | {
     'info_cols_pred': SNIFFLES_INFO_PRED_COLS,
     'format_cols': ['GT', 'GQ', 'DR', 'DV'],
     'svlen_source': 'svlen',
-    'bnd2_pos': 'svlen'
+    'bnd2_pos': 'svlen',
+    'header_signature': {'INFO': ['STDEV_POS', 'STDEV_LEN', 'SUPPORT_INLINE']},
 }
 
 
-SNIFFLES_H_PARAMS = SNIFFLES_PARAMS.copy()
+SNIFFLES_H_PARAMS = SNIFFLES_PARAMS | {'header_signature': None}
 
 # Parameters for Sniffles2 v2.0.7 (Kosugi et al. 2024 version)
 # v2.0.7 has a smaller filter set and different INFO fields compared to v2.7.x
@@ -503,9 +515,10 @@ SEVERUS_PARAMS = DEFAULT_PARAMS | {
     'format_cols': ['GT', 'DR', 'DV', 'VAF', 'hVAF'],
     'svlen_source': 'svlen',
     'bnd2_pos': 'end',
+    'header_signature': {'INFO': ['DETAILED_TYPE', 'CLUSTERID'], 'FORMAT': ['hVAF']},
 }
 
-SEVERUS_H_PARAMS = SEVERUS_PARAMS.copy()
+SEVERUS_H_PARAMS = SEVERUS_PARAMS | {'header_signature': None}
 
 # Parameters for CuteSV (long-read SV caller)
 CUTESV_FILTERS = [
@@ -537,9 +550,10 @@ CUTESV_PARAMS = DEFAULT_PARAMS | {
     'svlen_source': 'svlen',
     'bnd2_pos': 'end',
     'qual_metric': 'INFO_RE',
+    'header_signature': {'INFO': ['RE', 'CILEN'], 'FILTER': ['q5']},
 }
 
-CUTESV_H_PARAMS = CUTESV_PARAMS.copy()
+CUTESV_H_PARAMS = CUTESV_PARAMS | {'header_signature': None}
 
 # Parameters for SvABA (short-read SV caller, local assembly-based)
 SVABA_FILTERS = [
@@ -594,9 +608,10 @@ SVABA_PARAMS = DEFAULT_PARAMS | {
     'format_cols': ['GT', 'GQ', 'AD', 'DP', 'SR', 'DR', 'LO', 'SL', 'LR', 'PL'],
     'svlen_source': 'alt',
     'bnd2_pos': None,
+    'header_signature': {'INFO': ['EVDNC', 'NUMPARTS', 'DISC_MAPQ']},
 }
 
-SVABA_H_PARAMS = SVABA_PARAMS.copy()
+SVABA_H_PARAMS = SVABA_PARAMS | {'header_signature': None}
 
 # Parameters for SMOOVE/LUMPY
 SMOOVE_FILTERS = []
@@ -629,6 +644,7 @@ SMOOVE_PARAMS = DEFAULT_PARAMS | {
     # QUAL is '.' on every smoove/LUMPY record; SU (total supporting evidence)
     # is the usable per-call quality signal.
     'qual_metric': 'INFO_SU',
+    'header_signature': {'INFO': ['SU', 'EV', 'PRPOS']},
 }
 
 class CallsetParamDict(dict):

@@ -8,12 +8,40 @@ from collections.abc import Iterable
 from typing import Sequence
 
 import pandas as pd
-from pysam import VariantFile, VariantRecord
+from pysam import VariantFile, VariantHeader, VariantRecord
 
 from . import _caller_params
 from ._constants import ANNOT_PREFIX, FILTER_PREFIX, INFO_PREFIX, SAMPLE_ID_COL, SAMPLE_PREFIX
 
 logger = logging.getLogger(__name__)
+
+
+# CALLSET IDENTIFICATION
+
+_HEADER_SECTIONS = {'INFO': 'info', 'FORMAT': 'formats', 'FILTER': 'filters'}
+"""header_signature section -> the VariantHeader attribute holding its IDs."""
+
+
+def get_callset_name(header: VariantHeader) -> str | None:
+    """Name the callset whose header_signature the header declares in full.
+
+    Checks every CALLSET_PARAM_DICT entry with a 'header_signature' and
+    returns its name only when exactly one entry matches; None when no
+    entry or several do.
+    """
+    matches = [
+        name
+        for name, params in _caller_params.CALLSET_PARAM_DICT.items()
+        if (signature := params.get('header_signature'))
+        and all(
+            field in getattr(header, _HEADER_SECTIONS[section])
+            for section, fields in signature.items()
+            for field in fields
+        )
+    ]
+    if len(matches) > 1:
+        logger.debug("get_callset_name: header matches several callsets %s", matches)
+    return matches[0] if len(matches) == 1 else None
 
 
 # BASIC READING FUNCTIONS

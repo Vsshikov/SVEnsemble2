@@ -93,7 +93,6 @@ svensemble --version
 ```bash
 svensemble run \
   --ref GRCh38.fa \
-  --callers manta_diploid delly \
   --caller_vcfs manta.diploidSV.vcf.gz delly.bcf \
   --ground_truth_vcf gnomad_sv.sites.vcf.gz \
   --model unbiased_rf \
@@ -108,7 +107,6 @@ your choice:
 ```bash
 svensemble run \
   --ref GRCh38.fa \
-  --callers manta_diploid delly \
   --caller_vcfs manta.diploidSV.vcf.gz delly.bcf \
   --ground_truth_vcf gnomad_sv.sites.vcf.gz \
   --model unbiased_rf \
@@ -121,8 +119,8 @@ Inputs to `svensemble run`:
 
 | Option | Required | Description |
 |---|---|---|
-| `--callers` | yes | Caller names, see [Supported callers](#supported-callers). Repeat a name to give one caller several files, e.g. one per sample |
-| `--caller_vcfs` | yes | Caller VCF/BCF files, unmodified caller output, in the same order as `--callers` |
+| `--caller_vcfs` | yes | Caller VCF/BCF files, unmodified caller output. Give one caller several files, e.g. one per sample |
+| `--callers` | no | Caller name per `--caller_vcfs` file, in the same order, see [Supported callers](#supported-callers). By default each file's caller is read from its header; `.` does that for one file |
 | `--ref` | yes | Reference genome FASTA the reads were aligned to (currently only recorded in the run's provenance) |
 | `--ground_truth_vcf` | one of these two | Ground truth SV sites VCF, used to label calls. Currently only gnomAD-SV is supported |
 | `--ground_truth_bps` | one of these two | Ground truth already processed by `svensemble ground-truth`, to reuse across samples |
@@ -137,13 +135,16 @@ Inputs to `svensemble run`:
 
 ### Supported callers
 
-| Caller | `--callers` value |
+| Caller | Name (read from the header) |
 |---|---|
 | GRIDSS | `gridss` |
 | Manta | `manta_diploid` (`diploidSV.vcf.gz`) |
 | Delly | `delly` |
 | SvABA | `svaba` |
 | smoove | `smoove` |
+
+The caller is recognised by the INFO, FORMAT and FILTER fields its VCF header declares, so
+`--callers` is needed only for a file whose header names no single caller.
 
 <!-- TODO: tested caller versions. -->
 
@@ -209,11 +210,12 @@ X, model_fit = api.train(matched, ["manta_diploid"], "unbiased_rf")
 calls = api.predict(model_fit, X, matched, "unbiased_rf", callers=["manta_diploid"])
 
 # Copies of the caller VCFs with the score as FORMAT SVENSSC (caller -> path(s))
-api.annotate(calls, {"manta_diploid": "manta.diploidSV.vcf.gz"}, "results/")
+api.annotate(calls, ["manta.diploidSV.vcf.gz"], "results/")
 ```
 
-`api.run` takes the same options as `svensemble run` as keyword arguments, with
-`caller_vcfs` as a mapping from caller name to one path or a list of paths.
+`api.run` takes the same options as `svensemble run` as keyword arguments: `caller_vcfs` is
+one path or a list of paths, and the optional `callers` lists a name per file, with `None` for
+a file whose caller is read from its header.
 
 ## Citation
 

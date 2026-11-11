@@ -6,11 +6,13 @@ import os
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 import pytest
 import pysam
 
 from svensemble.vcfparse import (
+    get_callset_name,
     parse_vcf_to_df,
     _fetch_filter_fields,
     _fetch_info_fields,
@@ -417,3 +419,50 @@ class TestAnnotatorCols:
         path = _write_annotated_vcf(rows, with_sample=False)
         df = self._parse(path, self._NO_FORMAT_PARAMS)
         assert not any(c.startswith("ANNOT_") for c in df.columns)
+
+
+# ---------------------------------------------------------------------------
+# get_callset_name
+# ---------------------------------------------------------------------------
+
+# Header-only copies of real caller output (sample BM009-met of the
+# full_run_somatic run): gridss 2.13.2, manta 1.6.0 (candidate_sv and
+# diploid_sv), delly 1.7.3 (BCF, written as text), smoove 0.2.8, svaba 1.2.0,
+# cuteSV 2.0.2, Sniffles2 2.7.3 and Severus 1.7. The sample is renamed to
+# SAMPLE; command lines, dates, the reference and all contigs but chr1 are
+# removed.
+CALLER_HEADERS = Path(__file__).parent / "data" / "caller_headers"
+DETECTABLE = sorted(path.stem for path in CALLER_HEADERS.glob("*.vcf"))
+
+
+def _header(path) -> pysam.VariantHeader:
+    with pysam.VariantFile(str(path)) as vf:
+        return vf.header.copy()
+
+
+class TestGetCallsetName:
+    @pytest.mark.parametrize("callset", DETECTABLE)
+    def test_real_header_names_its_caller(self, callset):
+        assert get_callset_name(_header(CALLER_HEADERS / f"{callset}.vcf")) == callset
+
+    def test_signatures_only_on_front_facing_callers(self):
+        # _H variants copy their base params; a copied signature would make
+        # every base-caller VCF match two callsets.
+        signed = sorted(name for name, params in _caller_params.CALLSET_PARAM_DICT.items()
+                        if params.get('header_signature'))
+        assert signed == DETECTABLE
+
+    def test_unknown_header_gives_none(self):
+        path = _write_vcf([], with_format=True)
+        try:
+            assert get_callset_name(_header(path)) is None
+        finally:
+            os.unlink(path)
+
+    def test_header_matching_two_callsets_gives_none(self, tmp_path):
+        delly = (CALLER_HEADERS / "delly.vcf").read_text().splitlines(keepends=True)
+        svaba_fields = [line for line in (CALLER_HEADERS / "svaba.vcf").read_text().splitlines(keepends=True)
+                        if line.startswith("##INFO=")]
+        path = tmp_path / "both.vcf"
+        path.write_text("".join(delly[:-1] + svaba_fields + delly[-1:]))
+        assert get_callset_name(_header(path)) is None

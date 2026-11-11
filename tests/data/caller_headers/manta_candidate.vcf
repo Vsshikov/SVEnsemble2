@@ -1,0 +1,27 @@
+##fileformat=VCFv4.1
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=GenerateSVCandidates 1.6.0
+##contig=<ID=chr1,length=248956422>
+##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description="Imprecise structural variation">
+##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">
+##INFO=<ID=SVLEN,Number=.,Type=Integer,Description="Difference in length between REF and ALT alleles">
+##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the variant described in this record">
+##INFO=<ID=CIPOS,Number=2,Type=Integer,Description="Confidence interval around POS">
+##INFO=<ID=CIEND,Number=2,Type=Integer,Description="Confidence interval around END">
+##INFO=<ID=CIGAR,Number=A,Type=String,Description="CIGAR alignment for each alternate indel allele">
+##INFO=<ID=MATEID,Number=.,Type=String,Description="ID of mate breakend">
+##INFO=<ID=EVENT,Number=1,Type=String,Description="ID of event associated to breakend">
+##INFO=<ID=HOMLEN,Number=.,Type=Integer,Description="Length of base pair identical homology at event breakpoints">
+##INFO=<ID=HOMSEQ,Number=.,Type=String,Description="Sequence of base pair identical homology at event breakpoints">
+##INFO=<ID=SVINSLEN,Number=.,Type=Integer,Description="Length of insertion">
+##INFO=<ID=SVINSSEQ,Number=.,Type=String,Description="Sequence of insertion">
+##INFO=<ID=LEFT_SVINSSEQ,Number=.,Type=String,Description="Known left side of insertion for an insertion of unknown length">
+##INFO=<ID=RIGHT_SVINSSEQ,Number=.,Type=String,Description="Known right side of insertion for an insertion of unknown length">
+##INFO=<ID=PAIR_COUNT,Number=1,Type=Integer,Description="Read pairs supporting this variant where both reads are confidently mapped">
+##INFO=<ID=BND_PAIR_COUNT,Number=1,Type=Integer,Description="Confidently mapped reads supporting this variant at this breakend (mapping may not be confident at remote breakend)">
+##INFO=<ID=UPSTREAM_PAIR_COUNT,Number=1,Type=Integer,Description="Confidently mapped reads supporting this variant at the upstream breakend (mapping may not be confident at downstream breakend)">
+##INFO=<ID=DOWNSTREAM_PAIR_COUNT,Number=1,Type=Integer,Description="Confidently mapped reads supporting this variant at this downstream breakend (mapping may not be confident at upstream breakend)">
+##ALT=<ID=DEL,Description="Deletion">
+##ALT=<ID=INS,Description="Insertion">
+##ALT=<ID=DUP:TANDEM,Description="Tandem Duplication">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO

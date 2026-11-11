@@ -343,18 +343,44 @@ def shap(
 # Caller VCF inputs: sample checks and annotation
 # ---------------------------------------------------------------------------
 
-CallerVcfs = Mapping[str, Path | Sequence[Path]]
-"""Caller name -> one VCF/BCF path, or several (e.g. one per sample)."""
-
 _NA_LIKE_SAMPLES = frozenset({"", "NA", "N/A", "NaN", "nan", "None", "null", "NULL", "<NA>", "*"})
 
 
-def _as_path_tuples(caller_vcfs: CallerVcfs) -> dict[str, tuple[Path, ...]]:
-    """caller_vcfs with every value as a tuple of Paths."""
-    return {
-        caller: (Path(vcfs),) if isinstance(vcfs, (str, Path)) else tuple(Path(v) for v in vcfs)
-        for caller, vcfs in caller_vcfs.items()
-    }
+def _resolve_caller_vcfs(
+    caller_vcfs: str | Path | Sequence[str | Path],
+    callers: Sequence[str | None] | None = None,
+) -> dict[str, tuple[Path, ...]]:
+    """Group caller VCFs by callset name, reading a name from the header where none is given.
+
+    *callers* pairs with *caller_vcfs* by position; None (or a None entry)
+    names that file by io.read_callset_name. Files with the same name, given
+    or read, collect in input order, e.g. one file per sample.
+
+    Raises:
+        ValueError: If the lengths differ, or some headers name no single
+            callset (all such files are listed).
+        TypeError: If caller_vcfs is a mapping (the old name -> paths form).
+    """
+    if isinstance(caller_vcfs, Mapping):
+        raise TypeError("caller_vcfs is a list of paths; give caller names in callers.")
+    vcfs = (Path(caller_vcfs),) if isinstance(caller_vcfs, (str, Path)) else tuple(map(Path, caller_vcfs))
+    names = (None,) * len(vcfs) if callers is None else tuple(callers)
+    if len(names) != len(vcfs):
+        raise ValueError(f"callers ({len(names)}) and caller_vcfs ({len(vcfs)}) must be the same length.")
+    out: dict[str, tuple[Path, ...]] = {}
+    unknown = []
+    for name, vcf in zip(names, vcfs):
+        name = name or sv_io.read_callset_name(vcf)
+        if name is None:
+            unknown.append(str(vcf))
+        else:
+            out[name] = out.get(name, ()) + (vcf,)
+    if unknown:
+        raise ValueError(
+            f"Cannot identify the caller of {unknown} from the header; "
+            "name it in callers (--callers on the command line)."
+        )
+    return out
 
 
 def _compare_sample_sets(sets_by_caller: Mapping[str, Collection[str]]) -> tuple[str, ...]:
@@ -375,14 +401,15 @@ def _compare_sample_sets(sets_by_caller: Mapping[str, Collection[str]]) -> tuple
     return tuple(sorted(next(iter(distinct)))) if distinct else ()
 
 
-def check_sample_sets(caller_vcfs: CallerVcfs) -> tuple[str, ...]:
+def check_sample_sets(caller_vcfs: Mapping[str, Sequence[Path]]) -> tuple[str, ...]:
     """Samples shared by all caller VCFs, read from their #CHROM lines.
 
-    A caller's samples are the union over its files; a sample in two files of
+    *caller_vcfs* maps caller name -> its files (_resolve_caller_vcfs). A
+    caller's samples are the union over its files; a sample in two files of
     one caller raises. Then _compare_sample_sets applies across callers.
     """
     sets_by_caller = {}
-    for caller, paths in _as_path_tuples(caller_vcfs).items():
+    for caller, paths in caller_vcfs.items():
         per_file = {path: sv_io.parse_samples_from_vcf(path) for path in paths}
         seen: dict[str, Path] = {}
         for path, samples in per_file.items():
@@ -439,7 +466,12 @@ def _check_annotatable(
     return samples, out_paths
 
 
-def annotate(calls: pd.DataFrame, caller_vcfs: CallerVcfs, output_dir: Path) -> dict[str, tuple[Path, ...]]:
+def annotate(
+    calls: pd.DataFrame,
+    caller_vcfs: str | Path | Sequence[str | Path],
+    output_dir: Path,
+    callers: Sequence[str | None] | None = None,
+) -> dict[str, tuple[Path, ...]]:
     """Copies of the caller VCFs/BCFs with the ensemble score as FORMAT SVENSSC.
 
     Records are edited as text or BCF bytes, never re-serialised, so each
@@ -449,13 +481,20 @@ def annotate(calls: pd.DataFrame, caller_vcfs: CallerVcfs, output_dir: Path) -> 
 
     Args:
         calls: Ensemble calls as predict returns them (or io.read_calls).
-        caller_vcfs: Caller name -> VCF/BCF path(s), as for run.
+        caller_vcfs: Caller VCF/BCF path(s), as for run.
         output_dir: Where io.ANNOTATED_VCF files go (created if missing).
+        callers: Caller name per file, as for run; None reads names from the headers.
 
     Returns:
         Caller name -> annotated paths, in input order.
     """
-    paths = _as_path_tuples(caller_vcfs)
+    return _annotate(calls, _resolve_caller_vcfs(caller_vcfs, callers), output_dir)
+
+
+def _annotate(
+    calls: pd.DataFrame, paths: Mapping[str, tuple[Path, ...]], output_dir: Path,
+) -> dict[str, tuple[Path, ...]]:
+    """annotate for caller VCFs already grouped by name (_resolve_caller_vcfs)."""
     sv_annotate.pred_column(calls)
     for caller in paths:
         if f"{caller}_INFO_EVENT" not in calls.columns:
@@ -483,7 +522,8 @@ SAVE_ARTIFACTS = frozenset({"model", "feature_matrix", "matched_bps", "id_graph"
 
 def run(
     *,
-    caller_vcfs: CallerVcfs,
+    caller_vcfs: str | Path | Sequence[str | Path],
+    callers: Sequence[str | None] | None = None,
     ref: Path,
     model: str,
     output_dir: Path | None = None,
@@ -529,9 +569,12 @@ def run(
     and share one record in the calls VCF.
 
     Args:
-        caller_vcfs: Caller name -> caller VCF, or several (e.g. one per
-            sample); each caller's files are parsed and concatenated. Sample
-            names must agree across callers (check_sample_sets).
+        caller_vcfs: Caller VCF/BCF path(s). Files of one caller (e.g. one
+            per sample) are parsed and concatenated. Sample names must agree
+            across callers (check_sample_sets).
+        callers: Caller name per file in *caller_vcfs*, the same length.
+            None, or a None entry, reads that file's caller from its header
+            (io.read_callset_name) and raises if the header names none.
         ref: Reference FASTA. Reserved for VCF writing; currently unused
             apart from the provenance record.
         model, training_set, model_config: As for train/predict.
@@ -542,7 +585,7 @@ def run(
             .vcf.gz) instead of output_dir. Its header carries the version,
             model_id and command; the provenance JSON is written only to
             output_dir and a kept scratch.
-        training_set: As in train; defaults to *callers* sorted and joined with '+'.
+        training_set: As in train; defaults to the callers sorted and joined with '+'.
         ground_truth_vcf, ground_truth_bps: Exactly one. A VCF goes through
             preprocess_ground_truth with the registry's filter_defaults (for
             other filters run ``svensemble ground-truth`` and pass the bps).
@@ -570,7 +613,7 @@ def run(
     """
     caller_vcfs = {
         caller: tuple(p.resolve() for p in paths)
-        for caller, paths in _as_path_tuples(caller_vcfs).items()
+        for caller, paths in _resolve_caller_vcfs(caller_vcfs, callers).items()
     }
     if not caller_vcfs:
         raise ValueError("caller_vcfs is empty; give at least one caller VCF.")
@@ -784,7 +827,7 @@ def _run_in(
     if calls_csv is not None:
         outputs["calls_csv"] = calls_csv
     if annotate_vcfs:
-        for caller, paths in annotate(calls, caller_vcfs, output_dir).items():
+        for caller, paths in _annotate(calls, caller_vcfs, output_dir).items():
             if len(paths) == 1:
                 outputs[f"{caller}.annotated_vcf"] = paths[0]
             else:

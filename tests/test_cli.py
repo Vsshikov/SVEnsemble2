@@ -152,6 +152,21 @@ class TestSubcommandParsing:
         out = pd.read_csv(tmp_path / "delly.raw_bps.csv")
         assert len(out) == 5
 
+    def test_preprocess_raw_reads_caller_from_header(self, tmp_path):
+        from .conftest import write_delly_vcf
+        vcf = tmp_path / "calls.vcf"
+        write_delly_vcf(vcf)
+        sys.argv = ["svensemble", "preprocess-raw", "--vcf", str(vcf), "--output_dir", str(tmp_path)]
+        main()
+        assert len(pd.read_csv(tmp_path / "delly.raw_bps.csv")) == 5
+
+    def test_preprocess_raw_unidentified_header_needs_caller(self, tmp_path):
+        vcf = tmp_path / "calls.vcf"
+        vcf.write_text("##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n")
+        sys.argv = ["svensemble", "preprocess-raw", "--vcf", str(vcf), "--output_dir", str(tmp_path)]
+        with pytest.raises(SystemExit, match="give --caller"):
+            main()
+
 
 class TestModelIdSubcommand:
     def test_all_lists_every_preset(self, capsys):
@@ -282,7 +297,8 @@ class TestRunSubcommand:
         assert captured["workdir"] is None
         assert captured["keep_workdir"] is False
         assert captured["save"] == set()
-        assert captured["caller_vcfs"] == {"gridss": (tmp_path / "g.vcf",), "manta_diploid": (tmp_path / "m.vcf",)}
+        assert captured["caller_vcfs"] == [tmp_path / "g.vcf", tmp_path / "m.vcf"]
+        assert captured["callers"] == ["gridss", "manta_diploid"]
         assert captured["annotate_vcfs"] is False
         assert captured["output_dir"] == tmp_path / "out"
         assert " run " in captured["command"] and "--output_dir" in captured["command"]
@@ -297,8 +313,23 @@ class TestRunSubcommand:
             "--output_dir", str(tmp_path / "out"), "--annotate_vcfs",
         ]
         main()
-        assert captured["caller_vcfs"] == {"delly": (tmp_path / "a.vcf", tmp_path / "b.vcf")}
+        assert captured["caller_vcfs"] == [tmp_path / "a.vcf", tmp_path / "b.vcf"]
+        assert captured["callers"] == ["delly", "delly"]
         assert captured["annotate_vcfs"] is True
+
+    def test_callers_optional(self, tmp_path, captured):
+        argv = self._argv(tmp_path, "--output_dir", str(tmp_path / "out"))
+        del argv[argv.index("--callers"):argv.index("--caller_vcfs")]
+        sys.argv = argv
+        main()
+        assert captured["callers"] is None
+
+    def test_dot_reads_caller_from_header(self, tmp_path, captured):
+        argv = self._argv(tmp_path, "--output_dir", str(tmp_path / "out"))
+        argv[argv.index("gridss")] = "."
+        sys.argv = argv
+        main()
+        assert captured["callers"] == [None, "manta_diploid"]
 
     def test_an_output_required(self, tmp_path, captured):
         sys.argv = self._argv(tmp_path)

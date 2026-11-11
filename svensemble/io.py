@@ -5,7 +5,8 @@ File I/O for SVEnsemble2: every pipeline filename and every read/write.
   writes. ``{caller}`` placeholders are filled with ``str.format``.
 
   Caller VCFs -- ``read_vcf`` parses a caller's VCF into the DataFrame
-  that ``api.preprocess_raw`` takes.
+  that ``api.preprocess_raw`` takes; ``read_callset_name`` names the
+  caller from the header alone.
 
   Artifacts -- ``read_*`` / ``write_*`` for breakpoint CSVs, the feature
   matrix, the model pickle and the final calls. Writers take the object
@@ -50,7 +51,7 @@ from .id_graph import EDGE_ATTRS, IdGraph, edge_table, node_table
 from ._caller_params import CALLSET_PARAM_DICT
 from ._constants import SAMPLE_ID_COL
 from .utils import atomic_path
-from .vcfparse import parse_vcf_to_df
+from .vcfparse import get_callset_name, parse_vcf_to_df
 
 
 RAW_BPS = "{caller}.raw_bps.csv"
@@ -93,6 +94,12 @@ def read_vcf(path: Path, caller: str, sample_names: str | list[str] | None = Non
     with VariantFile(str(path)) as vcf:
         vcf_df, _ = parse_vcf_to_df(vcf, params, sample_names=sample_names)
     return vcf_df
+
+
+def read_callset_name(path: Path) -> str | None:
+    """The callset a VCF/BCF header identifies (vcfparse.get_callset_name), or None."""
+    with VariantFile(str(path)) as vcf:
+        return get_callset_name(vcf.header)
 
 
 def read_bps(path: Path) -> pd.DataFrame:

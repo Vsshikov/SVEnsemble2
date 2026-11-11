@@ -104,15 +104,18 @@ def _register_preprocess_raw(subparsers):
         help="Parse caller VCF into raw breakpoints CSV.",
     )
     p.add_argument("--vcf", type=Path, required=True, help="Input VCF file path.")
-    p.add_argument("--caller", type=str, required=True, help="Caller name (e.g. gridss, manta_diploid, delly).")
+    p.add_argument("--caller", type=str, default=None, help="Caller name (e.g. gridss, manta_diploid, delly). Default: read from the VCF header.")
     p.add_argument("--output_dir", type=Path, required=True, help="Output directory for {caller}.raw_bps.csv.")
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_preprocess_raw)
 
 
 def _cmd_preprocess_raw(args):
-    bp_df = api.preprocess_raw(sv_io.read_vcf(args.vcf, args.caller), args.caller, verbose=args.verbose)
-    out = sv_io.write_bps(bp_df, args.output_dir / sv_io.RAW_BPS.format(caller=args.caller))
+    caller = args.caller or sv_io.read_callset_name(args.vcf)
+    if caller is None:
+        raise SystemExit(f"Cannot identify the caller of {args.vcf} from its header; give --caller.")
+    bp_df = api.preprocess_raw(sv_io.read_vcf(args.vcf, caller), caller, verbose=args.verbose)
+    out = sv_io.write_bps(bp_df, args.output_dir / sv_io.RAW_BPS.format(caller=caller))
 
     if args.verbose:
         print(f"Wrote {len(bp_df)} raw breakpoints to {out}")
@@ -307,16 +310,24 @@ def _cmd_predict(args):
 # Subcommand: annotate
 # ---------------------------------------------------------------------------
 
-def _caller_vcfs_from_args(callers: list[str], caller_vcfs: list[Path]) -> dict[str, tuple[Path, ...]]:
-    """Pair --callers with --caller_vcfs; a repeated caller name collects several files."""
+_DETECT_CALLER = "."
+"""--callers entry that reads that file's caller from its header."""
+
+_CALLERS_HELP = (
+    "Caller name per --caller_vcfs file, in the same order; '.' reads that file's caller from its "
+    "header. Default: read every caller from its header. Repeat a name for several files of one caller."
+)
+
+
+def _callers_from_args(callers: list[str] | None, caller_vcfs: list[Path]) -> list[str | None] | None:
+    """--callers for api.run/annotate: '.' becomes None; None stays None."""
+    if callers is None:
+        return None
     if len(callers) != len(caller_vcfs):
         raise SystemExit(
             f"--callers ({len(callers)}) and --caller_vcfs ({len(caller_vcfs)}) must be the same length."
         )
-    out: dict[str, tuple[Path, ...]] = {}
-    for caller, vcf in zip(callers, caller_vcfs):
-        out[caller] = out.get(caller, ()) + (vcf,)
-    return out
+    return [None if c == _DETECT_CALLER else c for c in callers]
 
 
 def _register_annotate(subparsers):
@@ -325,8 +336,8 @@ def _register_annotate(subparsers):
         help="Copy caller VCFs/BCFs with the ensemble score added as FORMAT SVENSSC (records otherwise untouched).",
     )
     p.add_argument("--calls", type=Path, required=True, help="Ensemble calls CSV (svensemble2_calls.csv).")
-    p.add_argument("--callers", type=str, nargs="+", required=True, help="Caller names (same order as --caller_vcfs); repeat a name for several files of one caller.")
-    p.add_argument("--caller_vcfs", type=Path, nargs="+", required=True, help="Caller VCFs/BCFs (same order as --callers).")
+    p.add_argument("--caller_vcfs", type=Path, nargs="+", required=True, help="Caller VCFs/BCFs.")
+    p.add_argument("--callers", type=str, nargs="+", default=None, help=_CALLERS_HELP)
     p.add_argument("--output_dir", type=Path, required=True, help="Output directory for the annotated files.")
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_annotate)
@@ -335,8 +346,9 @@ def _register_annotate(subparsers):
 def _cmd_annotate(args):
     written = api.annotate(
         sv_io.read_calls(args.calls),
-        _caller_vcfs_from_args(args.callers, args.caller_vcfs),
+        args.caller_vcfs,
         args.output_dir,
+        callers=_callers_from_args(args.callers, args.caller_vcfs),
     )
     if args.verbose:
         for caller, paths in written.items():
@@ -548,11 +560,11 @@ def _register_run(subparsers):
         "run",
         help="End-to-end standalone run: preprocess-raw -> ... -> predict for one sample.",
     )
-    p.add_argument("--callers", type=str, nargs="+", required=True, help="Caller names (same order as --caller_vcfs); repeat a name for several files of one caller.")
-    p.add_argument("--caller_vcfs", type=Path, nargs="+", required=True, help="Caller VCFs (same order as --callers).")
+    p.add_argument("--caller_vcfs", type=Path, nargs="+", required=True, help="Caller VCFs/BCFs.")
+    p.add_argument("--callers", type=str, nargs="+", default=None, help=_CALLERS_HELP)
     p.add_argument("--ref", type=Path, required=True, help="Reference FASTA path. Reserved for VCF writing; currently only recorded in provenance.")
     p.add_argument("--model", type=str, required=True, help="Model name.")
-    p.add_argument("--training_set", type=str, default=None, help="Training set name. Defaults to --callers sorted and joined with '+'. Give a TRAINING_SET_PRESETS name to train on that preset's callers.")
+    p.add_argument("--training_set", type=str, default=None, help="Training set name. Defaults to the callers sorted and joined with '+'. Give a TRAINING_SET_PRESETS name to train on that preset's callers.")
     p.add_argument("--output_dir", type=Path, default=None, help="Directory for the calls and any --save_* / --annotate_vcfs outputs (created if missing; one run per directory). Optional with --output_vcf.")
     p.add_argument("--output_vcf", type=Path, default=None, help="Write the calls VCF to exactly this path (.vcf or .vcf.gz).")
     grp = p.add_mutually_exclusive_group(required=True)
@@ -583,11 +595,12 @@ def _raise_on_sigterm(signum, frame):
 def _cmd_run(args):
     if args.output_dir is None and args.output_vcf is None:
         raise SystemExit("Give --output_dir and/or --output_vcf.")
-    caller_vcfs = _caller_vcfs_from_args(args.callers, args.caller_vcfs)
+    callers = _callers_from_args(args.callers, args.caller_vcfs)
     previous = signal.signal(signal.SIGTERM, _raise_on_sigterm)
     try:
         api.run(
-            caller_vcfs=caller_vcfs,
+            caller_vcfs=args.caller_vcfs,
+            callers=callers,
             ref=args.ref,
             model=args.model,
             training_set=args.training_set,
