@@ -98,8 +98,16 @@ def _sha256(path: Path) -> str:
 
 
 def output_info(path: Path) -> dict:
-    """Path, size and sha256 of a published output."""
+    """Path, size and sha256 of a published output; per file for a directory output."""
     path = Path(path)
+    if path.is_dir():
+        return {
+            "path": str(path),
+            "files": {
+                f.name: {"size": f.stat().st_size, "sha256": _sha256(f)}
+                for f in sorted(path.iterdir()) if f.is_file()
+            },
+        }
     return {"path": str(path), "size": path.stat().st_size, "sha256": _sha256(path)}
 
 

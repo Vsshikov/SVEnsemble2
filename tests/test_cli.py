@@ -502,7 +502,7 @@ class TestTrainingSetDefault:
         monkeypatch.setattr("svensemble.io.read_model", lambda p: None)
         monkeypatch.setattr("svensemble.io.read_feature_matrix", lambda p: None)
         monkeypatch.setattr("svensemble.io.read_bps", lambda p: None)
-        monkeypatch.setattr("svensemble.io.write_calls", lambda df, d, s: (d / "c.csv", d / "c.vcf"))
+        monkeypatch.setattr("svensemble.io.write_calls", lambda df, d, s, **k: (d / "c.csv", d / "c.vcf"))
         sys.argv = [
             "svensemble", "predict",
             "--model_pkl", "m.pkl", "--feature_matrix", "fm.csv", "--matched_bps", "mb.csv",
@@ -512,3 +512,53 @@ class TestTrainingSetDefault:
         main()
         assert captured["args"][4] is None
         assert captured["kwargs"]["callers"] == ["manta_diploid", "delly"]
+
+
+class TestMatchAndPredictIdGraph:
+    def test_match_writes_id_graph_next_to_matched_bps(self, tmp_path):
+        # Feeds two callers' breakpoints in S1 and S2 plus a ground truth;
+        # expects matched_bps.csv and an id_graph/ directory in --output_dir
+        # whose node SV IDs are the ones in the matched_bps.csv column.
+        from svensemble import io as sv_io
+        from svensemble._constants import SAMPLE_ID_COL
+        from svensemble.id_graph import node_table
+
+        from .test_chunk_match import _bps, _row
+
+        bps = _bps(
+            _row('delly', 'ev1', 1000, 1500, sample='S1'),
+            _row('delly', 'ev1', 1000, 1500, sample='S2'),
+            _row('sniffles', 'evA', 1003, 1503, sample='S1'),
+            _row('sniffles', 'evB', 1002, 1502, sample='S2'),
+            _row('gnomad', 'g1', 1001, 1501, sample='S1'),
+        )
+        paths = {}
+        for caller in ('delly', 'sniffles'):
+            paths[caller] = sv_io.write_bps(bps[caller], tmp_path / f'{caller}.bps.csv')
+        gt = sv_io.write_bps(bps['gnomad'].drop(columns=[SAMPLE_ID_COL]), tmp_path / 'gt.bps.csv')
+        out = tmp_path / 'out'
+        sys.argv = [
+            "svensemble", "match", "--bps", str(paths['delly']), str(paths['sniffles']),
+            "--callers", "delly", "sniffles", "--ground_truth_bps", str(gt), "--sample", "S",
+            "--max_dist", "10", "--output_dir", str(out),
+        ]
+        main()
+        assert sorted(p.name for p in out.iterdir()) == [sv_io.ID_GRAPH, sv_io.MATCHED_BPS]
+        assert sorted(p.name for p in (out / sv_io.ID_GRAPH).iterdir()) == ['edges.csv', 'meta.json', 'nodes.csv']
+        matched = sv_io.read_bps(out / sv_io.MATCHED_BPS)
+        nodes = node_table(sv_io.read_id_graph(out / sv_io.ID_GRAPH))
+        assert set(matched['svensemble_id']) == set(nodes['svensemble_id'].dropna())
+        assert matched['svensemble_id'].nunique() == 1 and sorted(matched[SAMPLE_ID_COL]) == ['S1', 'S2']
+
+    def test_predict_has_no_id_graph_option(self, tmp_path):
+        # predict reads the SV IDs from the matched_bps column, so --id_graph
+        # is an unknown argument (usage error, exit code 2).
+        sys.argv = [
+            "svensemble", "predict",
+            "--model_pkl", "m.pkl", "--feature_matrix", "fm.csv", "--matched_bps", "mb.csv",
+            "--sample", "s", "--callers", "delly", "--model", "unbiased_xgb",
+            "--output_dir", str(tmp_path), "--id_graph", str(tmp_path / "id_graph"),
+        ]
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 2

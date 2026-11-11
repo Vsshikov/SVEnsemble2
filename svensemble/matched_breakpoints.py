@@ -2,11 +2,15 @@
 Functions to handle dataframes with multiple matched breakpoint sets
 Some of the functions related to SVEnsemble2 metrics are also in this module.
 """
+import re
+
 import pandas as pd
 import numpy as np
 
 from . import _caller_params as caller_params
 from . import breakpoints as bps
+from . import vcfwrite
+from .annotate import pred_column
 from ._constants import (
     BNDS,
     CI_LEFT,
@@ -387,7 +391,8 @@ def get_X_y_from_training_df(
 
 def get_svensemble2_calls(
     matchedbps_df: pd.DataFrame,
-    pred_df: pd.DataFrame
+    pred_df: pd.DataFrame,
+    common_id_name: str = 'svensemble_id',
 ) -> pd.DataFrame:
     """
     Summarizes SVEnsemble2 calls by merging matched breakpoint and prediction DataFrames,
@@ -396,6 +401,8 @@ def get_svensemble2_calls(
     Args:
         matchedbps_df (pd.DataFrame): DataFrame of matched breakpoints.
         pred_df (pd.DataFrame): DataFrame containing model predictions and INFO_EVENT keys.
+        common_id_name (str): SV ID column (join_calls with add_common_id); kept in
+            the calls when matchedbps_df has it. Defaults to 'svensemble_id'.
 
     Returns:
         pd.DataFrame: Unified DataFrame of SVEnsemble2 summary calls with consensus coordinates, insert size, unique ID, and predictions.
@@ -448,6 +455,92 @@ def get_svensemble2_calls(
             'svensemble2_insert_size',
             'INFO_EVENT',
             *([SAMPLE_ID_COL] if SAMPLE_ID_COL in matchedbps_df_copy.columns else []),
+            *([common_id_name] if common_id_name in matchedbps_df_copy.columns else []),
             f"{training_set_name}_{model_name}{PRED_SUFFIX}"
         ]
     )
+
+_MATE_IN_ALT = re.compile(r'([\[\]])([^\[\]:]+):(\d+)([\[\]])')
+
+
+def _set_alt_mate_pos(alt: pd.Series, mate_pos: pd.Series) -> pd.Series:
+    """BND ALT strings with the mate position replaced; other ALTs unchanged."""
+    return pd.Series(
+        [
+            _MATE_IN_ALT.sub(lambda m, p=p: f'{m[1]}{m[2]}:{int(p)}{m[4]}', a) if isinstance(a, str) else a
+            for a, p in zip(alt, mate_pos)
+        ],
+        index=alt.index,
+    )
+
+
+def _harmonise_samples(
+    df: pd.DataFrame, how: str = 'mean', common_id_name: str = 'svensemble_id',
+) -> pd.DataFrame:
+    """Give every row of one SV the same site across the samples it appears in.
+
+    Groups the rows by their SV ID (the common_id_name column, from join_calls
+    with add_common_id). For each SV with rows in more than one sample, the site columns
+    (vcfwrite.site_cols: coordinates, CIs, ALT, INFO_INFERRED_SVTYPE,
+    INFO_SVLEN) of all its rows are overwritten with one value set; every
+    other column, and the rows themselves, are unchanged. A frame with at
+    most one sample is returned as is.
+
+    Args:
+        df: matched_bps or calls rows with SAMPLE_ID_COL and common_id_name.
+        how: 'mean' -- positions are the rounded mean, CIs the envelope of
+            the rows' intervals around the new positions, INFO_SVLEN the
+            mean; text columns (CHROM, ALT, INFO_INFERRED_SVTYPE) come from
+            the first row in sample order, with BND ALT mate positions
+            updated. 'max_score' -- all site columns are copied from the
+            SV's highest-scoring row (needs the '*_pred' column).
+        common_id_name: Column holding the SV IDs. Defaults to 'svensemble_id'.
+    """
+    if how not in ('mean', 'max_score'):
+        raise ValueError(f"how must be 'mean' or 'max_score', got {how!r}")
+    if SAMPLE_ID_COL not in df.columns or df[SAMPLE_ID_COL].nunique() <= 1:
+        return df
+
+    sv = df[common_id_name].astype(str)
+    shared = (sv.groupby(sv).transform('size') > 1).to_numpy()
+    if not shared.any():
+        return df
+    if pd.DataFrame({'sv': sv, 'sample': df[SAMPLE_ID_COL].astype(str)}).duplicated().any():
+        raise ValueError("An SV has more than one row for one sample; prune the ID graph first")
+
+    cols = vcfwrite.site_cols(df, include_event=False)
+    rows = df.loc[shared]
+    groups = sv[shared]
+    out = df.copy()
+
+    if how == 'max_score':
+        pred = pred_column(df)
+        best = rows[pred].astype(float).groupby(groups).idxmax()
+        site = df.loc[best.to_numpy(), cols].set_axis(best.index)
+        out.loc[shared, cols] = site.reindex(groups.to_numpy()).to_numpy()
+        return out
+
+    ordered = rows.assign(_sv=groups).sort_values(SAMPLE_ID_COL, kind='stable')
+    site = ordered.groupby('_sv')[cols].first()
+    for bnd in BNDS:
+        pos_col = f'POS_{bnd}'
+        mean_pos = rows[pos_col].astype(float).groupby(groups).mean().round().astype(np.int64)
+        for side, agg in ((CI_LEFT, 'min'), (CI_RIGHT, 'max')):
+            ci_col = f'INFO_CIPOS_{side}_{bnd}'
+            if ci_col in cols:
+                edge = (rows[pos_col] + rows[ci_col]).groupby(groups).agg(agg)
+                site[ci_col] = (edge - mean_pos).astype(np.int64)
+        site[pos_col] = mean_pos
+    if 'INFO_SVLEN' in cols:
+        site['INFO_SVLEN'] = rows['INFO_SVLEN'].astype(float).groupby(groups).mean().round()
+    for bnd, mate in ((BNDS[0], BNDS[1]), (BNDS[1], BNDS[0])):
+        alt_col = f'ALT_{bnd}'
+        if alt_col in cols:
+            site[alt_col] = _set_alt_mate_pos(site[alt_col], site[f'POS_{mate}'])
+
+    for col in cols:
+        values = site[col].reindex(groups.to_numpy()).to_numpy()
+        if pd.api.types.is_integer_dtype(out[col].dtype) and not pd.isna(values).any():
+            values = values.astype(out[col].dtype)
+        out.loc[shared, col] = values
+    return out

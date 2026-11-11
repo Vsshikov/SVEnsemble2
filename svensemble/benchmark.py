@@ -125,8 +125,9 @@ def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_mat
             max_dist=val_match_margin,
             insert_delta_threshold=val_match_insert_delta_threshold,
             ids_only=True,
-            ignore_size=False
-        )
+            ignore_size=False,
+            no_self_match=[callset_name, val_key],
+        )[0]
         matched = matched_ids[f'{callset_name}_INFO_EVENT']
     callset_bps_.loc[:, 'is_in_val'] = callset_bps_['INFO_EVENT'].astype(str).isin(matched)
     cols_to_keep = ['INFO_EVENT', qual_metric, 'is_in_val']
@@ -188,8 +189,9 @@ def validate_svensemble2_predictions(svensemble2_bps, val_set, val_name, trainin
             max_dist=val_match_margin,
             insert_delta_threshold=val_match_insert_delta_threshold,
             ids_only=True,
-            ignore_size=False
-        )
+            ignore_size=False,
+            no_self_match=['svensemble2', val_key],
+        )[0]
         matched = matched_ids['svensemble2_INFO_EVENT']
     svens_calls_.loc[:, 'is_in_val'] = svens_calls_['INFO_EVENT'].astype(str).isin(matched)
     cols_to_keep = ['INFO_EVENT', pred_col, 'is_in_val']

@@ -5,10 +5,12 @@ Delly and Manta VCFs it builds:
 
   * Manta as one joint-called VCF with two identical sample columns, S1 and S2;
   * Delly as two single-sample files, S1 with every record and S2 without
-    every tenth record,
+    every tenth record, and with some deletions moved 100 kb away under
+    their original IDs (per-sample files reuse event IDs at different loci),
 
 then runs api.run with annotate_vcfs and checks that calls, scores and the
-annotated VCFs stay per sample.
+annotated VCFs stay per sample, and that the calls VCF groups rows by the
+ID graph's SV IDs, never by reused event IDs.
 """
 
 import json
@@ -18,6 +20,9 @@ from pathlib import Path
 import pandas as pd
 import pysam
 import pytest
+
+from svensemble import io as sv_io
+from svensemble.id_graph import node_table
 
 from svensemble._constants import SAMPLE_ID_COL, SCORE_FIELD
 
@@ -50,6 +55,19 @@ def _with_samples(header: list[str], records: list[str], samples: list[str]) -> 
     return "\n".join(lines) + "\n"
 
 
+MOVE_BY = 100_000
+
+
+def _moved(rec: str) -> str:
+    """A DEL record shifted by MOVE_BY (POS and INFO END), ID unchanged."""
+    cols = rec.split("\t")
+    cols[1] = str(int(cols[1]) + MOVE_BY)
+    cols[7] = ";".join(
+        f"END={int(kv[4:]) + MOVE_BY}" if kv.startswith("END=") else kv for kv in cols[7].split(";")
+    )
+    return "\t".join(cols)
+
+
 @pytest.fixture(scope="module")
 def multi_run(tmp_path_factory):
     from svensemble import api
@@ -66,9 +84,17 @@ def multi_run(tmp_path_factory):
     delly_s1 = base / "S1.delly.vcf"
     delly_s1.write_text(_with_samples(delly_header, delly_records, ["S1"]))
     dropped_ids = {rec.split("\t")[2] for rec in delly_records[::10]}
+    moved_ids = {
+        rec.split("\t")[2] for rec in delly_records[5::10] if "SVTYPE=DEL" in rec.split("\t")[7]
+    }
     delly_s2 = base / "S2.delly.vcf"
     delly_s2.write_text(_with_samples(
-        delly_header, [rec for rec in delly_records if rec.split("\t")[2] not in dropped_ids], ["S2"],
+        delly_header,
+        [
+            _moved(rec) if rec.split("\t")[2] in moved_ids else rec
+            for rec in delly_records if rec.split("\t")[2] not in dropped_ids
+        ],
+        ["S2"],
     ))
 
     out = base / "out"
@@ -82,8 +108,9 @@ def multi_run(tmp_path_factory):
         ground_truth_name=spec["ground_truth_name"],
         workdir=base / "workdir",
         annotate_vcfs=True,
+        save={"id_graph", "callsets"},
     )
-    return outputs, dropped_ids, manta
+    return outputs, dropped_ids, moved_ids, manta
 
 
 def _scores(path: Path) -> dict[str, dict[str, float | None]]:
@@ -93,23 +120,42 @@ def _scores(path: Path) -> dict[str, dict[str, float | None]]:
 
 
 def test_calls_are_per_sample(multi_run):
-    outputs, _, _ = multi_run
+    outputs, _, _, _ = multi_run
     calls = pd.read_csv(outputs["calls_csv"], index_col=0, dtype={SAMPLE_ID_COL: str})
     assert set(calls[SAMPLE_ID_COL]) == {"S1", "S2"}
     assert not calls.duplicated(["INFO_EVENT", SAMPLE_ID_COL]).any()
 
 
 def test_calls_vcf_one_record_per_sv_with_both_samples(multi_run):
-    outputs, _, _ = multi_run
-    calls = pd.read_csv(outputs["calls_csv"], index_col=0)
+    outputs, _, _, _ = multi_run
+    sv_ids = set(node_table(sv_io.read_id_graph(outputs["id_graph"]))["svensemble_id"].dropna())
     scores = _scores(outputs["calls_vcf"])
     with pysam.VariantFile(str(outputs["calls_vcf"])) as vcf:
         assert list(vcf.header.samples) == ["S1", "S2"]
-    assert set(scores) <= set(calls["INFO_EVENT"]) | {f"{e}_{b}" for e in calls["INFO_EVENT"] for b in ("bnd1", "bnd2")}
+    assert set(scores) <= sv_ids | {f"{e}_{b}" for e in sv_ids for b in ("bnd1", "bnd2")}
+    # The joint Manta calls are in both samples, so some records carry both scores
+    assert any(rec["S1"] is not None and rec["S2"] is not None for rec in scores.values())
+
+
+def test_reused_ids_at_different_loci_are_different_svs(multi_run):
+    _, _, moved_ids, _ = multi_run
+    assert moved_ids
+    nodes = node_table(sv_io.read_id_graph(multi_run[0]["id_graph"]))
+    moved = nodes[(nodes["source"] == "delly") & nodes["event"].isin(moved_ids)]
+    by_event = moved.pivot(index="event", columns="sample", values="svensemble_id")
+    assert (by_event["S1"] != by_event["S2"]).all()
+
+
+def test_one_callset_vcf_per_input_file(multi_run):
+    outputs, _, _, _ = multi_run
+    assert {"delly.vcf.0", "delly.vcf.1", "manta_diploid.vcf"} <= set(outputs)
+    for key, sample in (("delly.vcf.0", "S1"), ("delly.vcf.1", "S2")):
+        with pysam.VariantFile(str(outputs[key])) as vcf:
+            assert list(vcf.header.samples) == [sample]
 
 
 def test_dropped_delly_records_unscored_in_s2_only(multi_run):
-    outputs, dropped_ids, _ = multi_run
+    outputs, dropped_ids, _, _ = multi_run
     calls = pd.read_csv(outputs["calls_csv"], index_col=0, dtype={SAMPLE_ID_COL: str, "delly_INFO_EVENT": str})
     delly_events = calls.dropna(subset=["delly_INFO_EVENT"])
     by_sample = {s: set(g["delly_INFO_EVENT"]) for s, g in delly_events.groupby(SAMPLE_ID_COL)}
@@ -123,7 +169,7 @@ def test_dropped_delly_records_unscored_in_s2_only(multi_run):
 
 
 def test_joint_manta_vcf_scored_for_both_samples(multi_run):
-    outputs, _, manta_input = multi_run
+    outputs, _, _, manta_input = multi_run
     path = outputs["manta_diploid.annotated_vcf"]
     scores = _scores(path)
     assert scores and all(rec["S1"] is not None and rec["S2"] is not None for rec in scores.values())

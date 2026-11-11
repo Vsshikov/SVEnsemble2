@@ -13,7 +13,8 @@ import numpy as np
 import pandas as pd
 
 from . import breakpoints as bps
-from ._constants import BND1, BND2, GROUND_TRUTH_SAMPLE, SAMPLE_ID_COL
+from ._constants import BND1, BND2, GROUND_TRUTH_SAMPLE, SAMPLE_ID_COL, SV_ID_PREFIX
+from .id_graph import IdGraph, drop_edges, pair_codes
 
 # Maps each BND relative-position string to a unique integer code.
 # Combined code = enc(bnd1) * 4 + enc(bnd2) gives a unique scalar per orientation pair,
@@ -289,7 +290,8 @@ def get_pairwise_matches(
     ins_dup_match: bool = False,
     return_graph: bool = True,
     return_unmatched: bool = False,
-    skip_single_source_for: str | list[str] | None = 'all'
+    skip_single_source_for: str | list[str] | None = 'all',
+    no_self_match: list[str] | None = None,
 ) -> ig.Graph | list[tuple[tuple[str, str], tuple[str, str]] | tuple[str, str]]:
     """
     Match breakpoints from multiple sources based on position and insert delta similarity.
@@ -308,6 +310,10 @@ def get_pairwise_matches(
             each vertex name is a (source, event_id, sample) tuple. Default
             False returns the raw matched pairs list.
         return_unmatched (bool): If True, also add unmatched breakpoint pairs to the result as single items.
+        no_self_match (list[str] | None): Sources whose breakpoints never match
+            each other, e.g. the ground truth. Breakpoints of any other source
+            may match others from the same source, within and across samples.
+            Defaults to None.
 
     Returns:
         ig.Graph: Undirected graph of matched breakpoints. Each vertex has a
@@ -371,11 +377,11 @@ def get_pairwise_matches(
 
         n = len(chunk_df)
 
-        # Build cross-source mask: True where row i and column j come from different sources.
-        # Uses the outer-product subtraction trick: start from all-ones and zero out each
-        # source's self-pair block. O(S * n) instead of an O(n²) nested loop.
+        # Build cross-source mask: False where row i and column j both come from one
+        # no_self_match source. Uses the outer-product subtraction trick: start from
+        # all-ones and zero out each listed source's self-pair block.
         cross_source_mask = np.ones((n, n), dtype=float)
-        for source in np.unique(chunk_df['source'].values):
+        for source in np.intersect1d(chunk_df['source'].values, no_self_match or []):
             m = chunk_df['source'].values == source
             cross_source_mask -= np.outer(m, m)
         cross_source_mask = cross_source_mask.astype(bool)
@@ -399,7 +405,7 @@ def get_pairwise_matches(
         alt_mask = alt_match_matrix(chunk_df, ins_dup_match=ins_dup_match)
 
 
-        # Use cached triu mask; cross_source_mask already filters same-source pairs
+        # Use cached triu mask; cross_source_mask already filters no_self_match pairs
         triu_mask = _get_triu_mask(n)
 
         # Create final match matrix (cross-source filter applied inside the matrix)
@@ -432,46 +438,71 @@ def get_pairwise_matches(
     if return_graph:
         out = ig.Graph.TupleList(matched_pairs, directed=False)
         out.add_vertices(unmatched)
+
+        # Edge annotations: the unordered source pair, coded against the sorted
+        # sources (IdGraph.sources), and whether both breakpoints come from one sample
+        names = out.vs['name'] if out.vcount() else []
+        sources = tuple(sorted({name[0] for name in names}))
+        source_index = np.array([sources.index(name[0]) for name in names], dtype=np.int64)
+        sample = np.array([name[2] for name in names], dtype=object)
+        ends = np.asarray(out.get_edgelist(), dtype=np.int64).reshape(-1, 2)
+        out.es['pair'] = pair_codes(source_index[ends[:, 0]], source_index[ends[:, 1]]).tolist()
+        out.es['same_sample'] = (sample[ends[:, 0]] == sample[ends[:, 1]]).tolist()
+        out = IdGraph(graph=out, sources=sources)
     else:
         out = matched_pairs + unmatched
 
     return out
 
+def _node_samples(graph: ig.Graph) -> list[str]:
+    """The sample of every node of *graph*, in node order."""
+    return [name[2] for name in graph.vs['name']] if graph.vcount() else []
+
+
+def _wildcard_mask(graph: ig.Graph, wildcard_sample: str | None) -> np.ndarray:
+    """Boolean mask over graph.vs: nodes whose sample is *wildcard_sample* (none if it is None)."""
+    return np.array([s == wildcard_sample for s in _node_samples(graph)], dtype=bool)
+
+
 def sample_vertex_mask(
     graph_in: ig.Graph,
     samples: Iterable[str],
-    include_ground_truth: bool = True,
+    wildcard_sample: str | None = None,
 ) -> np.ndarray:
     """Boolean mask over graph_in.vs: nodes whose sample is in *samples*.
 
-    Ground-truth nodes (sample GROUND_TRUTH_SAMPLE) are included when
-    *include_ground_truth*, since the ground truth applies to every sample.
+    Also selects the nodes whose sample is *wildcard_sample*, since those
+    belong to every sample.
     """
-    wanted = set(samples) | ({GROUND_TRUTH_SAMPLE} if include_ground_truth else set())
-    return np.array([v['name'][2] in wanted for v in graph_in.vs], dtype=bool)
+    wanted = set(samples) | ({wildcard_sample} if wildcard_sample is not None else set())
+    return np.array([s in wanted for s in _node_samples(graph_in)], dtype=bool)
 
 
-def split_graph_by_sample(graph_in: ig.Graph) -> dict[str, ig.Graph]:
-    """One subgraph per sample: that sample's nodes plus the ground truth.
+def split_graph_by_sample(graph_in: ig.Graph, wildcard_sample: str | None = None) -> dict[str, ig.Graph]:
+    """One subgraph per sample: that sample's nodes plus the wildcard nodes.
 
-    Each subgraph is induced by sample_vertex_mask, which drops every edge
-    between different samples. Ground-truth nodes left without a neighbour
-    in a sample are removed from that sample's subgraph, so they do not form
-    ground-truth-only components there. Samples are in sorted order.
+    Induces each subgraph from the sample's nodes and the nodes whose sample is
+    *wildcard_sample* (as sample_vertex_mask selects them), which drops every
+    edge between different samples. Removes the wildcard nodes left without a
+    neighbour in a sample from that sample's subgraph, so they join only the
+    samples they match. Returns the samples in sorted order.
     """
-    samples = sorted({v['name'][2] for v in graph_in.vs} - {GROUND_TRUTH_SAMPLE})
+    # Read the names once: per-vertex attribute access in a per-sample loop is
+    # O(samples x nodes) in Python
+    sample_of = np.array(_node_samples(graph_in), dtype=object)
+    is_wild = _wildcard_mask(graph_in, wildcard_sample)
     out = {}
-    for sample in samples:
-        sub = graph_in.induced_subgraph(np.flatnonzero(sample_vertex_mask(graph_in, (sample,))))
-        stray = [v.index for v in sub.vs if v['name'][2] == GROUND_TRUTH_SAMPLE and v.degree() == 0]
-        sub.delete_vertices(stray)
+    for sample in sorted(set(sample_of[~is_wild])):
+        sub = graph_in.induced_subgraph(np.flatnonzero((sample_of == sample) | is_wild))
+        stray = _wildcard_mask(sub, wildcard_sample) & (np.array(sub.degree(), dtype=np.int64) == 0)
+        sub.delete_vertices(np.flatnonzero(stray).tolist())
         out[sample] = sub
     return out
 
 
-def component_sample(component: list[tuple]) -> str:
-    """The sample of a per-sample component (its one non-ground-truth sample)."""
-    samples = {node[2] for node in component} - {GROUND_TRUTH_SAMPLE}
+def component_sample(component: list[tuple], wildcard_sample: str | None = None) -> str:
+    """The sample of a per-sample component: its one sample other than *wildcard_sample*."""
+    samples = {node[2] for node in component} - {wildcard_sample}
     if len(samples) != 1:
         raise ValueError(f"Component spans samples {sorted(samples)}; split the graph by sample first")
     return samples.pop()
@@ -524,22 +555,35 @@ def merge_bp_pairs_dfs(pairs):
 
 _TOPOLOGY_PREFIX = 'svensembletopology'
 
-def smoothe_by_source(graph_in: ig.Graph, source_to_drop: str):
-    """
-    Drop vertices from the input graph with source source_to_drop while retaining connectivity
-    """
-    drop_indices = [v.index for v in graph_in.vs if v['name'][0] == source_to_drop]
-    neighbors = [v.neighbors() for v in graph_in.vs[drop_indices]]
-    new_edges = set()
-    for neighbor_set in neighbors:
-        new_edges.update(itertools.combinations(neighbor_set, 2))
+def smoothe_by_source(graph_in: ig.Graph, source_to_drop: str) -> ig.Graph:
+    """Remove one source's vertices from a match graph and join their neighbours.
 
-    if new_edges:
-        eids = graph_in.get_eids(new_edges, error=False)
-        new_edges = {pair for pair, eid in zip(new_edges, eids) if eid == -1}
+    Joins every two neighbours of each vertex of *source_to_drop* by an edge,
+    unless they already share one, then deletes the vertices of that source.
+    Added edges carry no attributes (None).
 
-    graph_in.add_edges(new_edges)
-    graph_in.delete_vertices(drop_indices)
+    Args:
+        graph_in (ig.Graph): Match graph whose vertex names start with the
+            source; stays unchanged.
+        source_to_drop (str): Source whose vertices to remove.
+
+    Returns:
+        ig.Graph: A new graph without the vertices of *source_to_drop*.
+    """
+    graph = graph_in.copy()
+    drop_indices = [v.index for v in graph.vs if v['name'][0] == source_to_drop]
+    pairs = []
+    for v in drop_indices:
+        neighbors = np.asarray(graph.neighbors(v), dtype=np.int64)
+        i, j = np.triu_indices(len(neighbors), k=1)
+        pairs.append(np.column_stack([neighbors[i], neighbors[j]]))
+    if pairs:
+        graph.add_edges(np.concatenate(pairs).tolist())
+        # Drop the added edges that duplicate existing ones; 'first' keeps the
+        # existing edge's attributes, as existing edges precede added ones
+        graph.simplify(multiple=True, loops=False, combine_edges='first')
+    graph.delete_vertices(drop_indices)
+    return graph
 
 def calc_component_stats(graph_in: ig.Graph, ignore_callsets: list[str] | None = None) -> pd.DataFrame:
     """Compute topological features for each connected component of a match graph.
@@ -618,6 +662,7 @@ def build_matched_bp_df(
     ref_callset: str | None = None,
     ids_only: bool = False,
     topology_df: pd.DataFrame = None,
+    wildcard_sample: str | None = None,
 ) -> pd.DataFrame:
     """Build a DataFrame containing matched breakpoints from different sources.
 
@@ -633,6 +678,8 @@ def build_matched_bp_df(
         topology_df (pd.DataFrame, optional): Per-component topological features,
             one row per component aligned with matched_lists. Concatenated into the
             result when provided.
+        wildcard_sample (str | None, optional): Sample of the nodes that belong
+            to every sample; a row takes its sample from its other nodes.
     Returns:
         pd.DataFrame: DataFrame where each row contains the matched breakpoint data from
             different sources side by side, with source-specific column prefixes. Only
@@ -657,7 +704,7 @@ def build_matched_bp_df(
     # This table will be used to join the breakpoint dataframes
     id_table_columns = [f'{source}_INFO_EVENT' for source in bp_df_dict.keys()]
     id_dict = {col: [pd.NA] * len(matched_lists) for col in id_table_columns}
-    id_dict[SAMPLE_ID_COL] = [component_sample(matched_list) for matched_list in matched_lists]
+    id_dict[SAMPLE_ID_COL] = [component_sample(matched_list, wildcard_sample) for matched_list in matched_lists]
     for i, matched_list in enumerate(matched_lists):
         sources_seen = set()
         for bp_source, bp_event, _sample in matched_list:
@@ -721,7 +768,290 @@ def _merge_on_event_and_sample(
     return merged.drop(columns=[source_sample_col])
 
 
-def inner_join_bps(
+def _kept_view(graph: ig.Graph, dropped: set[int]) -> ig.Graph:
+    """Copy *graph* without the *dropped* edges, tagging every edge with its ID in
+    *graph* ('eid') and every node with its ID ('vid').
+
+    igraph carries the tags through subgraphs, so cut edges map straight back to
+    *graph*. subgraph_edges keeps the edges in ID order, which matches *kept*.
+    """
+    kept = [e for e in range(graph.ecount()) if e not in dropped]
+    view = graph.subgraph_edges(kept, delete_vertices=False)
+    view.es['eid'] = kept
+    view.vs['vid'] = list(range(view.vcount()))
+    return view
+
+
+def _edge_costs(graph: ig.Graph, is_wild: np.ndarray) -> list[int]:
+    """Price every edge of *graph* at 1, or, if it touches a wildcard node, above all edges together.
+
+    A minimum cut over these prices removes as few wildcard edges as it can and,
+    among those cuts, as few other edges as it can, so breakpoints stay with the
+    wildcard (ground-truth) site they match.
+    """
+    heavy = graph.ecount() + 1
+    return [heavy if is_wild[u] or is_wild[v] else 1 for u, v in graph.get_edgelist()]
+
+
+def _most_separating(cuts: list, conflicts: list[tuple[int, int]], cost: list[float]):
+    """The cut that separates the most conflicting vertex pairs per unit of edge *cost*
+    it removes; the first wins ties."""
+    def separated_per_cost(cut):
+        side = set(cut.partition[0])
+        return sum((a in side) != (b in side) for a, b in conflicts) / sum(cost[e] for e in cut.cut)
+    return max(cuts, key=separated_per_cost)
+
+
+def same_caller_split_edges(
+    idg: IdGraph, dropped: Iterable[int] = (), wildcard_sample: str | None = None,
+) -> np.ndarray:
+    """Collect edges whose removal leaves no source twice in a per-sample component.
+
+    Each round, removes the marked edges from a copy of the graph, splits it by
+    sample (split_graph_by_sample, with the wildcard nodes in every sample they
+    match), and in every component that holds two breakpoints of one source,
+    separates them with a minimum cut and marks the cut edges. Stops when no
+    component holds a source twice. Wildcard (ground-truth) breakpoints
+    conflict like any other source's.
+
+    Within a component, computes one candidate cut per duplicated source,
+    between its two breakpoints with the most edges in the component (ties:
+    event ID), and applies the candidate that separates the most same-source
+    pairs per unit of cost cut (ties: alphabetically first source). Prices
+    every edge at 1, and an edge to a wildcard node above all edges together
+    (_edge_costs), so the cut keeps breakpoints with the wildcard site they
+    match whenever other edges can separate them. Each candidate keeps the
+    better-connected breakpoint: adds eps to its edges, so that among equally
+    cheap cuts its neighbours stay with it. eps never changes the cut's cost.
+
+    Args:
+        idg (IdGraph): ID graph to split; stays unchanged.
+        dropped (Iterable[int]): Edge IDs already marked for removal.
+        wildcard_sample (str | None): Sample of the nodes that belong to every
+            sample they match (the ground truth). Defaults to None.
+
+    Returns:
+        np.ndarray: The sorted IDs (in idg.graph) of the marked edges: the
+            input ones plus the new ones.
+    """
+    graph = idg.graph
+    dropped = {int(e) for e in dropped}
+    while True:
+        view = _kept_view(graph, dropped)
+        new = []
+        for sample_graph in split_graph_by_sample(view, wildcard_sample).values():
+            for component in sample_graph.connected_components():
+                sub = sample_graph.subgraph(component)
+                names = sub.vs['name']
+                by_source = defaultdict(list)
+                for i, name in enumerate(names):
+                    by_source[name[0]].append(i)
+                duplicated = sorted(s for s, members in by_source.items() if len(members) > 1)
+                if not duplicated:
+                    continue
+                # Every two breakpoints of one source conflict
+                conflicts = [p for s in duplicated for p in itertools.combinations(by_source[s], 2)]
+                # One candidate cut per duplicated source, between its two best-connected
+                # breakpoints, adding eps to the kept one's edges
+                cost = _edge_costs(sub, _wildcard_mask(sub, wildcard_sample))
+                edges = sub.get_edgelist()
+                degree = sub.degree()
+                cuts = []
+                for s in duplicated:
+                    kept, other = sorted(by_source[s], key=lambda i: (-degree[i], str(names[i][1])))[:2]
+                    eps = 1 / (2 * (degree[kept] + 1))
+                    capacity = [c + eps if kept in e else c for c, e in zip(cost, edges)]
+                    cuts.append(sub.mincut(source=kept, target=other, capacity=capacity))
+                new.extend(sub.es[_most_separating(cuts, conflicts, cost).cut]['eid'])
+        if not new:
+            return np.array(sorted(dropped), dtype=np.int64)
+        dropped.update(new)
+
+
+def same_sample_split_edges(
+    idg: IdGraph, dropped: Iterable[int] = (), wildcard_sample: str | None = None,
+) -> np.ndarray:
+    """Collect edges whose removal leaves no sample twice in an SV.
+
+    Each round, removes the marked edges from a copy of the graph, numbers its
+    per-sample components (split_graph_by_sample), and groups all breakpoints,
+    wildcard ones included, into SVs by the edges between them. In every SV
+    that holds two per-sample components of one sample, separates those two
+    with a minimum cut and marks the cut edges. The cut runs on a graph whose
+    vertices are the SV's per-sample components and its wildcard breakpoints,
+    one vertex each, and which keeps every edge between two of them. Wildcard
+    breakpoints belong to no single sample, so they never conflict. Stops
+    when no SV holds a sample twice.
+
+    Within an SV, computes one candidate cut per pair of same-sample
+    components and applies the candidate that separates the most such pairs
+    per unit of cost cut (ties: alphabetically first sample, then
+    lowest-numbered components). Prices every edge at 1, and an edge to a
+    wildcard node above all edges together (_edge_costs), so the cut keeps
+    every sample's breakpoints with the wildcard site they match whenever
+    other edges can separate the conflict.
+
+    Args:
+        idg (IdGraph): ID graph to split; stays unchanged.
+        dropped (Iterable[int]): Edge IDs already marked for removal.
+        wildcard_sample (str | None): Sample of the nodes that belong to every
+            sample they match (the ground truth). Defaults to None.
+
+    Returns:
+        np.ndarray: The sorted IDs (in idg.graph) of the marked edges: the
+            input ones plus the new ones.
+    """
+    graph = idg.graph
+    sample_of = _node_samples(graph)
+    is_wild = _wildcard_mask(graph, wildcard_sample)
+    dropped = {int(e) for e in dropped}
+    while True:
+        view = _kept_view(graph, dropped)
+        # Per-sample component of every non-wildcard breakpoint; each wildcard
+        # breakpoint gets a number of its own
+        component_of = np.full(graph.vcount(), -1, dtype=np.int64)
+        n_components = 0
+        for sample_graph in split_graph_by_sample(view, wildcard_sample).values():
+            components = sample_graph.connected_components()
+            vid = np.array(sample_graph.vs['vid'], dtype=np.int64)
+            component_of[vid] = n_components + np.array(components.membership, dtype=np.int64)
+            n_components += len(components)
+        component_of[is_wild] = n_components + np.arange(is_wild.sum())
+
+        new = []
+        for sv in view.connected_components():
+            per_sample = defaultdict(set)
+            for v in sv:
+                if not is_wild[v]:
+                    per_sample[sample_of[v]].add(component_of[v])
+            conflicting = sorted(s for s, comps in per_sample.items() if len(comps) > 1)
+            if not conflicting:
+                continue
+            # Price the SV's edges, then merge each per-sample component (and
+            # wildcard breakpoint) into one vertex, keeping every edge between them
+            quotient = view.subgraph(sv)
+            vid = quotient.vs['vid']
+            quotient.es['cost'] = _edge_costs(quotient, is_wild[vid])
+            components, local = np.unique(component_of[vid], return_inverse=True)
+            quotient.contract_vertices(local.tolist())
+            cost = quotient.es['cost']
+            index = {c: i for i, c in enumerate(components)}
+            # Every two per-sample components of one sample conflict; cut each pair
+            conflicts = [
+                (index[a], index[b])
+                for sample in conflicting
+                for a, b in itertools.combinations(sorted(per_sample[sample]), 2)
+            ]
+            cuts = [quotient.mincut(source=a, target=b, capacity=cost) for a, b in conflicts]
+            new.extend(quotient.es[_most_separating(cuts, conflicts, cost).cut]['eid'])
+        if not new:
+            return np.array(sorted(dropped), dtype=np.int64)
+        dropped.update(new)
+
+
+def assign_svensemble_ids(
+    idg: IdGraph, dropped: Iterable[int], wildcard_sample: str | None = None,
+    common_id_name: str = 'svensemble_id',
+) -> IdGraph:
+    """Drop the marked edges and label every SV with its SVEnsemble ID.
+
+    Groups all breakpoints, wildcard ones included, into SVs by the edges
+    between them, once before and once after removing the marked edges,
+    numbering the groups by their smallest node ID. Labels each SV after the
+    removal with SV_ID_PREFIX plus the number of the group it came from, adding
+    '.k' when the removal split that group (k numbers the pieces). Leaves a
+    wildcard breakpoint without a label when it stands alone.
+
+    Args:
+        idg (IdGraph): ID graph to label; stays unchanged.
+        dropped (Iterable[int]): Edge IDs marked for removal.
+        wildcard_sample (str | None): Sample of the nodes that belong to every
+            sample they match (the ground truth). Defaults to None.
+        common_id_name (str): Node attribute to write the labels to. Defaults
+            to 'svensemble_id'.
+
+    Returns:
+        IdGraph: A new ID graph without the marked edges, with the label in the
+            common_id_name node attribute (None for a wildcard breakpoint that
+            stands alone).
+    """
+    is_wild = _wildcard_mask(idg.graph, wildcard_sample)
+    pruned = drop_edges(idg, dropped)
+
+    # SV components before and after the drop, lone wildcard nodes left out
+    before, after = (
+        sorted(
+            (c for c in graph.connected_components() if not is_wild[c].all()),
+            key=min,
+        )
+        for graph in (idg.graph, pruned.graph)
+    )
+    parent_of = np.empty(len(is_wild), dtype=np.int64)
+    for number, component in enumerate(before):
+        parent_of[component] = number
+    pieces = defaultdict(list)
+    for component in after:
+        pieces[parent_of[component[0]]].append(component)
+
+    pruned.graph.vs[common_id_name] = None
+    for parent, parts in pieces.items():
+        for k, component in enumerate(parts):
+            pruned.graph.vs[component][common_id_name] = (
+                f'{SV_ID_PREFIX}{parent}' if len(parts) == 1 else f'{SV_ID_PREFIX}{parent}.{k}'
+            )
+    return pruned
+
+
+def flatten_idgraph(
+    idg: IdGraph,
+    sources: Iterable[str],
+    wildcard_sample: str | None = None,
+    common_id_name: str = 'svensemble_id',
+    add_common_id: bool = False,
+) -> pd.DataFrame:
+    """Turn a pruned ID graph into the ID table, one row per per-sample component.
+
+    Splits the graph by sample (split_graph_by_sample), so a wildcard node
+    appears once in every sample it matches, and lists every node as
+    (source, event, sample, SV ID). Pivots that list on (SV ID, sample) into
+    one <source>_INFO_EVENT column per source. Pruning leaves at most one node
+    per source in each (SV ID, sample) pair, so the pivot meets no duplicates;
+    DataFrame.pivot raises if it does.
+
+    Args:
+        idg (IdGraph): Pruned ID graph with SV IDs assigned (assign_svensemble_ids).
+        sources (Iterable[str]): Sources to give a column, in column order.
+        wildcard_sample (str | None): Sample of the nodes that belong to every
+            sample they match (the ground truth). Defaults to None.
+        common_id_name (str): Node attribute holding the SV IDs. Defaults to
+            'svensemble_id'.
+        add_common_id (bool): Keep the SV ID as a column named common_id_name.
+            Defaults to False.
+
+    Returns:
+        pd.DataFrame: One <source>_INFO_EVENT column per source and
+            SAMPLE_ID_COL, plus common_id_name with add_common_id; all text.
+    """
+    long = pd.DataFrame(
+        [
+            (name[0], name[1], sample, common_id)
+            for sample, sub in split_graph_by_sample(idg.graph, wildcard_sample).items()
+            for name, common_id in zip(sub.vs['name'], sub.vs[common_id_name])
+        ],
+        columns=['source', 'event', SAMPLE_ID_COL, common_id_name],
+    )
+    table = (
+        long.pivot(index=[common_id_name, SAMPLE_ID_COL], columns='source', values='event')
+        .reindex(columns=list(sources))
+        .rename(columns=lambda source: f'{source}_INFO_EVENT')
+        .reset_index()
+    )
+    if not add_common_id:
+        table = table.drop(columns=common_id_name)
+    return table.astype('string')
+
+
+def join_calls(
     bp_df_dict: dict[str, pd.DataFrame],
     ref_callset: str | None = None,
     insert_delta_threshold: float = 0.7,
@@ -730,22 +1060,63 @@ def inner_join_bps(
     add_topology: bool = False,
     ignore_size: bool = False,
     workflow_config: dict | None = None,
-    return_unmatched: bool = False,
-) -> pd.DataFrame:
-    """Find all pairwise matches in the breakpoint dataframe dictionary
-    and return a dataframe with the matches.
+    keep_unmatched: bool = False,
+    wildcard_sample: str | None = None,
+    no_self_match: list[str] | None = None,
+    common_id_name: str = 'svensemble_id',
+    add_common_id: bool = False,
+    verbose: bool = False,
+) -> tuple[pd.DataFrame, IdGraph]:
+    """Match breakpoints across sources and join them side by side.
+
+    Matches the breakpoints (get_pairwise_matches), then marks and drops edges
+    until no per-sample component holds two breakpoints of one source and no
+    SV holds two per-sample components of one sample
+    (same_caller_split_edges, same_sample_split_edges, assign_svensemble_ids).
+    Splits the result by sample and puts each per-sample component on one row,
+    prefixing each source's columns with its name. Keeps unmatched breakpoints
+    as rows of their own only with keep_unmatched. Treats the breakpoints whose
+    sample is wildcard_sample as belonging to every sample they match: they
+    join each such sample's components and rows, link those samples into one
+    SV, and cost more to cut away than any other match.
 
     Args:
-        bp_df_dict (dict[str, pd.DataFrame]): Dictionary mapping source names
-        to their breakpoint DataFrames
-        insert_delta_threshold (float, optional): Minimum similarity threshold
-        for insert delta. Defaults to 0.7.
-        max_dist (int, optional): Maximum allowed distance between breakpoints. Defaults to 10.
-        ids_only (bool, optional): Whether to return only the event IDs. Defaults to False.
-        add_topology (bool, optional): Whether to add columns with topological characteristics of breakpoint clusters. Defaults to False.
-        return_unmatched (bool, optional): Whether to return the unmatched breakpoints alongside the matched ones. Useful for obtaining topology features. Defaults to False.
+        bp_df_dict (dict[str, pd.DataFrame]): Breakpoint frame of each source,
+            keyed by source name.
+        ref_callset (str | None): Reference (ground truth) source; matched
+            against but never merged in or matched to itself. Defaults to None.
+        insert_delta_threshold (float): Minimum similarity threshold for insert
+            delta. Defaults to 0.7.
+        max_dist (int): Maximum allowed distance between breakpoints. Defaults
+            to 10.
+        ids_only (bool): Whether to return only the event IDs. Defaults to
+            False.
+        add_topology (bool): Whether to add columns with topological
+            characteristics of breakpoint clusters. Defaults to False.
+        ignore_size (bool): If True, skips insert delta filtering. Defaults to
+            False.
+        workflow_config (dict | None): If given, its
+            model.training_params.add_topology overrides add_topology.
+            Defaults to None.
+        keep_unmatched (bool): Keep every breakpoint, unmatched ones as rows of
+            their own (outer join); otherwise only matched ones (inner join).
+            Defaults to False.
+        wildcard_sample (str | None): Sample of the breakpoints that belong to
+            every sample they match, such as GROUND_TRUTH_SAMPLE from
+            mark_ground_truth. Defaults to None (no wildcard).
+        no_self_match (list[str] | None): Further sources whose breakpoints
+            never match each other, besides ref_callset. Defaults to None.
+        common_id_name (str): Node attribute (in the returned ID graph) that
+            holds the SV IDs. Defaults to 'svensemble_id'.
+        add_common_id (bool): Also return the SV IDs as a column named
+            common_id_name. Defaults to False.
+        verbose (bool): Print how many match edges the pruning drops.
+            Defaults to False.
+
     Returns:
-        pd.DataFrame: DataFrame containing matched breakpoints from different sources side by side
+        tuple[pd.DataFrame, IdGraph]: The matched breakpoints from different
+            sources side by side, one row per per-sample component; and the
+            pruned ID graph, whose nodes carry their SV ID (common_id_name).
     """
     # Combine all breakpoint dataframes into one with source labels
     zipped_bp_df = concat_bp_dfs(bp_df_dict)
@@ -759,31 +1130,119 @@ def inner_join_bps(
         max_dist=max_dist,
         ignore_size=ignore_size,
         return_graph=True,
-        return_unmatched=return_unmatched,
-        skip_single_source_for=([ref_callset] if ref_callset is not None else None)
+        return_unmatched=keep_unmatched,
+        skip_single_source_for=([ref_callset] if ref_callset is not None else None),
+        no_self_match=sorted(set(no_self_match or []) | ({ref_callset} if ref_callset is not None else set())),
     )
 
-    # Components and topology are per sample: matching ignores samples, so
-    # on the whole graph cross-sample edges would merge components and
-    # inflate degrees (and with them the representative chosen per source).
-    ignore_callsets = [ref_callset] if ref_callset is not None else None
-    matched_lists = []
-    topology_dfs = []
-    for sample_graph in split_graph_by_sample(match_graph).values():
-        matched_lists.extend(graph_to_unique_component_lists(sample_graph))
-        if add_topology:
-            topology_dfs.append(calc_component_stats(sample_graph, ignore_callsets=ignore_callsets))
+    # Prune: collect the edges whose removal leaves at most one breakpoint per
+    # caller in each per-sample component and one per-sample component per
+    # sample in each SV, then drop them and label the SVs
+    dropped = same_caller_split_edges(match_graph, wildcard_sample=wildcard_sample)
+    dropped = same_sample_split_edges(match_graph, dropped, wildcard_sample=wildcard_sample)
+    id_graph = assign_svensemble_ids(
+        match_graph, dropped, wildcard_sample=wildcard_sample, common_id_name=common_id_name,
+    )
+    if verbose:
+        print(f"Pruned {len(dropped)} of {match_graph.graph.ecount()} match edges")
 
-    topology_df = None
+    # One row per per-sample component, keyed by (SV ID, sample) until the end
+    matched_df = flatten_idgraph(
+        id_graph, bp_df_dict.keys(), wildcard_sample=wildcard_sample,
+        common_id_name=common_id_name, add_common_id=True,
+    )
+    # Drop rows whose only event is the reference's (without a wildcard sample,
+    # reference breakpoints form rows of their own)
+    if ref_callset is not None:
+        call_cols = [f'{source}_INFO_EVENT' for source in bp_df_dict if source != ref_callset]
+        matched_df = matched_df[matched_df[call_cols].notna().any(axis=1)].reset_index(drop=True)
+
+    # Topology per SV: computed on the pruned graph across samples, so every
+    # sample's row of one SV shares it; joined on the SV ID alone
     if add_topology:
-        topology_df = (
-            pd.concat(topology_dfs, ignore_index=True) if topology_dfs
-            else calc_component_stats(ig.Graph(), ignore_callsets=ignore_callsets)
-        )
+        ignore_callsets = [ref_callset] if ref_callset is not None else []
+        stats = calc_component_stats(id_graph.graph, ignore_callsets=ignore_callsets or None)
+        # calc_component_stats skips components made only of ignored sources;
+        # key the rest by the SV ID of their first other node
+        keys = [
+            next(id_graph.graph.vs[v][common_id_name] for v in c
+                 if id_graph.graph.vs[v]['name'][0] not in ignore_callsets)
+            for c in id_graph.graph.connected_components()
+            if any(id_graph.graph.vs[v]['name'][0] not in ignore_callsets for v in c)
+        ]
+        topology = stats.assign(**{common_id_name: keys}).astype({common_id_name: 'string'})
+        matched_df = matched_df.merge(topology, on=common_id_name, how='left')
 
-    return build_matched_bp_df(
-        bp_df_dict, matched_lists, ref_callset, ids_only,
-        topology_df=topology_df,
+    # Add each caller's breakpoint columns on (event, sample)
+    if not ids_only:
+        for source, bp_df in bp_df_dict.items():
+            if source == ref_callset:
+                continue
+            prefixed = bp_df.assign(INFO_EVENT=bp_df['INFO_EVENT'].astype('string')).add_prefix(f'{source}_')
+            matched_df = _merge_on_event_and_sample(matched_df, prefixed, source, how='left')
+
+    if not add_common_id:
+        matched_df = matched_df.drop(columns=common_id_name)
+    return matched_df, id_graph
+
+
+def inner_join_bps(
+    bp_df_dict: dict[str, pd.DataFrame],
+    ref_callset: str | None = None,
+    insert_delta_threshold: float = 0.7,
+    max_dist: int = 10,
+    ids_only: bool = False,
+    add_topology: bool = False,
+    ignore_size: bool = False,
+    workflow_config: dict | None = None,
+    wildcard_sample: str | None = None,
+    no_self_match: list[str] | None = None,
+    common_id_name: str = 'svensemble_id',
+    add_common_id: bool = False,
+    verbose: bool = False,
+) -> tuple[pd.DataFrame, IdGraph]:
+    """Join matched breakpoints only.
+
+    Calls join_calls with keep_unmatched=False and passes every other argument
+    through.
+
+    Args:
+        bp_df_dict (dict[str, pd.DataFrame]): Breakpoint frame of each source,
+            keyed by source name.
+        ref_callset (str | None): Reference (ground truth) source. Defaults to
+            None.
+        insert_delta_threshold (float): Minimum similarity threshold for insert
+            delta. Defaults to 0.7.
+        max_dist (int): Maximum allowed distance between breakpoints. Defaults
+            to 10.
+        ids_only (bool): Whether to return only the event IDs. Defaults to
+            False.
+        add_topology (bool): Whether to add topology columns. Defaults to False.
+        ignore_size (bool): If True, skips insert delta filtering. Defaults to
+            False.
+        workflow_config (dict | None): Workflow config; see join_calls.
+            Defaults to None.
+        wildcard_sample (str | None): Sample of the breakpoints that belong to
+            every sample they match; see join_calls. Defaults to None.
+        no_self_match (list[str] | None): Further sources whose breakpoints
+            never match each other; see join_calls. Defaults to None.
+        common_id_name (str): Node attribute that holds the SV IDs; see
+            join_calls. Defaults to 'svensemble_id'.
+        add_common_id (bool): Also return the SV IDs as a column; see
+            join_calls. Defaults to False.
+        verbose (bool): Print how many match edges the pruning drops.
+            Defaults to False.
+
+    Returns:
+        tuple[pd.DataFrame, IdGraph]: Matched breakpoints from different sources
+            side by side, and the pruned ID graph; see join_calls.
+    """
+    return join_calls(
+        bp_df_dict, ref_callset=ref_callset, insert_delta_threshold=insert_delta_threshold,
+        max_dist=max_dist, ids_only=ids_only, add_topology=add_topology, ignore_size=ignore_size,
+        workflow_config=workflow_config, keep_unmatched=False, wildcard_sample=wildcard_sample,
+        no_self_match=no_self_match, common_id_name=common_id_name,
+        add_common_id=add_common_id, verbose=verbose,
     )
 
 
@@ -795,8 +1254,13 @@ def outer_join_bps(
     ids_only: bool = False,
     ignore_size: bool = False,
     add_topology: bool = False,
-    workflow_config: dict | None = None
-) -> pd.DataFrame:
+    workflow_config: dict | None = None,
+    wildcard_sample: str | None = None,
+    no_self_match: list[str] | None = None,
+    common_id_name: str = 'svensemble_id',
+    add_common_id: bool = False,
+    verbose: bool = False,
+) -> tuple[pd.DataFrame, IdGraph]:
     """
     Merge breakpoint dataframes from multiple callers, aligning on matching events.
 
@@ -808,47 +1272,26 @@ def outer_join_bps(
         ids_only (bool, optional): Whether to return only the event IDs. Defaults to False.
         add_topology (bool, optional): Whether to add columns with topological
             characteristics of breakpoint clusters. Defaults to False.
+        wildcard_sample (str | None, optional): Sample of the breakpoints that
+            belong to every sample they match; see join_calls. Defaults to None.
+        no_self_match (list[str] | None, optional): Further sources whose
+            breakpoints never match each other; see join_calls. Defaults to None.
+        common_id_name (str, optional): Node attribute that holds the SV IDs;
+            see join_calls. Defaults to 'svensemble_id'.
+        add_common_id (bool, optional): Also return the SV IDs as a column;
+            see join_calls. Defaults to False.
+        verbose (bool, optional): Print how many match edges the pruning drops.
+            Defaults to False.
 
     Returns:
-        pd.DataFrame: Outer-joined DataFrame containing breakpoints from all callers,
-                      with columns suffixed by caller name.
+        tuple[pd.DataFrame, IdGraph]: Outer-joined DataFrame containing breakpoints
+            from all callers, with columns prefixed by caller name, and the
+            pruned ID graph; see join_calls.
     """
-    # Obtain matched breakpoints using the inner_join_bps utility
-    matched_bp_df = inner_join_bps(
-        bp_df_dict=bp_df_dict,
-        ref_callset=ref_callset,
-        insert_delta_threshold=insert_delta_threshold,
-        max_dist=max_dist,
-        ids_only=True,
-        ignore_size=ignore_size,
-        add_topology=add_topology,
-        workflow_config=workflow_config,
-        return_unmatched=True
+    return join_calls(
+        bp_df_dict, ref_callset=ref_callset, insert_delta_threshold=insert_delta_threshold,
+        max_dist=max_dist, ids_only=ids_only, add_topology=add_topology, ignore_size=ignore_size,
+        workflow_config=workflow_config, keep_unmatched=True, wildcard_sample=wildcard_sample,
+        no_self_match=no_self_match, common_id_name=common_id_name,
+        add_common_id=add_common_id, verbose=verbose,
     )
-
-    # Ensure DataFrame type for subsequent merges
-    if not isinstance(matched_bp_df, pd.DataFrame):
-        raise TypeError('matched_bp_df is not a DataFrame')
-
-    # Start with a copy of the matched breakpoints DataFrame
-    joint_bp_df = matched_bp_df.copy()
-
-    # Merge in each caller's DataFrame, except the reference callset
-    for caller, df in bp_df_dict.items():
-        if caller == ref_callset:
-            # Skip the reference callset; only need to know if calls match to it
-            continue
-
-        # Only keep the event and sample columns if ids_only is True
-        if ids_only:
-            df_prefixed = df[['INFO_EVENT', SAMPLE_ID_COL]]
-        else:
-            df_prefixed = df.copy()
-
-        # Add a prefix to all columns to distinguish between callers
-        df_prefixed = df_prefixed.add_prefix(f'{caller}_')
-
-        # Merge on (event, sample), outer, to retain every breakpoint
-        joint_bp_df = _merge_on_event_and_sample(joint_bp_df, df_prefixed, caller, how='outer')
-
-    return joint_bp_df

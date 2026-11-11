@@ -7,7 +7,7 @@ or a fitted model; none of them read or write files. Pair them with
 
     raw = api.preprocess_raw(io.read_vcf(vcf, "manta_diploid"), "manta_diploid")
     bps = api.preprocess(raw, "manta_diploid", model="unbiased_xgb")
-    matched = api.match({"manta_diploid": bps}, io.read_bps(gt_csv))
+    matched, id_graph = api.match({"manta_diploid": bps}, io.read_bps(gt_csv))
     X, model_fit = api.train(matched, ["manta_diploid"], "unbiased_xgb", "manta_diploid")
     calls = api.predict(model_fit, X, matched, "unbiased_xgb", "manta_diploid")
 
@@ -17,7 +17,7 @@ fixed filenames named in ``svensemble.io``. Argument names match the CLI
 flags. ``annotate`` also takes the calls DataFrame and orchestrates
 ``svensemble.io`` (reading and writing) around the pure ``svensemble.annotate``.
 
-``run`` chains every step for one sample, as ``svensemble run`` does. It
+``run`` chains every step for one or more samples, as ``svensemble run`` does. It
 takes input paths, metadata and an ``output_dir``; intermediates go to a
 private scratch directory (a tmpdir under ``$TMPDIR`` unless ``workdir`` is
 given) and only the calls plus the artifacts named in ``save`` are written to
@@ -46,11 +46,12 @@ from . import breakpoints as bps_mod
 from . import callset_specific
 from . import chunk_match
 from . import io as sv_io
+from .id_graph import IdGraph
 from . import matched_breakpoints as mbps
 from . import models
 from ._caller_params import CALLSET_PARAM_DICT
 from ._config import list_preset_ids
-from ._constants import PRED_SUFFIX, SAMPLE_ID_COL
+from ._constants import GROUND_TRUTH_SAMPLE, PRED_SUFFIX, SAMPLE_ID_COL
 from .benchmark import run_single_callset_benchmark as benchmark_callset
 from .ground_truth import preprocess_ground_truth
 from .utils import atomic_path
@@ -170,8 +171,13 @@ def match(
     max_dist: int = 100,
     insert_delta_threshold: float = 0.7,
     verbose: bool = False,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, IdGraph]:
     """Outer-join the callers' breakpoints with the ground truth.
+
+    Returns (matched breakpoints, ID graph): one row per matched breakpoint
+    set, and the graph of every breakpoint with its row and SV ID
+    (svensemble.id_graph), the reference for which calls are one SV across
+    samples.
 
     Args:
         caller_bps: Processed breakpoints per caller name; not modified. Each
@@ -182,7 +188,7 @@ def match(
         model, model_config: Only the ``add_topology`` training param is used.
         max_dist: Maximum breakpoint distance for a match.
         insert_delta_threshold: Insert-size similarity threshold for a match.
-        verbose: Print the callsets being matched.
+        verbose: Print the callsets being matched and the pruned edge counts.
     """
     without_sample = [caller for caller, df in caller_bps.items() if SAMPLE_ID_COL not in df.columns]
     if without_sample:
@@ -203,6 +209,9 @@ def match(
         insert_delta_threshold=insert_delta_threshold,
         max_dist=max_dist,
         workflow_config=workflow_config,
+        wildcard_sample=GROUND_TRUTH_SAMPLE,
+        add_common_id=True,
+        verbose=verbose,
     )
 
 
@@ -468,7 +477,7 @@ def annotate(calls: pd.DataFrame, caller_vcfs: CallerVcfs, output_dir: Path) -> 
 # End-to-end run
 # ---------------------------------------------------------------------------
 
-SAVE_ARTIFACTS = frozenset({"model", "feature_matrix", "matched_bps", "ground_truth", "callsets"})
+SAVE_ARTIFACTS = frozenset({"model", "feature_matrix", "matched_bps", "id_graph", "ground_truth", "callsets"})
 """Intermediates ``run`` can publish to output_dir besides the calls."""
 
 
@@ -494,7 +503,7 @@ def run(
     command: str | None = None,
     verbose: bool = False,
 ) -> dict[str, Path]:
-    """Run every step for one sample; return the paths written to output_dir.
+    """Run every step for the samples in caller_vcfs; return the paths written to output_dir.
 
     Inputs are paths, metadata are plain values, and output_dir receives the
     calls (io.CALLS_CSV, io.CALLS_VCF) plus whatever *save* names, under their
@@ -514,7 +523,10 @@ def run(
     output_dir at the start and rewritten at the end.
 
     All arguments are keyword-only. The samples are read from the caller
-    VCF headers (check_sample_sets) and recorded in the provenance.
+    VCF headers (check_sample_sets) and recorded in the provenance. With
+    several samples, the rows of one SV (same svensemble_id, from match) get
+    the site of their highest-scoring sample (matched_breakpoints._harmonise_samples)
+    and share one record in the calls VCF.
 
     Args:
         caller_vcfs: Caller name -> caller VCF, or several (e.g. one per
@@ -550,8 +562,9 @@ def run(
 
     Returns:
         ``calls_vcf``, ``calls_csv`` (with output_dir), plus for each saved artifact
-        ``model``, ``feature_matrix``, ``matched_bps``, ``ground_truth`` and
-        ``<caller>.bps`` / ``<caller>.vcf``; with *annotate_vcfs*,
+        ``model``, ``feature_matrix``, ``matched_bps``, ``id_graph``, ``ground_truth`` and
+        ``<caller>.bps`` / ``<caller>.vcf`` (``<caller>.vcf.<k>``, one per input
+        file, when the caller has several files); with *annotate_vcfs*,
         ``<caller>.annotated_vcf`` (``<caller>.annotated_vcf.<k>`` when the
         caller has several files).
     """
@@ -698,13 +711,28 @@ def _run_in(
             preprocess_raw(vcf_df, caller, verbose=verbose),
             scratch / "preprocess_raw" / sv_io.RAW_BPS.format(caller=caller),
         )
-        bps_path, vcf_path = sv_io.write_callset(
+        # One callset VCF per input file: event IDs are only consistent
+        # within a file, so records group by INFO_EVENT inside each.
+        callset_dir = artifact_dir("callsets", f"preprocess/{caller}")
+        vcf_paths = None
+        if len(vcfs) > 1:
+            vcf_paths = [
+                (callset_dir / sv_io.callset_vcf_name(caller, vcf), sv_io.parse_samples_from_vcf(vcf))
+                for vcf in vcfs
+            ]
+            names = [path.name for path, _ in vcf_paths]
+            if len(set(names)) != len(names):
+                raise ValueError(f"{caller}: callset VCF names collide: {sorted(names)}")
+        bps_path, vcf_paths_written = sv_io.write_callset(
             preprocess(sv_io.read_bps(raw_path), caller, model=model, model_config=model_config),
-            artifact_dir("callsets", f"preprocess/{caller}"), caller, None,
+            callset_dir, caller, None, group_by="INFO_EVENT", vcf_paths=vcf_paths,
         )
         if "callsets" in save:
             published[f"{caller}.bps"] = bps_path
-            published[f"{caller}.vcf"] = vcf_path
+            if len(vcf_paths_written) == 1:
+                published[f"{caller}.vcf"] = vcf_paths_written[0]
+            else:
+                published.update({f"{caller}.vcf.{k}": p for k, p in enumerate(vcf_paths_written)})
         caller_bps[caller] = sv_io.read_bps(bps_path)
         if verbose:
             print(f"[run] {caller}: {len(caller_bps[caller])} breakpoints -> {bps_path}")
@@ -722,14 +750,14 @@ def _run_in(
     else:
         gt_path = ground_truth_bps
 
-    matched_path = sv_io.write_bps(
-        match(
-            caller_bps, sv_io.read_bps(gt_path), ground_truth_name=ground_truth_name,
-            model=model, model_config=model_config, max_dist=max_dist,
-            insert_delta_threshold=insert_delta_threshold, verbose=verbose,
-        ),
-        artifact_dir("matched_bps", "match") / sv_io.MATCHED_BPS,
+    matched_df, id_graph = match(
+        caller_bps, sv_io.read_bps(gt_path), ground_truth_name=ground_truth_name,
+        model=model, model_config=model_config, max_dist=max_dist,
+        insert_delta_threshold=insert_delta_threshold, verbose=verbose,
     )
+    matched_path = sv_io.write_bps(matched_df, artifact_dir("matched_bps", "match") / sv_io.MATCHED_BPS)
+    id_graph_path = sv_io.write_id_graph(id_graph, artifact_dir("id_graph", "match") / sv_io.ID_GRAPH)
+    del matched_df, id_graph
     matched_bps = sv_io.read_bps(matched_path)
 
     X, model_fit = train(
@@ -739,12 +767,15 @@ def _run_in(
     model_path = sv_io.write_model(model_fit, artifact_dir("model", "train") / sv_io.MODEL)
     fm_path = sv_io.write_feature_matrix(X, artifact_dir("feature_matrix", "train") / sv_io.FEATURE_MATRIX)
 
-    calls = predict(
-        model_fit, sv_io.read_feature_matrix(fm_path), matched_bps, model, training_set,
-        model_config=model_config, callers=list(caller_vcfs),
+    calls = mbps._harmonise_samples(
+        predict(
+            model_fit, sv_io.read_feature_matrix(fm_path), matched_bps, model, training_set,
+            model_config=model_config, callers=list(caller_vcfs),
+        ),
+        how="max_score",
     )
     calls_csv, calls_vcf = sv_io.write_calls(
-        calls, output_dir, None, vcf_header_lines, vcf_path=output_vcf,
+        calls, output_dir, None, vcf_header_lines, vcf_path=output_vcf, group_by="svensemble_id",
     )
     if verbose:
         print(f"[run] done. calls -> {calls_vcf}")
@@ -758,8 +789,8 @@ def _run_in(
                 outputs[f"{caller}.annotated_vcf"] = paths[0]
             else:
                 outputs.update({f"{caller}.annotated_vcf.{k}": path for k, path in enumerate(paths)})
-    for artifact, path in (("matched_bps", matched_path), ("model", model_path),
-                           ("feature_matrix", fm_path)):
+    for artifact, path in (("matched_bps", matched_path), ("id_graph", id_graph_path),
+                           ("model", model_path), ("feature_matrix", fm_path)):
         if artifact in save:
             outputs[artifact] = path
     return outputs

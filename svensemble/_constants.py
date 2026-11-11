@@ -44,3 +44,6 @@ PRED_SUFFIX = '_pred'
 
 # FORMAT field holding the SVEnsemble2 score in annotated caller VCFs
 SCORE_FIELD = 'SVENSSC'
+
+# Prefix of SVEnsemble IDs, the IDs of the cross-sample SVs in the ID graph
+SV_ID_PREFIX = 'svensemble2_'

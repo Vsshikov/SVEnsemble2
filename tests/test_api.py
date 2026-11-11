@@ -11,6 +11,8 @@ from svensemble import api
 from svensemble import io as sv_io
 from svensemble._constants import GROUND_TRUTH_SAMPLE, SAMPLE_ID_COL
 
+from .conftest import _DELLY_VCF_HEADER
+
 
 def _train_shaped_X():
     """A feature matrix as train returns it: indexed by <callset>_INFO_EVENT,
@@ -113,9 +115,9 @@ class TestMatch:
     def test_does_not_modify_input(self, monkeypatch):
         captured = {}
 
-        def fake_outer_join(bp_df_dict, ref_callset, insert_delta_threshold, max_dist, workflow_config):
+        def fake_outer_join(bp_df_dict, ref_callset, **kwargs):
             captured.update(bp_df_dict=bp_df_dict, ref_callset=ref_callset)
-            return pd.DataFrame()
+            return pd.DataFrame(), None
 
         monkeypatch.setattr("svensemble.chunk_match.outer_join_bps", fake_outer_join)
         caller_bps = {
@@ -131,6 +133,16 @@ class TestMatch:
         assert list(gt.columns) == ["a"]
         assert list(captured["bp_df_dict"]["gnomad"][SAMPLE_ID_COL]) == [GROUND_TRUTH_SAMPLE]
         assert captured["ref_callset"] == "gnomad"
+
+    def test_keeps_sv_ids_and_lets_truth_join_every_sample(self, monkeypatch):
+        # match asks the outer join for the SV ID column and treats the ground
+        # truth's placeholder sample as a wildcard.
+        captured = {}
+        monkeypatch.setattr("svensemble.chunk_match.outer_join_bps",
+                            lambda **kwargs: captured.update(kwargs) or (pd.DataFrame(), None))
+        api.match({"delly": pd.DataFrame({"a": [1], SAMPLE_ID_COL: ["S1"]})}, pd.DataFrame({"a": [3]}))
+        assert captured["add_common_id"] is True
+        assert captured["wildcard_sample"] == GROUND_TRUTH_SAMPLE
 
     def test_ground_truth_with_sample_column_rejected(self):
         caller_bps = {"delly": pd.DataFrame({"a": [1], SAMPLE_ID_COL: ["S1"]})}
@@ -259,6 +271,14 @@ class _PicklableModel:
     """Stand-in fitted model; only needs to survive pickling."""
 
 
+def _empty_id_graph():
+    import igraph as ig
+
+    from svensemble.id_graph import IdGraph
+
+    return IdGraph(graph=ig.Graph(), sources=())
+
+
 @pytest.fixture
 def fake_pipeline(monkeypatch):
     """Replace the step functions with cheap fakes so run's file handling can be tested.
@@ -293,7 +313,7 @@ def fake_pipeline(monkeypatch):
     monkeypatch.setattr(sv_io, "parse_samples_from_vcf", lambda path: ["S"])
     monkeypatch.setattr(api, "preprocess_raw", step("preprocess_raw", lambda *a, **k: bps))
     monkeypatch.setattr(api, "preprocess", step("preprocess", lambda *a, **k: bps))
-    monkeypatch.setattr(api, "match", step("match", lambda *a, **k: bps))
+    monkeypatch.setattr(api, "match", step("match", lambda *a, **k: (bps, _empty_id_graph())))
     monkeypatch.setattr(api, "train", step("train", lambda *a, **k: (X, _PicklableModel())))
     monkeypatch.setattr(api, "predict", step("predict", lambda *a, **k: bps.assign(gridss_m_pred=[0.1, 0.2])))
     monkeypatch.setattr(api, "preprocess_ground_truth", fake_gt)
@@ -379,13 +399,13 @@ class TestRunScratch:
     def test_save_routes_artifacts_to_output_dir(self, tmp_path, fake_pipeline, tmpdir_root):
         out = api.run(
             **_run_kwargs(tmp_path),
-            save={"model", "feature_matrix", "matched_bps", "callsets"},
+            save={"model", "feature_matrix", "matched_bps", "id_graph", "callsets"},
         )
         o = tmp_path / "out"
         assert out == {
             "calls_csv": o / sv_io.CALLS_CSV, "calls_vcf": o / sv_io.CALLS_VCF,
             "model": o / sv_io.MODEL, "feature_matrix": o / sv_io.FEATURE_MATRIX,
-            "matched_bps": o / sv_io.MATCHED_BPS,
+            "matched_bps": o / sv_io.MATCHED_BPS, "id_graph": o / sv_io.ID_GRAPH,
             "gridss.bps": o / "gridss.bps.csv", "gridss.vcf": o / "gridss.vcf",
         }
         assert all(p.exists() for p in out.values())
@@ -531,3 +551,85 @@ class TestRunOutputVcf:
         with pytest.raises(ValueError, match=match):
             api.run(**_run_kwargs(tmp_path, **over))
         assert list(tmpdir_root.iterdir()) == []
+
+
+# ---------------------------------------------------------------------------
+# api.run end to end on two single-sample Delly files that reuse event IDs
+# ---------------------------------------------------------------------------
+
+_DELLY_FORMAT = "GT:GQ:RC:RCL:RCR:RDCN:DR:DV:RR:RV\t0/1:50:10:10:10:2:5:5:5:5"
+
+
+def _delly_del(i, pos, end, pe):
+    """One precise Delly DEL record DEL<i> from pos to end with pe supporting pairs."""
+    return (f"chr1\t{pos}\tDEL{i:08d}\tA\t<DEL>\t{pe * 10}\tPASS\tPRECISE;SVTYPE=DEL;SVMETHOD=x;"
+            f"END={end};PE={pe};MAPQ=60;SR={pe};CT=3to5;CIPOS=-5,5;CIEND=-5,5\t{_DELLY_FORMAT}")
+
+
+class TestRunTwoSamples:
+    N_SITES, N_SHARED = 20, 5
+
+    def _inputs(self, tmp_path):
+        """Write S1's and S2's Delly VCFs and a ground truth from half of S1's breakpoints.
+
+        S2 reuses every S1 event ID 7 kb away from S1's call, and adds calls
+        at S1's first N_SHARED loci under new IDs.
+        """
+        starts = [1000 + 20_000 * i for i in range(self.N_SITES)]
+        files = {}
+        for sample, shift in (("S1", 0), ("S2", 7_000)):
+            lines = [_delly_del(i, p + shift, p + shift + 500 + 10 * i, 5 + i % 7) for i, p in enumerate(starts)]
+            if sample == "S2":
+                lines += [_delly_del(100 + i, starts[i], starts[i] + 500 + 10 * i, 9) for i in range(self.N_SHARED)]
+                lines.sort(key=lambda line: int(line.split("\t")[1]))
+            files[sample] = tmp_path / f"{sample}.delly.vcf"
+            files[sample].write_text(
+                _DELLY_VCF_HEADER.replace("\tS1\n", f"\t{sample}\n") + "\n".join(lines) + "\n")
+        s1 = api.preprocess(api.preprocess_raw(sv_io.read_vcf(files["S1"], "delly"), "delly"), "delly",
+                            model="consensus")
+        gt = s1.iloc[::2].drop(columns=[SAMPLE_ID_COL]).assign(INFO_EVENT=lambda d: "gt" + d["INFO_EVENT"])
+        return files, sv_io.write_bps(gt, tmp_path / "gt.bps.csv")
+
+    def test_run_keeps_reused_ids_apart_and_shares_common_sites(self, tmp_path):
+        # Runs every step with the consensus model (no training) and checks
+        # the saved matched breakpoints, ID graph, calls VCF and callset VCFs.
+        import pysam
+
+        from svensemble.id_graph import node_table
+
+        files, gt_path = self._inputs(tmp_path)
+        outputs = api.run(
+            caller_vcfs={"delly": (files["S1"], files["S2"])}, ref=tmp_path / "ref.fa", model="consensus",
+            output_dir=tmp_path / "out", ground_truth_bps=gt_path, workdir=tmp_path / "wd",
+            save={"id_graph", "callsets", "matched_bps"},
+        )
+        assert {"calls_vcf", "calls_csv", "matched_bps", "id_graph", "delly.bps", "delly.vcf.0",
+                "delly.vcf.1"} <= set(outputs)
+
+        matched = sv_io.read_bps(outputs["matched_bps"])
+        assert "svensemble_id" in matched.columns and matched["svensemble_id"].notna().all()
+
+        # Every reused event ID names one call per sample, at different loci: never one SV
+        nodes = node_table(sv_io.read_id_graph(outputs["id_graph"]))
+        delly = nodes[nodes["source"] == "delly"].pivot(index="event", columns="sample", values="svensemble_id")
+        reused = delly.dropna()
+        assert len(reused) == self.N_SITES
+        assert (reused["S1"] != reused["S2"]).all()
+        # The calls S2 adds at S1's loci join S1's SVs
+        added = delly[delly["S1"].isna()]
+        assert len(added) == self.N_SHARED
+        assert set(added["S2"]) <= set(delly["S1"].dropna())
+
+        with pysam.VariantFile(str(outputs["calls_vcf"])) as vcf:
+            assert list(vcf.header.samples) == ["S1", "S2"]
+            scores = [(r.samples["S1"]["SVENSSC"], r.samples["S2"]["SVENSSC"]) for r in vcf]
+        assert sum(a is not None and b is not None for a, b in scores) == self.N_SHARED
+        assert len(scores) == 2 * self.N_SITES
+
+        # One callset VCF per input file, each holding its own sample
+        for key, sample in (("delly.vcf.0", "S1"), ("delly.vcf.1", "S2")):
+            path = outputs[key]
+            assert path.parent == (tmp_path / "out").resolve()
+            with pysam.VariantFile(str(path)) as vcf:
+                assert list(vcf.header.samples) == [sample]
+                assert len(list(vcf)) == self.N_SITES + (self.N_SHARED if sample == "S2" else 0)

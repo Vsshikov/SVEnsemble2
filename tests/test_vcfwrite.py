@@ -880,7 +880,7 @@ class TestWriteScores:
         df = self._calls([
             ('sv1', 100, 500, 'S2', 0.25), ('sv1', 100, 500, 'S1', 0.9), ('sv2', 2000, 2600, 'S1', 0.5),
         ])
-        write_vcf(df, tmp_path / 'out.vcf', score_col=self.PRED)
+        write_vcf(df, tmp_path / 'out.vcf', score_col=self.PRED, group_by='INFO_EVENT')
         with pysam.VariantFile(str(tmp_path / 'out.vcf')) as vcf:
             assert list(vcf.header.samples) == ['S1', 'S2']
             recs = list(vcf)
@@ -889,10 +889,27 @@ class TestWriteScores:
         assert recs[0].samples['S2']['SVENSSC'] == pytest.approx(0.25)
         assert recs[1].samples['S2']['SVENSSC'] is None
 
-    def test_samples_disagreeing_on_the_record_raise(self, tmp_path):
+    def test_samples_disagreeing_on_the_site_raise(self, tmp_path):
         df = self._calls([('sv1', 100, 500, 'S1', 0.9), ('sv1', 110, 500, 'S2', 0.2)])
         with pytest.raises(ValueError, match='disagree'):
+            write_vcf(df, tmp_path / 'out.vcf', score_col=self.PRED, group_by='INFO_EVENT')
+
+    def test_several_samples_without_grouping_raise(self, tmp_path):
+        df = self._calls([('sv1', 100, 500, 'S1', 0.9), ('sv1', 100, 500, 'S2', 0.2)])
+        with pytest.raises(ValueError, match='no group_by'):
             write_vcf(df, tmp_path / 'out.vcf', score_col=self.PRED)
+
+    def test_one_sample_without_grouping_one_record_per_row(self, tmp_path):
+        df = self._calls([('sv1', 100, 500, 'S1', 0.9), ('sv2', 2000, 2600, 'S1', 0.2)])
+        write_vcf(df, tmp_path / 'out.vcf', score_col=self.PRED)
+        with pysam.VariantFile(str(tmp_path / 'out.vcf')) as vcf:
+            assert list(vcf.header.samples) == ['S1']
+            assert [r.id for r in vcf] == ['sv1', 'sv2']
+
+    def test_missing_group_by_column_raises(self, tmp_path):
+        df = self._calls([('sv1', 100, 500, 'S1', 0.9)])
+        with pytest.raises(KeyError, match='svensemble_id'):
+            write_vcf(df, tmp_path / 'out.vcf', score_col=self.PRED, group_by='svensemble_id')
 
     def test_without_sample_column_scores_go_to_sample_name(self, tmp_path):
         df = pd.DataFrame([_del_row('sv1', 100, 500) | {self.PRED: 0.4}])
@@ -904,7 +921,7 @@ class TestWriteScores:
     def test_callset_rows_per_sample_written_once(self, tmp_path):
         from svensemble._constants import SAMPLE_ID_COL
         df = pd.DataFrame([_del_row('sv1', 100, 500) | {SAMPLE_ID_COL: s} for s in ('S1', 'S2')])
-        write_vcf(df, tmp_path / 'out.vcf', sample_name='S')
+        write_vcf(df, tmp_path / 'out.vcf', sample_name='S', group_by='INFO_EVENT')
         assert len(_read_records(tmp_path / 'out.vcf')) == 1
         with pysam.VariantFile(str(tmp_path / 'out.vcf')) as vcf:
             assert list(vcf.header.samples) == ['S1', 'S2']

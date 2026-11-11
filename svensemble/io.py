@@ -39,12 +39,14 @@ from io import TextIOWrapper
 from pathlib import Path
 from typing import BinaryIO, TextIO
 
+import igraph as ig
 import numpy as np
 import pandas as pd
 from pysam import BGZFile, VariantFile
 
 from . import annotate as sv_annotate
 from . import vcfwrite
+from .id_graph import EDGE_ATTRS, IdGraph, edge_table, node_table
 from ._caller_params import CALLSET_PARAM_DICT
 from ._constants import SAMPLE_ID_COL
 from .utils import atomic_path
@@ -55,6 +57,7 @@ RAW_BPS = "{caller}.raw_bps.csv"
 CALLSET_BPS = "{caller}.bps.csv"
 CALLSET_VCF = "{caller}.vcf"
 MATCHED_BPS = "matched_bps.csv"
+ID_GRAPH = "id_graph"
 MODEL = "model.pkl"
 FEATURE_MATRIX = "feature_matrix.csv"
 CALLS_CSV = "svensemble2_calls.csv"
@@ -110,19 +113,91 @@ def write_bps(bp_df: pd.DataFrame, path: Path) -> Path:
     return path
 
 
-def write_callset(bp_df: pd.DataFrame, out_dir: Path, caller: str, sample: str | None) -> tuple[Path, Path]:
-    """Write a processed callset as CALLSET_BPS plus CALLSET_VCF in *out_dir*.
+def write_callset(
+    bp_df: pd.DataFrame,
+    out_dir: Path,
+    caller: str,
+    sample: str | None,
+    group_by: str | None = None,
+    vcf_paths: Sequence[tuple[Path, Sequence[str]]] | None = None,
+) -> tuple[Path, tuple[Path, ...]]:
+    """Write a processed callset as CALLSET_BPS plus its VCF(s) in *out_dir*.
 
-    *sample* names the VCF's sample column; None writes a sites-only VCF.
+    *sample* names the VCF's sample column for breakpoints without
+    SAMPLE_ID_COL; None writes a sites-only VCF. *group_by* is passed to
+    vcfwrite.write_vcf. With *vcf_paths*, (path, samples) pairs, each path
+    gets the breakpoints of its samples (one VCF per input file); otherwise
+    one CALLSET_VCF holds them all. Returns (bps path, VCF paths).
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     bps_path = out_dir / CALLSET_BPS.format(caller=caller)
-    vcf_path = out_dir / CALLSET_VCF.format(caller=caller)
     with atomic_path(bps_path) as tmp:
         bp_df.to_csv(tmp, index=False)
-    vcfwrite.write_vcf(bp_df, vcf_path, source=caller, sample_name=sample)
-    return bps_path, vcf_path
+    if vcf_paths is None:
+        vcf_path = out_dir / CALLSET_VCF.format(caller=caller)
+        vcfwrite.write_vcf(bp_df, vcf_path, source=caller, sample_name=sample, group_by=group_by)
+        return bps_path, (vcf_path,)
+    written = []
+    for path, samples in vcf_paths:
+        part = bp_df[bp_df[SAMPLE_ID_COL].astype(str).isin(list(samples))]
+        written.append(vcfwrite.write_vcf(part, path, source=caller, sample_name=sample, group_by=group_by))
+    return bps_path, tuple(written)
+
+
+def callset_vcf_name(caller: str, path: Path) -> str:
+    """CALLSET_VCF for one of a caller's several input files, named after its stem."""
+    stem, _ext = split_vcf_name(path)
+    return f"{caller}.{stem}.vcf"
+
+
+def write_id_graph(idg: IdGraph, path: Path) -> Path:
+    """Write an IdGraph as a directory: nodes.csv, edges.csv and meta.json.
+
+    meta.json holds the source order the edges' pair codes refer to. Each
+    file is written atomically.
+    """
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    nodes = node_table(idg).rename_axis("node")
+    edges = edge_table(idg).rename_axis("edge")
+    with atomic_path(path / "nodes.csv") as tmp:
+        nodes.to_csv(tmp, index=True)
+    with atomic_path(path / "edges.csv") as tmp:
+        edges.to_csv(tmp, index=True)
+    with atomic_path(path / "meta.json") as tmp:
+        tmp.write_text(json.dumps({
+            "sources": list(idg.sources),
+            "pair_code": "hi*(hi+1)/2 + lo over indices into sources",
+        }, indent=2) + "\n")
+    return path
+
+
+def read_id_graph(path: Path, common_id_name: str = "svensemble_id") -> IdGraph:
+    """Read an IdGraph written by write_id_graph; node text columns stay text.
+
+    Reads empty cells of the common_id_name column (the SV IDs) back as None.
+    """
+    path = Path(path)
+    meta = json.loads((path / "meta.json").read_text())
+    nodes = pd.read_csv(
+        path / "nodes.csv", index_col="node", keep_default_na=False, na_values={common_id_name: [""]},
+        dtype={"source": str, "event": str, "sample": str, common_id_name: str},
+    )
+    edges = pd.read_csv(path / "edges.csv", index_col="edge", dtype={"source": np.int64, "target": np.int64})
+    if not nodes.index.equals(pd.RangeIndex(len(nodes))) or not edges.index.equals(pd.RangeIndex(len(edges))):
+        raise ValueError(f"{path}: node and edge IDs must be 0..n-1 in order")
+    graph = ig.Graph(n=len(nodes), edges=edges[["source", "target"]].to_numpy().tolist(), directed=False)
+    # node_table unpacked each (source, event, sample) name into columns; pack them back
+    name_cols = ["source", "event", "sample"]
+    graph.vs["name"] = list(zip(*(nodes[col] for col in name_cols)))
+    for col in nodes.columns.drop(name_cols):
+        values = nodes[col].astype(object).where(nodes[col].notna(), None)
+        graph.vs[col] = values.tolist()
+    for col in EDGE_ATTRS:
+        if col in edges.columns:
+            graph.es[col] = edges[col].tolist()
+    return IdGraph(graph=graph, sources=tuple(meta["sources"]))
 
 
 def read_feature_matrix(path: Path) -> pd.DataFrame:
@@ -173,6 +248,7 @@ def write_calls(
     sample: str | None,
     header_lines: Sequence[str] = (),
     vcf_path: Path | None = None,
+    group_by: str | None = None,
 ) -> tuple[Path | None, Path]:
     """Write ensemble calls as CALLS_CSV (with index) plus a calls VCF.
 
@@ -195,6 +271,7 @@ def write_calls(
     vcfwrite.write_vcf(
         calls_df, vcf_path, source="svensemble2", sample_name=sample,
         score_col=sv_annotate.pred_column(calls_df), header_lines=header_lines,
+        group_by=group_by,
     )
     return csv_path, vcf_path
 

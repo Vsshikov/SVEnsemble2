@@ -30,6 +30,7 @@ from pathlib import Path
 from . import __version__
 from . import api
 from . import io as sv_io
+from . import matched_breakpoints as mbps
 
 
 def main():
@@ -141,7 +142,9 @@ def _cmd_preprocess(args):
         sv_io.read_bps(args.raw_bps), args.caller,
         model=args.model, model_config=_load_model_config(args),
     )
-    bps_path, _ = sv_io.write_callset(bp_df, args.output_dir, args.caller, args.sample)
+    # One input file per call, so its event IDs are consistent: a joint
+    # multi-sample file's per-sample rows share records by INFO_EVENT.
+    bps_path, _ = sv_io.write_callset(bp_df, args.output_dir, args.caller, args.sample, group_by="INFO_EVENT")
 
     if args.verbose:
         print(f"Wrote {len(bp_df)} processed breakpoints to {bps_path}")
@@ -164,7 +167,7 @@ def _register_match(subparsers):
     p.add_argument("--ground_truth_name", type=str, default="gnomad", help="Ground truth set name.")
     p.add_argument("--max_dist", type=int, default=100, help="Maximum distance for matching.")
     p.add_argument("--insert_delta_threshold", type=float, default=0.7, help="Insert delta threshold.")
-    p.add_argument("--output_dir", type=Path, required=True, help="Output directory for matched_bps.csv.")
+    p.add_argument("--output_dir", type=Path, required=True, help="Output directory for matched_bps.csv and the id_graph/ directory.")
     _add_model_config_arg(p)
     _add_verbose_arg(p)
     p.set_defaults(func=_cmd_match)
@@ -175,7 +178,7 @@ def _cmd_match(args):
         raise ValueError(f"Number of --bps files ({len(args.bps)}) must match --callers ({len(args.callers)})")
 
     caller_bps = {callset: sv_io.read_bps(path) for callset, path in zip(args.callers, args.bps)}
-    matched_bp_df = api.match(
+    matched_bp_df, id_graph = api.match(
         caller_bps,
         sv_io.read_bps(args.ground_truth_bps),
         ground_truth_name=args.ground_truth_name,
@@ -186,6 +189,7 @@ def _cmd_match(args):
         verbose=args.verbose,
     )
     out = sv_io.write_bps(matched_bp_df, args.output_dir / sv_io.MATCHED_BPS)
+    sv_io.write_id_graph(id_graph, args.output_dir / sv_io.ID_GRAPH)
 
     if args.verbose:
         print(f"Wrote {len(matched_bp_df)} matched breakpoints to {out}")
@@ -288,7 +292,12 @@ def _cmd_predict(args):
         model_config=_load_model_config(args),
         callers=args.callers,
     )
-    calls_csv, _ = sv_io.write_calls(svensemble2_calls_df, args.output_dir, args.sample)
+    # Calls from a match with the SV ID column: the rows of one SV get the site of
+    # their highest-scoring sample and share one calls VCF record
+    group_by = "svensemble_id" if "svensemble_id" in svensemble2_calls_df.columns else None
+    if group_by is not None:
+        svensemble2_calls_df = mbps._harmonise_samples(svensemble2_calls_df, how="max_score")
+    calls_csv, _ = sv_io.write_calls(svensemble2_calls_df, args.output_dir, args.sample, group_by=group_by)
 
     if args.verbose:
         print(f"Wrote {len(svensemble2_calls_df)} calls to {calls_csv}")

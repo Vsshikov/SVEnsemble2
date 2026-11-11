@@ -22,6 +22,7 @@ from ._constants import BND1, BND2, INV_EVENT_SUFFIXES, SAMPLE_ID_COL, SCORE_FIE
 logger = logging.getLogger(__name__)
 
 
+
 _SYMBOLIC_SVTYPES = frozenset({'DEL', 'DUP', 'INS', 'INV'})
 
 _REQUIRED_COLS = [
@@ -296,18 +297,117 @@ def _write_bnd_records(
         vcf_out.write(rec)
 
 
-def _one_row_per_event(
+_SITE_EXTRA_COLS = ['INFO_INFERRED_SVTYPE', 'INFO_SVLEN']
+
+
+def site_cols(bps_df: pd.DataFrame, include_event: bool) -> list[str]:
+    """List the columns that all samples of one record share.
+
+    Args:
+        bps_df (pd.DataFrame): Breakpoint rows.
+        include_event (bool): Also list INFO_EVENT.
+
+    Returns:
+        list[str]: The columns of *bps_df* among positions, ALTs, CIs,
+            INFO_INFERRED_SVTYPE and INFO_SVLEN (and INFO_EVENT).
+    """
+    cols = _REQUIRED_COLS + _CI_COLS + _SITE_EXTRA_COLS
+    return [c for c in cols if c in bps_df.columns and (include_event or c != 'INFO_EVENT')]
+
+
+def _check_sites(bps_df: pd.DataFrame, key: pd.Series, cols: list[str]) -> None:
+    """Raise if rows that share a record key differ in any of *cols*.
+
+    Args:
+        bps_df (pd.DataFrame): Breakpoint rows.
+        key (pd.Series): Record key of each row, aligned with *bps_df*.
+        cols (list[str]): Columns the rows of one record must share.
+
+    Raises:
+        ValueError: If two rows of one record differ in a column of *cols*.
+    """
+    per_key = bps_df[cols].groupby(key.to_numpy(), sort=False).nunique(dropna=False)
+    conflicting = per_key.index[(per_key > 1).any(axis=1)].tolist()
+    if conflicting:
+        raise ValueError(f"Samples disagree on the site of SV(s) {conflicting[:10]}; harmonise them first")
+
+
+def _pair_inversion_halves(bps_df: pd.DataFrame, key: pd.Series) -> dict[str, str]:
+    """Pair the records that hold the two halves of one inversion.
+
+    Inversions on the event path are split into <event>_e1 and <event>_e2
+    (events.convert_inv_to_bnd). Looks through every <source>_INFO_EVENT
+    column, and pairs the record of a row holding <event>_e1 with the record
+    of the row of the same sample holding <event>_e2. Keeps only unambiguous
+    pairs: a record paired with two different partners belongs to disagreeing
+    inversions and keeps its own record.
+
+    Args:
+        bps_df (pd.DataFrame): Calls rows with SAMPLE_ID_COL and
+            <source>_INFO_EVENT columns.
+        key (pd.Series): Record key of each row, aligned with *bps_df*.
+
+    Returns:
+        dict[str, str]: For each paired record, the key of the inversion record
+            both halves are written under (the _e1 half's key).
+    """
+    sample = bps_df[SAMPLE_ID_COL].astype(str).to_numpy()
+    halves = []
+    for col in [c for c in bps_df.columns if c.endswith('_INFO_EVENT')]:
+        event = bps_df[col].astype('string').fillna('').to_numpy(dtype=str)
+        for suffix in INV_EVENT_SUFFIXES:
+            has = np.char.endswith(event, suffix)
+            halves.append(pd.DataFrame({
+                'col': col, 'sample': sample[has], 'base': [e[:-len(suffix)] for e in event[has]],
+                'suffix': suffix, 'key': key.to_numpy()[has],
+            }))
+    halves = pd.concat(halves, ignore_index=True) if halves else pd.DataFrame(
+        columns=['col', 'sample', 'base', 'suffix', 'key'])
+    first, second = (halves[halves['suffix'] == s].drop(columns='suffix') for s in INV_EVENT_SUFFIXES)
+    pairs = first.merge(second, on=['col', 'sample', 'base'], suffixes=('_e1', '_e2'))
+    pairs = pairs.loc[pairs['key_e1'] != pairs['key_e2'], ['key_e1', 'key_e2']].drop_duplicates()
+    counts = pd.concat([pairs['key_e1'], pairs['key_e2']]).value_counts()
+    unique = pairs[(pairs['key_e1'].map(counts) == 1) & (pairs['key_e2'].map(counts) == 1)]
+    return {
+        **dict(zip(unique['key_e1'], unique['key_e1'])),
+        **dict(zip(unique['key_e2'], unique['key_e1'])),
+    }
+
+
+def _group_rows(
     bps_df: pd.DataFrame,
     score_col: str | None,
     sample_name: str | None,
-) -> tuple[pd.DataFrame, list[str], dict[str, dict[str, float]]]:
-    """(one row per INFO_EVENT, header samples, {event: {sample: score}}).
+    group_by: str | None,
+) -> tuple[pd.DataFrame, list[str], dict[str, dict[str, float]], dict[str, str]]:
+    """Group per-sample rows into VCF records and collect their scores.
 
-    Per-sample rows of one SV share their record (shared INFO); only the
-    score is per sample (FORMAT). Rows of one event that disagree on a
-    record-defining column raise. The header samples are the data's
-    SAMPLE_ID_COL values; only without that column is *sample_name* used
-    (every row is then its own record and scores go to *sample_name*).
+    Without SAMPLE_ID_COL, writes every row as its own record and gives its
+    score to *sample_name*. Otherwise keys each row by its *group_by* column,
+    or, with *group_by* None, by its INFO_EVENT (and raises when the rows hold
+    more than one sample). Rows that share a key become one record, which takes
+    the key as its INFO_EVENT and must agree on the site columns (site_cols);
+    only the score stays per sample. Finds the inversion halves to collapse:
+    by stripping _e1/_e2 from the key when grouping by INFO_EVENT, otherwise
+    with _pair_inversion_halves.
+
+    Args:
+        bps_df (pd.DataFrame): Breakpoint or calls rows.
+        score_col (str | None): Column holding the score, if any.
+        sample_name (str | None): Sample to score rows without SAMPLE_ID_COL.
+        group_by (str | None): Column whose shared values make rows of several
+            samples one record, e.g. 'INFO_EVENT' for joint-called input or
+            'svensemble_id' for calls.
+
+    Returns:
+        tuple: The rows, one per record; the header samples; each record's
+            score per sample; and each record's inversion record key.
+
+    Raises:
+        KeyError: If the rows lack the *group_by* column.
+        ValueError: If *group_by* is None and the rows hold several samples,
+            if rows of one record disagree on the site, or if a record holds
+            two rows of one sample.
     """
     if SAMPLE_ID_COL not in bps_df.columns:
         samples = [sample_name] if (score_col and sample_name) else []
@@ -315,24 +415,44 @@ def _one_row_per_event(
             {str(e): {sample_name: v} for e, v in zip(bps_df['INFO_EVENT'], bps_df[score_col])}
             if samples else {}
         )
-        return bps_df, samples, scores
+        events = bps_df['INFO_EVENT'].astype(str)
+        return bps_df, samples, scores, {e: _strip_inv_event_suffix(e) for e in events}
 
-    record_cols = [
-        c for c in _REQUIRED_COLS + _CI_COLS + ['INFO_INFERRED_SVTYPE', 'INFO_SVLEN']
-        if c in bps_df.columns
-    ]
-    per_event = bps_df.groupby('INFO_EVENT', sort=False)[record_cols].nunique(dropna=False)
-    conflicting = per_event.index[(per_event > 1).any(axis=1)].tolist()
-    if conflicting:
-        raise ValueError(f"Samples disagree on the record of SV(s) {conflicting[:10]}")
-    record_df = bps_df.drop_duplicates('INFO_EVENT', keep='first').drop(columns=[SAMPLE_ID_COL])
-    samples = sorted(bps_df[SAMPLE_ID_COL].astype(str).unique())
+    sample = bps_df[SAMPLE_ID_COL].astype(str)
+    samples = sorted(sample.unique())
+    if group_by is None and len(samples) > 1:
+        raise ValueError(
+            f"Rows of {len(samples)} samples {samples[:10]} and no group_by: give group_by "
+            "'INFO_EVENT' (joint-called input) or the SV ID column (calls)"
+        )
+    if group_by is not None and group_by not in bps_df.columns:
+        raise KeyError(f"group_by column {group_by!r} not in the rows")
+    key = bps_df[group_by or 'INFO_EVENT'].astype(str)
+    if group_by is not None:
+        _check_sites(bps_df, key, site_cols(bps_df, include_event=(group_by == 'INFO_EVENT')))
+
+    repeated = pd.DataFrame({'key': key.to_numpy(), 'sample': sample.to_numpy()}).duplicated()
+    if repeated.any():
+        dup = key[repeated.to_numpy()].unique().tolist()
+        raise ValueError(f"Record(s) {dup[:10]} have more than one row for one sample")
+
+    if group_by in (None, 'INFO_EVENT'):
+        inversion_key = {k: _strip_inv_event_suffix(k) for k in key}
+    else:
+        paired = _pair_inversion_halves(bps_df, key)
+        inversion_key = {k: paired.get(k, k) for k in key}
+
+    record_df = (
+        bps_df.assign(INFO_EVENT=key)
+        .drop_duplicates('INFO_EVENT', keep='first')
+        .drop(columns=[SAMPLE_ID_COL])
+    )
     if not score_col:
-        return record_df, samples, {}
+        return record_df, samples, {}, inversion_key
     scores: dict[str, dict[str, float]] = {}
-    for event, sample, score in zip(bps_df['INFO_EVENT'], bps_df[SAMPLE_ID_COL].astype(str), bps_df[score_col]):
-        scores.setdefault(str(event), {})[sample] = score
-    return record_df, samples, scores
+    for k, smp, score in zip(key, sample, bps_df[score_col]):
+        scores.setdefault(k, {})[smp] = score
+    return record_df, samples, scores, inversion_key
 
 
 def write_vcf(
@@ -343,6 +463,7 @@ def write_vcf(
     inv_as_bnd: bool = False,
     score_col: str | None = None,
     header_lines: Sequence[str] = (),
+    group_by: str | None = None,
 ) -> Path:
     """
     Write a VCF 4.5 file from a breakpoint DataFrame.
@@ -377,10 +498,13 @@ def write_vcf(
         inv_as_bnd: If True, write inversions as BND pairs instead of
             symbolic <INV> records.
         header_lines: Extra '##key=value' meta lines for the header.
-        score_col: Column holding the SVEnsemble2 score. When given, each
-            SV is written once (rows of one INFO_EVENT across samples share
-            the record) with the score as FORMAT SCORE_FIELD per sample;
-            the header lists the samples in FORMAT_SAMPLE_ID.
+        score_col: Column holding the SVEnsemble2 score, written as FORMAT
+            SCORE_FIELD per sample; the header lists the samples in
+            FORMAT_SAMPLE_ID.
+        group_by: Column whose shared values make rows of several samples one
+            record, e.g. 'INFO_EVENT' (joint-called input) or 'svensemble_id'
+            (calls). None (the default) writes one record per row and raises
+            with more than one sample. See _group_rows.
 
     Returns:
         Path to the written VCF file.
@@ -405,7 +529,7 @@ def write_vcf(
         )
         bps_df = bps_df[~invalid_pos_mask]
 
-    bps_df, samples, scores = _one_row_per_event(bps_df, score_col, sample_name)
+    bps_df, samples, scores, inversion_key = _group_rows(bps_df, score_col, sample_name, group_by)
     header_kwargs = dict(
         sample_name=sample_name, source=source, samples=samples, score=bool(score_col),
         extra_lines=header_lines,
@@ -450,7 +574,7 @@ def write_vcf(
                     if inv_as_bnd:
                         _write_bnd_records(vcf_out, row, has_ci, row_scores)
                     else:
-                        base_event = _strip_inv_event_suffix(str(row['INFO_EVENT']))
+                        base_event = inversion_key[str(row['INFO_EVENT'])]
                         if base_event in written_inv_events:
                             continue
                         written_inv_events.add(base_event)
