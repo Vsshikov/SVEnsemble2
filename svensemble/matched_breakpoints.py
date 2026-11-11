@@ -398,9 +398,14 @@ def get_svensemble2_calls(
     pred_df: pd.DataFrame,
     common_id_name: str = 'svensemble_id',
 ) -> pd.DataFrame:
-    """
-    Summarizes SVEnsemble2 calls by merging matched breakpoint and prediction DataFrames,
-    computing combined insert sizes, generating unique SVEnsemble2 IDs, and formatting results.
+    """Merge the predictions into the matched breakpoints and turn each matched row into one call.
+
+    Keeps only the matched columns the calls are built from, adds each row's
+    largest insert size across the callsets, merges in the predictions on the
+    callsets' event IDs (and the sample, when the predictions carry one),
+    numbers each distinct event combination as the call's INFO_EVENT, and
+    averages the callsets' coordinates into one breakpoint pair
+    (matchedbps_to_bps).
 
     Args:
         matchedbps_df (pd.DataFrame): DataFrame of matched breakpoints.
@@ -411,11 +416,20 @@ def get_svensemble2_calls(
     Returns:
         pd.DataFrame: Unified DataFrame of SVEnsemble2 summary calls with consensus coordinates, insert size, unique ID, and predictions.
     """
-    # Create a working copy of the matched breakpoints to avoid modifying the input DataFrame
-    matchedbps_df_copy = matchedbps_df.copy()
-
     # Infer callset list based on prefixes of INFO_EVENT columns in pred_df
     callsets = [col.replace('_INFO_EVENT', '') for col in pred_df.columns if 'INFO_EVENT' in col]
+
+    # Take only the columns the calls are built from (matchedbps_to_bps), so the
+    # merge below copies those rather than the whole frame, and add the combined
+    # (largest) insert size across the callsets, which reads the rest per row
+    used = {
+        *(f'{callset}_{field}_{bnd}' for callset in callsets for bnd in BNDS
+          for field in ('POS', 'CHROM', 'INFO_CIPOS_l', 'INFO_CIPOS_r', 'ALT')),
+        *(f'{callset}_INFO_EVENT' for callset in callsets), SAMPLE_ID_COL, common_id_name,
+    }
+    matchedbps_df_copy = matchedbps_df[[col for col in matchedbps_df.columns if col in used]].assign(
+        svensemble2_insert_size=get_combined_insert_size(matchedbps_df, callsets)
+    )
 
     # Merge the predictions into the matched breakpoints data on the
     # INFO_EVENT columns, plus the sample when the predictions are per sample
@@ -425,11 +439,6 @@ def get_svensemble2_calls(
         matchedbps_df_copy[SAMPLE_ID_COL] = matchedbps_df_copy[SAMPLE_ID_COL].astype(str)
         pred_df = pred_df.assign(**{SAMPLE_ID_COL: pred_df[SAMPLE_ID_COL].astype(str)})
     matchedbps_df_copy = matchedbps_df_copy.merge(pred_df, on=merge_keys)
-
-    # Compute the combined (aggregate/max) insert size across all callsets and store in a new column
-    matchedbps_df_copy['svensemble2_insert_size'] = get_combined_insert_size(
-        matchedbps_df_copy, callsets
-    )
 
     # Generate a unique identifier for each SV by concatenating INFO_EVENT fields from all callsets
     # This is useful for matching SVs across different sets and preserving provenance

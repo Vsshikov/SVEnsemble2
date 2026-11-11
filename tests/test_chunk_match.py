@@ -34,7 +34,9 @@ from svensemble.chunk_match import (
     split_graph_by_sample,
     _get_match_matrix,
     _get_triu_mask,
+    _split_by_bnd2,
 )
+import svensemble.chunk_match as chunk_match
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +333,51 @@ class TestGetPairwiseMatches:
         names = {v['name'] for v in g.vs}
         assert ('delly', 'ev3', 'S1') in names
         assert all(len(name) == 3 for name in names)
+
+
+# ---------------------------------------------------------------------------
+# _split_by_bnd2: re-cut oversized chunks by POS_bnd2
+# ---------------------------------------------------------------------------
+
+class TestSplitByBnd2:
+
+    def test_leaves_small_chunks_alone(self):
+        pos2 = np.array([500, 100, 9000, 300])
+        order, bounds = _split_by_bnd2(pos2, [(0, 2), (2, 4)], max_n=2, max_dist=10)
+        assert order.tolist() == [0, 1, 2, 3]
+        assert bounds == [(0, 2), (2, 4)]
+
+    def test_sorts_and_cuts_large_chunk(self):
+        """Rows 1-4 form one chunk over max_n; sorted by POS_bnd2 they fall into 3 groups."""
+        pos2 = np.array([7, 5000, 100, 5005, 105])
+        order, bounds = _split_by_bnd2(pos2, [(0, 1), (1, 5)], max_n=3, max_dist=10)
+        assert order.tolist() == [0, 2, 4, 1, 3]
+        assert bounds == [(0, 1), (1, 3), (3, 5)]
+
+    def test_cuts_at_missing_position(self):
+        pos2 = np.array([100.0, np.nan, 101.0, 102.0])
+        order, bounds = _split_by_bnd2(pos2, [(0, 4)], max_n=2, max_dist=10)
+        assert order.tolist() == [0, 2, 3, 1]
+        assert bounds == [(0, 3), (3, 4)]
+
+    def test_hotspot_matches_same_pairs_as_one_chunk(self, monkeypatch):
+        """1200 breakpoints piled within 600 bp at bnd1 and spread at bnd2 match
+        the same pairs whether or not the oversized chunk is re-cut by bnd2."""
+        rows = []
+        for k in range(600):
+            rows.append(_row('delly', f'd{k}', 1000 + k, 100_000 + 1000 * k))
+            rows.append(_row('sniffles', f's{k}', 1003 + k, 100_005 + 1000 * k))
+        df = _df(*rows)
+
+        def edges():
+            pairs = get_pairwise_matches(df, max_dist=10, ignore_size=True, return_graph=False)
+            return {frozenset(p) for p in pairs}
+
+        split = edges()
+        monkeypatch.setattr(chunk_match, 'CHUNK_BND2_MATCH_THRESHOLD', 10**9)
+        whole = edges()
+        assert len(split) == 600
+        assert split == whole
 
 
 # ---------------------------------------------------------------------------
@@ -807,3 +854,47 @@ class TestJoinCalls:
         assert 'ev9' not in set(inner['delly_INFO_EVENT'].dropna())
         pd.testing.assert_frame_equal(inner_join_bps(bp_dict, **kw)[0], inner)
         pd.testing.assert_frame_equal(outer_join_bps(bp_dict, **kw)[0], outer)
+
+
+# ---------------------------------------------------------------------------
+# _attach_source_columns: one lookup and concat in place of a merge per source
+# ---------------------------------------------------------------------------
+
+def _id_rows():
+    """ID table as flatten_idgraph leaves it: text columns, one row per per-sample component."""
+    return pd.DataFrame({
+        'svensemble_id': ['sv0', 'sv1', 'sv2', 'sv3'],
+        SAMPLE_ID_COL: ['S1', 'S1', 'S2', 'S2'],
+        'delly_INFO_EVENT': ['e1', pd.NA, 'e1', 'e2'],
+        'manta_INFO_EVENT': ['m1', 'm2', pd.NA, pd.NA],
+    }, dtype='string')
+
+
+def _source_frames():
+    """Two sources whose columns change dtype when a row has no breakpoint (int, bool, text)."""
+    return {
+        'delly': pd.DataFrame({
+            'INFO_EVENT': ['e1', 'e1', 'e2', 'e9'], SAMPLE_ID_COL: ['S1', 'S2', 'S2', 'S1'],
+            'POS_bnd1': [10, 11, 20, 90], 'FILTER_PASS': [True, False, True, True], 'ALT_bnd1': ['A', 'B', 'C', 'D'],
+        }),
+        'manta': pd.DataFrame({
+            'INFO_EVENT': ['m1', 'm2'], SAMPLE_ID_COL: ['S1', 'S1'], 'POS_bnd1': [12, 30], 'QUAL': [1.5, 2.5],
+        }),
+    }
+
+
+class TestAttachSourceColumns:
+
+    def test_matches_a_left_merge_per_source(self):
+        from svensemble.chunk_match import _attach_source_columns, _merge_on_event_and_sample
+        expected = _id_rows()
+        for source, bp_df in _source_frames().items():
+            expected = _merge_on_event_and_sample(expected, bp_df.add_prefix(f'{source}_'), source, how='left')
+        pd.testing.assert_frame_equal(_attach_source_columns(_id_rows(), _source_frames()), expected)
+
+    def test_rejects_duplicate_event_and_sample(self):
+        from svensemble.chunk_match import _attach_source_columns
+        frames = _source_frames()
+        frames['manta'] = pd.concat([frames['manta'], frames['manta'].iloc[[0]]])
+        with pytest.raises(ValueError, match='manta'):
+            _attach_source_columns(_id_rows(), frames)

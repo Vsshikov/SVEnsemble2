@@ -29,6 +29,11 @@ _INS_DUP_CODES: frozenset[int] = frozenset([
     _ORIENT_ENCODE[']N'] * 4 + _ORIENT_ENCODE['N['],  # 4  – tandem duplication
 ])
 
+# Chunks of more rows than this get re-cut by POS_bnd2 (_split_by_bnd2), so a
+# locus that piles thousands of breakends onto one bnd1 spot, with mates spread
+# far apart, never builds an n x n matrix over all of them
+CHUNK_BND2_MATCH_THRESHOLD = 1000
+
 def mark_ground_truth(bp_df: pd.DataFrame) -> pd.DataFrame:
     """Give ground-truth breakpoints the GROUND_TRUTH_SAMPLE placeholder as their sample.
 
@@ -98,6 +103,38 @@ def _chunk_bounds(
             start = i
     bounds.append((start, n))
     return bounds
+
+
+def _split_by_bnd2(
+    pos2: np.ndarray,
+    bounds: list[tuple[int, int]],
+    max_n: int,
+    max_dist: int,
+) -> tuple[np.ndarray, list[tuple[int, int]]]:
+    """Re-cut every chunk of more than max_n rows by POS_bnd2.
+
+    Sorts such a chunk's rows by POS_bnd2 and starts a new chunk wherever
+    POS_bnd2 rises by more than max_dist over the previous row's, or is
+    missing. Leaves smaller chunks, and their row order, as they are. Like
+    _chunk_bounds, ignores confidence intervals, so it may separate two
+    breakpoints whose widened bnd2 intervals still lie within max_dist.
+
+    Returns:
+        The order to read the rows in, and each chunk's [start, end) range in that order.
+    """
+    order = np.arange(len(pos2))
+    out = []
+    for start, end in bounds:
+        if end - start <= max_n:
+            out.append((start, end))
+            continue
+        rows = start + np.argsort(pos2[start:end], kind='stable')
+        order[start:end] = rows
+        # 'not gap <= max_dist' also cuts at a missing position
+        cuts = (start + 1 + np.flatnonzero(~(np.diff(pos2[rows]) <= max_dist))).tolist()
+        edges = [start, *cuts, end]
+        out.extend(zip(edges[:-1], edges[1:]))
+    return order, out
 
 
 def _interval_dists(ref_lo: np.ndarray, ref_hi: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
@@ -324,6 +361,12 @@ def get_pairwise_matches(
     bp_df = zipped_bp_df[col_retain_list]
     bp_df = bp_df[bp_df['CHROM_bnd1'].notna() & bp_df['CHROM_bnd2'].notna()]
     bp_df = bp_df.sort_values(['CHROM_bnd1', 'CHROM_bnd2'], kind='stable')
+    bounds = _chunk_bounds(
+        bp_df['CHROM_bnd1'].to_numpy(), bp_df['CHROM_bnd2'].to_numpy(), bp_df['POS_bnd1'].to_numpy(),
+        chunk_max_n=100, chunk_max_n_dist=max_dist,
+    )
+    order, bounds = _split_by_bnd2(bp_df['POS_bnd2'].to_numpy(), bounds, CHUNK_BND2_MATCH_THRESHOLD, max_dist)
+    bp_df = bp_df.iloc[order]
 
     # Read every per-row value once; each chunk below is a slice of these arrays
     same_chrom = (bp_df['CHROM_bnd1'] == bp_df['CHROM_bnd2']).to_numpy()
@@ -345,10 +388,6 @@ def get_pairwise_matches(
 
     matched_pairs = []
     unmatched = []
-    bounds = _chunk_bounds(
-        bp_df['CHROM_bnd1'].to_numpy(), bp_df['CHROM_bnd2'].to_numpy(), bp_df['POS_bnd1'].to_numpy(),
-        chunk_max_n=100, chunk_max_n_dist=max_dist,
-    )
     print(f'Number of chunks: {len(bounds)}')
     for start, end in bounds:
         n = end - start
@@ -732,6 +771,42 @@ def _merge_on_event_and_sample(
     merged[SAMPLE_ID_COL] = merged[SAMPLE_ID_COL].fillna(merged[source_sample_col])
     del merged[source_sample_col]
     return merged
+
+
+def _attach_source_columns(left: pd.DataFrame, bp_df_dict: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Append each source's breakpoint columns to *left*, prefixed with the source name.
+
+    For every row of *left*, looks up the source's breakpoint with the row's
+    {source}_INFO_EVENT and SAMPLE_ID_COL, compared as text, and takes that
+    breakpoint's other columns, or NaN where the row has none. Joins all the
+    sources' columns to *left* in one concat that copies nothing, so no step
+    copies the growing frame. Gives the rows and columns that a left merge per
+    source (_merge_on_event_and_sample) gives, with a fresh RangeIndex.
+
+    Raises:
+        ValueError: If a source holds two breakpoints with one event and sample,
+            which a merge would turn into duplicate rows.
+    """
+    left = left.reset_index(drop=True)
+    blocks = []
+    for source, bp_df in bp_df_dict.items():
+        keys = [f'{source}_INFO_EVENT', SAMPLE_ID_COL]
+        right = (
+            bp_df[['INFO_EVENT', SAMPLE_ID_COL]].astype('string')
+            .set_axis(keys, axis=1).reset_index(drop=True)
+            .assign(_row=np.arange(len(bp_df)))
+        )
+        if right.duplicated(keys).any():
+            raise ValueError(f"{source} holds more than one breakpoint with the same event and sample")
+        # how='left' keeps left's rows in order; -1 marks rows without the source's breakpoint
+        rows = left[keys].astype('string').merge(right, on=keys, how='left')['_row'].fillna(-1).to_numpy(dtype=np.int64)
+        body = bp_df.drop(columns=['INFO_EVENT', SAMPLE_ID_COL])
+        body.index = pd.RangeIndex(len(body))
+        block = body.reindex(rows)
+        block.index = left.index
+        block.columns = [f'{source}_{col}' for col in block.columns]
+        blocks.append(block)
+    return pd.concat([left, *blocks], axis=1, copy=False)
 
 
 def _kept_view(graph: ig.Graph, dropped: set[int]) -> ig.Graph:
@@ -1248,11 +1323,9 @@ def join_calls(
 
     # Add each caller's breakpoint columns on (event, sample)
     if not ids_only:
-        for source, bp_df in bp_df_dict.items():
-            if source == ref_callset:
-                continue
-            # The merge turns the event and sample keys into text itself
-            matched_df = _merge_on_event_and_sample(matched_df, bp_df.add_prefix(f'{source}_'), source, how='left')
+        matched_df = _attach_source_columns(
+            matched_df, {source: bp_df for source, bp_df in bp_df_dict.items() if source != ref_callset},
+        )
 
     if not add_common_id:
         matched_df = matched_df.drop(columns=common_id_name)
