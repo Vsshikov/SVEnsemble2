@@ -144,7 +144,7 @@ Inputs to `svensemble run`:
 | smoove | `smoove` |
 
 The caller is recognised by the INFO, FORMAT and FILTER fields its VCF header declares, so
-`--callers` is needed only for a file whose header names no single caller.
+`--callers` is only needed if input vcfs come from unsupported caller version or vcfs with modified headers.
 
 <!-- TODO: tested caller versions. -->
 
