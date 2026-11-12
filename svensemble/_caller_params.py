@@ -137,12 +137,9 @@ GRIDSS_FILTERS = [
     'ASSEMBLY_TOO_SHORT',
     'INSUFFICIENT_SUPPORT',
     'LOW_MAPQ',
-    'LOW_QUAL',
-    'NO_ASSEMBLY',
     'NO_RP',
     'NO_SR',
     'REF',
-    'SINGLE_ASSEMBLY',
     'SINGLE_SUPPORT',
     'SMALL_EVENT'
 ]
@@ -152,12 +149,29 @@ GRIDSS_INFO_MANDATORY_COLS = [
     'EVENT',
     'CIPOS'
 ]
-# INFO fields from GRIDSS VCF that will be used for call posterior probability estimation
+# INFO fields from GRIDSS VCF that will be used for call posterior probability estimation.
+# Only fields without a per-sample FORMAT counterpart; the rest live in GRIDSS_FORMAT_COLS.
 GRIDSS_INFO_PRED_COLS = [
+    'SVLEN',
+    'AS',
+    'BA',
+    'BMQ',
+    'BMQN',
+    'BMQX',
+    'CAS',
+    'IMPRECISE',
+    'MQ',
+    'MQN',
+    'MQX',
+    'RAS',
+    'SB',
+    'SELF',
+]
+# FORMAT fields from GRIDSS VCF used for per-sample call posterior probability estimation.
+# Each also has an INFO twin, which is left unparsed.
+GRIDSS_FORMAT_COLS = [
     'ANRP',
-    'ANRPQ',
     'ANSR',
-    'ANSRQ',
     'ASQ',
     'ASRP',
     'ASSR',
@@ -180,24 +194,6 @@ GRIDSS_INFO_PRED_COLS = [
     'SR',
     'SRQ',
     'VF',
-    'SVLEN',
-    'AS',
-    'BA',
-    'BMQ',
-    'BMQN',
-    'BMQX',
-    'CAS',
-    'CQ',
-    'IMPRECISE',
-    'INSRMP',
-    'MQ',
-    'MQN',
-    'MQX',
-    'RAS',
-    'RF',
-    'SB',
-    'SELF',
-    'SVTYPE'
 ]
 
 # Parameters for GRIDSS
@@ -206,6 +202,7 @@ GRIDSS_PARAMS = DEFAULT_PARAMS | {
     'filter_cols': GRIDSS_FILTERS,
     'info_cols_mandatory': GRIDSS_INFO_MANDATORY_COLS,
     'info_cols_pred': GRIDSS_INFO_PRED_COLS,
+    'format_cols': GRIDSS_FORMAT_COLS,
     'svlen_source': 'alt',
     'bnd2_pos': None,
     'header_signature': {'INFO': ['ANRP', 'ASRP', 'BASSR']},
