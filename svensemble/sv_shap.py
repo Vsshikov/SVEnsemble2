@@ -7,6 +7,7 @@ step and writes {sample}.{model_id}.{training_set}.shap_values.pkl and
 subcommand.
 """
 
+import logging
 import time
 import pickle
 from pathlib import Path
@@ -20,6 +21,8 @@ import shap
 from . import _config as sv_config
 from . import io as sv_io
 
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Feature alignment
@@ -27,7 +30,6 @@ from . import io as sv_io
 def align_features(
     model,
     X: pd.DataFrame,
-    verbose: bool = False,
 ) -> pd.DataFrame:
     """
     Align DataFrame columns with the model's expected feature set.
@@ -46,9 +48,10 @@ def align_features(
     missing = model_features - data_features
 
     if extra:
-        if verbose:
-            print(f"Dropping {len(extra)} extra features not in model: "
-                  f"{sorted(extra)[:10]}{'...' if len(extra) > 10 else ''}")
+        logger.info(
+            "Dropping %d extra features not in model: %s%s",
+            len(extra), sorted(extra)[:10], "..." if len(extra) > 10 else "",
+        )
         X = X.drop(columns=list(extra))
 
     if missing:
@@ -67,7 +70,6 @@ def compute_shap_values(
     X: pd.DataFrame,
     use_gpu: bool = False,
     max_samples: Optional[int] = None,
-    verbose: bool = False,
 ) -> shap.Explanation:
     """
     Compute SHAP values with TreeExplainer.
@@ -78,21 +80,20 @@ def compute_shap_values(
         use_gpu: Use shap.explainers.GPUTreeExplainer when True.
         max_samples: If set, subsample *X* to at most this many rows for
             the background dataset and explanation (useful for large datasets).
-        verbose: Print progress information.
 
     Returns:
         shap.Explanation object.
     """
     if max_samples is not None and len(X) > max_samples:
-        if verbose:
-            print(f"Subsampling {len(X)} rows to {max_samples} for SHAP computation")
+        logger.info("Subsampling %d rows to %d for SHAP computation", len(X), max_samples)
         rng = np.random.RandomState(42)
         idx = rng.choice(len(X), size=max_samples, replace=False)
         X = X.iloc[sorted(idx)]
 
-    if verbose:
-        explainer_type = "GPUTreeExplainer" if use_gpu else "TreeExplainer"
-        print(f"Creating {explainer_type} (n_features={X.shape[1]}, n_samples={X.shape[0]})")
+    logger.info(
+        "Creating %s (n_features=%d, n_samples=%d)",
+        "GPUTreeExplainer" if use_gpu else "TreeExplainer", X.shape[1], X.shape[0],
+    )
 
     start = time.time()
 
@@ -104,8 +105,7 @@ def compute_shap_values(
     shap_values = explainer(X, check_additivity=not use_gpu)
     elapsed = time.time() - start
 
-    if verbose:
-        print(f"SHAP computation completed in {elapsed:.1f}s")
+    logger.info("SHAP computation completed in %.1fs", elapsed)
 
     return shap_values
 
@@ -152,7 +152,6 @@ def run_shap(
     use_gpu: bool = False,
     max_samples: Optional[int] = None,
     top_n: int = 20,
-    verbose: bool = False,
 ) -> Path:
     """
     Pipeline-friendly SHAP entry point.  Accepts file paths directly
@@ -182,27 +181,29 @@ def run_shap(
     if fillna is not None:
         X = X.fillna(fillna)
 
-    X = align_features(model, X, verbose=verbose)
+    X = align_features(model, X)
 
-    if verbose:
-        print(f"SHAP for sample={sample} model={sv_config.model_id(resolved)} training_set={training_set}")
-        print(f"Feature matrix shape: {X.shape}")
-
-    shap_values = compute_shap_values(
-        model, X, use_gpu=use_gpu, max_samples=max_samples, verbose=verbose,
+    logger.info(
+        "SHAP for sample=%s model=%s training_set=%s, feature matrix shape %s",
+        sample, sv_config.model_id(resolved), training_set, X.shape,
     )
+
+    shap_values = compute_shap_values(model, X, use_gpu=use_gpu, max_samples=max_samples)
 
     output_dir = Path(output_dir)
     summary = summarise_shap_values(shap_values, top_n=top_n)
     summary_csv_path = output_dir / sv_io.SHAP_SUMMARY
     with sv_io.atomic_path(summary_csv_path) as tmp:
         summary.to_csv(tmp, index=False)
-    print(f"Saved SHAP summary (top {len(summary)}): {summary_csv_path}")
-    print(summary.to_string(index=False))
+    if logger.isEnabledFor(logging.INFO):
+        logger.info(
+            "Saved SHAP summary (top %d) to %s:\n%s",
+            len(summary), summary_csv_path, summary.to_string(index=False),
+        )
 
     shap_pkl_path = output_dir / sv_io.SHAP_VALUES
     with sv_io.atomic_path(shap_pkl_path) as tmp, open(tmp, 'wb') as f:
         pickle.dump(shap_values, f)
-    print(f"Saved SHAP values: {shap_pkl_path}")
+    logger.info("Saved SHAP values to %s", shap_pkl_path)
 
     return shap_pkl_path

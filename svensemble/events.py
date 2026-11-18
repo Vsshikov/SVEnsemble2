@@ -4,12 +4,16 @@ Events include both simple events used in VCF format: DEL, DUP, INV, INS,
 and complex event combinations described in
 """
 
+import logging
+
 import numpy as np
 import pandas as pd
 
 from . import utils
 from . import _caller_params as caller_params
 from ._constants import INV_EVENT1_SUFFIX, INV_EVENT2_SUFFIX
+
+logger = logging.getLogger(__name__)
 
 drop_cols = ['INFO_CHR2', 'INFO_CIEND_l', 'INFO_CIEND_r']
 
@@ -273,13 +277,15 @@ def event_to_bnd(vcf_df: pd.DataFrame, bnd2_pos: str = 'svlen') -> pd.DataFrame:
     bnd_dfs = []
     for svtype, svtype_df in svtype_dict.items():
         if svtype not in svtype_dispatch:
-            print(f'{svtype} found in INFO_SVTYPE but not in svtype_dispatch, skipping')
+            logger.warning(
+                "Skipping %d %s records: no converter in svtype_dispatch", len(svtype_df), svtype,
+            )
             continue
         if len(svtype_df) > 0:
             bnd_dfs.append(svtype_dispatch[svtype](svtype_df, bnd2_pos))
 
     if not bnd_dfs:
-        print('No breakends found, returning empty DataFrame')
+        logger.debug("No breakends found, returning empty DataFrame")
         return pd.DataFrame()
 
     return pd.concat(bnd_dfs, axis=0)

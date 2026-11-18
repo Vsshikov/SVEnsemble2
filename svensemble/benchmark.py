@@ -6,6 +6,8 @@ sets are produced by validation_sets.preprocess_validation_set; curves and
 plots are made from the benchmark CSVs in svensemble_analyse.
 """
 
+import logging
+
 import pandas as pd
 import numpy as np
 from typing import List
@@ -17,6 +19,8 @@ from . import breakpoints as bps
 from . import io as sv_io
 from . import utils as sv_utils
 from ._constants import PRED_SUFFIX, SAMPLE_ID_COL
+
+logger = logging.getLogger(__name__)
 
 
 def _select_sample(bps_df: pd.DataFrame, sample: str | None) -> tuple[pd.DataFrame, str | None]:
@@ -74,7 +78,7 @@ def get_truth_count(
     return len(truth_filtered)
 
 
-def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True, sample: str | None = None):
+def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, sample: str | None = None):
     """
     Given dataframes of a callset and a validation set, match them and return a dataframe with the following columns:
     INFO_EVENT, {qual_metric}, is_in_val, INFO_INFERRED_SVTYPE, {FILTER_PASS}
@@ -142,7 +146,7 @@ def validate_basic_callset(callset_bps, val_set, val_name, callset_name, val_mat
 
 
 
-def validate_svensemble2_predictions(svensemble2_bps, val_set, val_name, training_set_name=None, model_name=None, pred_col=None, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, verbose=True, sample: str | None = None):
+def validate_svensemble2_predictions(svensemble2_bps, val_set, val_name, training_set_name=None, model_name=None, pred_col=None, val_match_margin=300, val_match_insert_delta_threshold=0.5, additional_cols: None | List[str] = None, sample: str | None = None):
     svens_calls_, sample = _select_sample(svensemble2_bps, sample)
     svens_calls_ = svens_calls_.copy()
 
@@ -214,7 +218,6 @@ def run_single_callset_benchmark(
     svtypes: list[str] | None = None,
     svlen_min: int | None = None,
     svlen_max: int | None = None,
-    verbose: bool = False,
     sample: str | None = None,
 ):
     """Benchmark one callset against a validation set and write a single CSV.
@@ -247,8 +250,6 @@ def run_single_callset_benchmark(
             0. Default: None.
         svlen_max (int, optional): Inclusive upper SV-length bound. None means
             unbounded. Default: None.
-        verbose (bool, optional): Whether to print processing info.
-            Default: False.
         sample (str, optional): Sample to benchmark in a multi-sample
             callset; required when the callset holds more than one sample.
 
@@ -270,15 +271,15 @@ def run_single_callset_benchmark(
         )
         callset_bps = bps.svlen_svtype_filter(callset_bps, source, svtypes=svtypes, svlens=svlens)
         val_set = bps.svlen_svtype_filter(val_set, val_name, svtypes=svtypes, svlens=svlens)
-        if verbose:
-            print(f"Filtered {callset_name} and {val_name} to svtypes={svtypes}, svlens={svlens}")
+        logger.info(
+            "Filtered %s and %s to svtypes=%s, svlens=%s", callset_name, val_name, svtypes, svlens,
+        )
 
     if callset_name.startswith('svensemble2'):
         val_df = validate_svensemble2_predictions(
             svensemble2_bps=callset_bps,
             val_set=val_set,
             val_name=val_name,
-            verbose=verbose,
             sample=sample,
         )
     else:
@@ -287,17 +288,13 @@ def run_single_callset_benchmark(
             val_set=val_set,
             val_name=val_name,
             callset_name=callset_name,
-            verbose=verbose,
             sample=sample,
         )
 
-    if verbose:
-        match_count = val_df["is_in_val"].sum()
-        total_count = len(val_df)
-        print(
-            f"{callset_name} callset processed against {val_name} "
-            f"({match_count} matches out of {total_count} predictions)"
-        )
+    logger.info(
+        "%s callset processed against %s (%d matches out of %d predictions)",
+        callset_name, val_name, val_df["is_in_val"].sum(), len(val_df),
+    )
 
     if output_dir is None:
         return val_df

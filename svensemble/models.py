@@ -2,6 +2,7 @@
 PU models for SV call probability estimation.
 """
 import inspect
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,8 @@ from sklearn.utils.multiclass import unique_labels
 from sklearn.metrics import euclidean_distances
 
 from . import matched_breakpoints as mbps
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +200,7 @@ def _estimate_duplessis_weights(
     estimation_params['label_prob'] = label_prob
 
     if y_train.sum() == 0 or y_val.sum() == 0:
-        print("No positive labels in the training or validation set, skipping")
+        logger.warning("No positive labels in the training or validation set, skipping")
         estimation_params['clpr'] = 0
         return estimation_params, {0: label_prob, 1: 0}
 
@@ -229,12 +232,12 @@ def _estimate_duplessis_weights(
     label_freq = y_proba_nontrad[y_val == 1].mean()
 
     if label_freq < _LABEL_FREQ_FLOOR:
-        print(
-            f"label_freq estimate ({label_freq:.2e}) is below the floor "
-            f"({_LABEL_FREQ_FLOOR:.2e}): the non-traditional classifier "
-            "assigned near-zero probability to the true positives in the "
-            "validation set. Flooring label_freq to avoid an unstable "
-            "weight estimate."
+        logger.warning(
+            "label_freq estimate (%.2e) is below the floor (%.2e): the "
+            "non-traditional classifier assigned near-zero probability to the "
+            "true positives in the validation set. Flooring label_freq to "
+            "avoid an unstable weight estimate.",
+            label_freq, _LABEL_FREQ_FLOOR,
         )
         label_freq = _LABEL_FREQ_FLOOR
 
@@ -242,7 +245,7 @@ def _estimate_duplessis_weights(
     estimation_params['clpr'] = clpr
     estimation_params['label_freq'] = label_freq
 
-    print(f"PU estimates: clpr {clpr:.2e}, label_prob {label_prob:.2e}, label_freq {label_freq:.2e}")
+    logger.info("PU estimates: clpr %.2e, label_prob %.2e, label_freq %.2e", clpr, label_prob, label_freq)
 
     return estimation_params, {0: 1 / (1 - label_prob), 1: 2 * clpr / label_prob}
 
@@ -379,7 +382,6 @@ def train_consensus_classifier(
     joint_bp_df: pd.DataFrame,
     workflow_config: dict,
     training_set_name: str,
-    verbose: bool = False,
 ) -> tuple[pd.DataFrame, SVEnsembleConsensusClassifier]:
     """
     Adapter for consensus classifier so it can be included into the pipeline despite not requiring actual `training`
@@ -390,7 +392,6 @@ def train_consensus_classifier(
         workflow_config,
         ground_truth_name,
         training_set_name,
-        verbose=verbose,
     )
     del joint_bp_df
 
@@ -418,7 +419,6 @@ def train_unbiased_rf(
     joint_bp_df: pd.DataFrame,
     workflow_config: dict,
     training_set_name: str,
-    verbose: bool = False,
 ) -> tuple[pd.DataFrame, RF]:
     """
     Train an unbiased Random Forest for a single training set using the Duplessis method.
@@ -429,7 +429,6 @@ def train_unbiased_rf(
         workflow_config,
         ground_truth_name,
         training_set_name,
-        verbose=verbose,
     )
     del joint_bp_df
 
@@ -451,8 +450,7 @@ def train_unbiased_rf(
     }
     del training_set_df
 
-    if verbose:
-        print(f"Training PU model for training set: {training_set_name}")
+    logger.info("Training PU model for training set: %s", training_set_name)
     training_params = workflow_config['model']['training_params']
     model_kwargs = training_params['model_kwargs']
     clpr = training_params.get('clpr')
@@ -467,7 +465,6 @@ def train_unbiased_nosvlen(
     joint_bp_df: pd.DataFrame,
     workflow_config: dict,
     training_set_name: str,
-    verbose: bool = False,
 ) -> tuple[pd.DataFrame, RF]:
     """
     Train an unbiased XGBoost model for a single training set, with all SVLEN
@@ -480,7 +477,6 @@ def train_unbiased_nosvlen(
         joint_bp_df_nosvlen,
         workflow_config,
         training_set_name,
-        verbose=verbose,
     )
 
 
@@ -488,7 +484,6 @@ def train_unbiased_concat_rf(
     matched_bps_sources: dict[str, pd.DataFrame | Path],
     workflow_config: dict,
     training_set_name: str,
-    verbose: bool = False,
 ) -> tuple[pd.DataFrame, RF]:
     """
     Train an unbiased Random Forest on a training set pooled from one or more samples.
@@ -511,7 +506,6 @@ def train_unbiased_concat_rf(
             workflow_config,
             _gt_name,
             training_set_name,
-            verbose=verbose,
         )
         del source_df
         training_set_dfs.append(sample_training_set_df)
@@ -537,8 +531,7 @@ def train_unbiased_concat_rf(
     }
     del training_set_df
 
-    if verbose:
-        print(f"Training PU model for training set: {training_set_name}")
+    logger.info("Training PU model for training set: %s", training_set_name)
     training_params = workflow_config['model']['training_params']
     model_kwargs = training_params['model_kwargs']
     clpr = training_params.get('clpr')
@@ -553,7 +546,6 @@ def train_unbiased_xgb(
     joint_bp_df: pd.DataFrame,
     workflow_config: dict,
     training_set_name: str,
-    verbose: bool = False,
 ) -> tuple[pd.DataFrame, XGB]:
     """
     Train an unbiased XGBoost model for a single training set using the Duplessis method.
@@ -564,7 +556,6 @@ def train_unbiased_xgb(
         workflow_config,
         ground_truth_name,
         training_set_name,
-        verbose=verbose,
     )
     del joint_bp_df
 
@@ -586,8 +577,7 @@ def train_unbiased_xgb(
     }
     del training_set_df
 
-    if verbose:
-        print(f"Training XGBoost PU model for training set: {training_set_name}")
+    logger.info("Training XGBoost PU model for training set: %s", training_set_name)
     training_params = workflow_config['model']['training_params']
     model_kwargs = training_params['model_kwargs']
     clpr = training_params.get('clpr')
@@ -602,7 +592,6 @@ def train_unbiased_xgb_concat(
     matched_bps_sources: dict[str, pd.DataFrame | Path],
     workflow_config: dict,
     training_set_name: str,
-    verbose: bool = False,
 ) -> tuple[pd.DataFrame, XGB]:
     """
     Train an unbiased XGBoost model on a training set pooled from one or more samples.
@@ -625,7 +614,6 @@ def train_unbiased_xgb_concat(
             workflow_config,
             _gt_name,
             training_set_name,
-            verbose=verbose,
         )
         del source_df
         training_set_dfs.append(sample_training_set_df)
@@ -651,8 +639,7 @@ def train_unbiased_xgb_concat(
     }
     del training_set_df
 
-    if verbose:
-        print(f"Training XGBoost PU model for training set: {training_set_name}")
+    logger.info("Training XGBoost PU model for training set: %s", training_set_name)
     training_params = workflow_config['model']['training_params']
     model_kwargs = training_params['model_kwargs']
     clpr = training_params.get('clpr')
@@ -667,7 +654,6 @@ def train_unbiased_xgb_nosvlen(
     joint_bp_df: pd.DataFrame,
     workflow_config: dict,
     training_set_name: str,
-    verbose: bool = False,
 ) -> tuple[pd.DataFrame, XGB]:
     """
     Train an unbiased XGBoost model for a single training set, with all SVLEN
@@ -680,7 +666,6 @@ def train_unbiased_xgb_nosvlen(
         joint_bp_df_nosvlen,
         workflow_config,
         training_set_name,
-        verbose=verbose,
     )
 
 # ---------------------------------------------------------------------------
@@ -702,7 +687,6 @@ def train_model(
     joint_bp_df: pd.DataFrame | None,
     workflow_config: dict,
     training_set_name: str,
-    verbose: bool = False,
     matched_bps_sources: dict[str, pd.DataFrame | Path] | None = None,
 ) -> tuple[pd.DataFrame, RF | XGB]:
     """
@@ -715,7 +699,6 @@ def train_model(
         workflow_config: Dictionary containing the workflow configuration.
             Must include 'ground_truth' with at least a 'name' key.
         training_set_name: Name of the training set.
-        verbose: If True, print verbose output.
         matched_bps_sources: Mapping of sample_name -> matched_bps DataFrame or
             path, for pooled (concat/cross) models (see MODEL_CONFIGS
             entries with training_params['concat'] = True). Required for
@@ -732,14 +715,8 @@ def train_model(
                 f"Model '{workflow_config['model']['name']}' is a concat/pooled model but no "
                 f"matched_bps_sources were provided (pass --train_samples/--train_matched_bps)."
             )
-        return model_function(
-            matched_bps_sources, workflow_config,
-            training_set_name, verbose,
-        )
+        return model_function(matched_bps_sources, workflow_config, training_set_name)
 
     if joint_bp_df is None:
         raise ValueError(f"Model '{workflow_config['model']['name']}' requires joint_bp_df.")
-    return model_function(
-        joint_bp_df, workflow_config,
-        training_set_name, verbose,
-    )
+    return model_function(joint_bp_df, workflow_config, training_set_name)

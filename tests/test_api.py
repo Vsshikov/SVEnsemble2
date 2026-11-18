@@ -1,5 +1,6 @@
 """Tests for svensemble.api steps and the svensemble.io artifact readers/writers."""
 
+import logging
 import math
 from pathlib import Path
 
@@ -168,7 +169,7 @@ class TestTrain:
         captured = {}
 
         def fake_train_model(joint_bp_df, workflow_config, training_set_name,
-                             verbose=False, matched_bps_sources=None):
+                             matched_bps_sources=None):
             captured.update(joint_bp_df=joint_bp_df, sources=matched_bps_sources,
                             workflow_config=workflow_config, training_set_name=training_set_name)
             return pd.DataFrame(), None
@@ -360,14 +361,15 @@ class TestRunScratch:
         )
         assert set(out) == {"calls_csv", "calls_vcf"}
 
-    def test_tmp_kept_on_failure(self, tmp_path, fake_pipeline, tmpdir_root, capsys):
+    def test_tmp_kept_on_failure(self, tmp_path, fake_pipeline, tmpdir_root, caplog):
         fake_pipeline["fail_in"] = "train"
-        with pytest.raises(RuntimeError, match="injected failure in train"):
-            api.run(**_run_kwargs(tmp_path))
+        with caplog.at_level(logging.WARNING, logger="svensemble.api"):
+            with pytest.raises(RuntimeError, match="injected failure in train"):
+                api.run(**_run_kwargs(tmp_path))
         kept = list(tmpdir_root.iterdir())
         assert len(kept) == 1 and kept[0].name.startswith("svensemble_run_")
         assert (kept[0] / "match" / sv_io.MATCHED_BPS).exists()
-        assert f"scratch kept at {kept[0]}" in capsys.readouterr().err
+        assert f"Scratch kept at {kept[0]}" in caplog.messages
         rec = _provenance(kept[0])
         assert rec["status"] == "failed"
         assert rec["error"] == {"type": "RuntimeError", "message": "injected failure in train"}
@@ -388,13 +390,14 @@ class TestRunScratch:
         assert (wd / "train" / sv_io.MODEL).exists()
         assert _provenance(wd)["parameters"]["workdir_is_tmp"] is False
 
-    def test_explicit_workdir_kept_on_failure(self, tmp_path, fake_pipeline, tmpdir_root, capsys):
+    def test_explicit_workdir_kept_on_failure(self, tmp_path, fake_pipeline, tmpdir_root, caplog):
         fake_pipeline["fail_in"] = "predict"
         wd = tmp_path / "wd"
-        with pytest.raises(RuntimeError):
-            api.run(**_run_kwargs(tmp_path), workdir=wd)
+        with caplog.at_level(logging.WARNING, logger="svensemble.api"):
+            with pytest.raises(RuntimeError):
+                api.run(**_run_kwargs(tmp_path), workdir=wd)
         assert (wd / "train" / sv_io.MODEL).exists()
-        assert "scratch kept" not in capsys.readouterr().err
+        assert not any(m.startswith("Scratch kept") for m in caplog.messages)
 
     def test_save_routes_artifacts_to_output_dir(self, tmp_path, fake_pipeline, tmpdir_root):
         out = api.run(

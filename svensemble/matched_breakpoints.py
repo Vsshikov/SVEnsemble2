@@ -2,6 +2,7 @@
 Functions to handle dataframes with multiple matched breakpoint sets
 Some of the functions related to SVEnsemble2 metrics are also in this module.
 """
+import logging
 import re
 
 import pandas as pd
@@ -24,6 +25,9 @@ from ._constants import (
     SAMPLE_PREFIX,
     TOPOLOGY_PREFIX,
 )
+
+logger = logging.getLogger(__name__)
+
 
 def generate_svensemble2_ids(matchedbps_df: pd.DataFrame, callsets: list[str], prefix: str = 'svensemble2_') -> pd.Series:
     """Number each distinct combination of the callsets' event IDs and prefix the number.
@@ -210,7 +214,6 @@ def preprocess_matchedbps_for_pu(
     training_set_name: str,
     add_match_ids_to_index: bool = False,
     ignore_match_errors: bool = False,
-    verbose: bool = False
 ) -> pd.DataFrame:
     """
     Preprocess the joined breakpoint DataFrame for PU learning.
@@ -223,7 +226,6 @@ def preprocess_matchedbps_for_pu(
         joint_bp_df (pd.DataFrame): DataFrame containing joined breakpoints.
         workflow_config (dict): Workflow config; supplies the training set's
             callers, their callset params and the model's training_params.
-        verbose (bool): If True, print information about dropped columns.
 
     Returns:
         pd.DataFrame: Preprocessed DataFrame.
@@ -317,8 +319,7 @@ def preprocess_matchedbps_for_pu(
                     )
                     training_df.iloc[:, training_df.columns.get_loc(column)] = vals
             except (AttributeError, TypeError) as err:
-                if verbose:
-                    print(f"Column '{column}' does not support string operations: {err}")
+                logger.debug("Column %r does not support string operations: %s", column, err)
                 continue
 
     # Check if 'ref_match' is constant
@@ -334,8 +335,8 @@ def preprocess_matchedbps_for_pu(
     # Never drop the match column even if it's constant
     if 'ref_match' in constant_cols:
         constant_cols.remove('ref_match')
-    if constant_cols and verbose:
-        print(f"Dropping {len(constant_cols)} constant columns: {constant_cols}")
+    if constant_cols:
+        logger.info("Dropping %d constant columns: %s", len(constant_cols), constant_cols)
     training_df = training_df.drop(columns=constant_cols)
 
     # Drop the match_sample_INFO_EVENT index from multiindex if specified by add_match_ids_to_index=False
@@ -349,7 +350,6 @@ def get_X_y_from_training_df(
     training_df: pd.DataFrame,
     match_col: str = 'ref_match',
     fillna: float | None = 0,
-    verbose: bool = False
 ) -> tuple[pd.DataFrame, pd.Series]:
     """
     Prepare feature matrix X and target vector y from a DataFrame with matched breakpoints.
@@ -365,7 +365,6 @@ def get_X_y_from_training_df(
         match_col (str): Name of the column indicating reference match (target).
         fillna (int | float | None): Value to fill NaN with. Set to None to
             preserve NaN (e.g. for models with native missing-value support).
-        verbose (bool): If True, print information about dropped columns.
 
     Returns:
         X (pd.DataFrame): Feature matrix after one-hot encoding and optional NaN filling.

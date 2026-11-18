@@ -1,5 +1,5 @@
+import logging
 from collections.abc import Callable
-from datetime import datetime
 from typing import Union, List, Literal, Dict, NotRequired, TypedDict
 
 import pandas as pd
@@ -11,16 +11,16 @@ from . import utils as sv_utils
 from . import _caller_params
 from ._constants import BND1, BND2, CI_LEFT, CI_RIGHT, CUSTOM_PREFIX
 
+logger = logging.getLogger(__name__)
+
 def gridss_preprocess(
     gridss_callset: pd.DataFrame,
-    verbose: bool = False,
     caller_params: dict|None = None
 ) -> pd.DataFrame:
     """Preprocess GRIDSS callset by splitting CIPOS values and cleaning columns.
 
     Args:
         gridss_callset: DataFrame containing GRIDSS variant calls with INFO_CIPOS field
-        verbose: If True, print progress messages during processing
         caller_params: Caller-specific parameters
 
     Returns:
@@ -32,8 +32,7 @@ def gridss_preprocess(
     if caller_params is None:
         caller_params = _caller_params.GRIDSS_PARAMS
 
-    if verbose:
-        print("Preprocessing GRIDSS callset...")
+    logger.info("Preprocessing GRIDSS callset")
 
     gridss_callset_ = gridss_callset.copy()
 
@@ -166,7 +165,6 @@ def gnomad_preprocess(
     evidence_cipos: Union[Dict[str, int], Literal['default']] = 'default',
     svtypes_retain: Union[str, List[str]] = 'simple',
     filter_pass_only: bool = False,
-    verbose: bool = False,
     caller_params: dict|None = None
 ) -> pd.DataFrame:
     """Preprocess gnomAD structural variant callset.
@@ -183,7 +181,6 @@ def gnomad_preprocess(
         svtypes_retain: Either 'simple' for basic SV types (DEL,DUP,INV,INS),
             or list of specific SV types to include
         filter_pass_only: If True, keep only variants with FILTER=PASS
-        verbose: If True, print processing information
         caller_params: Caller-specific parameters
 
     Returns:
@@ -192,27 +189,22 @@ def gnomad_preprocess(
     Raises:
         NotImplementedError: If unsupported SV types requested
     """
-    if verbose:
-        print("Preprocessing gnomAD callset...")
+    logger.info("Preprocessing gnomAD callset")
     if caller_params is None:
         caller_params = _caller_params.GNOMAD_PARAMS
 
     svtypes_supported = caller_params['supported_svtypes']
-    if verbose:
-        print(f"SV types currently supported: {svtypes_supported}")
+    logger.debug("SV types currently supported: %s", svtypes_supported)
 
     if evidence_cipos == 'default':
         evidence_cipos = caller_params['method_cipos']
-    if verbose:
-        print(f"Using default evidence CIPOS: {evidence_cipos}")
+    logger.debug("Using evidence CIPOS: %s", evidence_cipos)
 
     if svtypes_retain == 'simple':
         svtypes_retain = svtypes_supported
-        if verbose:
-            print(f"Using default viable SV types: {svtypes_retain}")
+        logger.debug("Using default viable SV types: %s", svtypes_retain)
     elif all(svtype in svtypes_supported for svtype in svtypes_retain):
-        if verbose:
-            print(f"Using specified viable SV types: {svtypes_retain}")
+        logger.debug("Using specified viable SV types: %s", svtypes_retain)
     else:
         raise NotImplementedError(f"Supported viable SV types: {svtypes_supported}")
 
@@ -228,14 +220,12 @@ def gnomad_preprocess(
     ] = gnomad_callset_['CHROM']
 
     if filter_pass_only:
-        if verbose:
-            print("Filtering to PASS variants only")
+        logger.info("Filtering to PASS variants only")
         gnomad_callset_ = gnomad_callset_[
             gnomad_callset_['FILTER_PASS'].astype(bool)
         ]
 
-    if verbose:
-        print("Setting confidence intervals based on evidence type")
+    logger.info("Setting confidence intervals based on evidence type")
     gnomad_callset_.loc[:, ['INFO_CIPOS_l', 'INFO_CIPOS_r']] = gnomad_get_cipos(
         gnomad_get_best_evidence(gnomad_callset_['INFO_EVIDENCE']),
         evidence_types=evidence_cipos.keys(),
@@ -1322,15 +1312,9 @@ parse_recipes: dict[str, ParseRecipe] = {
 }
 
 
-def _log(msg: str) -> None:
-    """Print a message with an ISO 8601 timestamp prefix."""
-    print(f"{datetime.now().astimezone().isoformat()} {msg}")
-
-
 def vcf_df_to_raw_bps(
     vcf_df: pd.DataFrame,
     caller_params: dict,
-    verbose: bool = False,
 ) -> pd.DataFrame:
     """Turn one caller's parsed VCF DataFrame into raw breakpoints.
 
@@ -1340,7 +1324,6 @@ def vcf_df_to_raw_bps(
     Args:
         vcf_df: The caller's VCF as parsed by vcfparse.parse_vcf_to_df.
         caller_params: The caller's CALLSET_PARAM_DICT entry.
-        verbose: If True, print progress messages.
 
     Returns:
         DataFrame of breakpoints.
@@ -1359,8 +1342,7 @@ def vcf_df_to_raw_bps(
     df = vcf_df.copy()
 
     if preprocess_all := recipe.get('preprocess_all'):
-        if verbose:
-            _log(f"Preprocessing all {source} variants")
+        logger.info("Preprocessing all %s variants", source)
         df = preprocess_all(df, caller_params=caller_params)
 
     bnd_svtypes = recipe['bnd_svtypes']
@@ -1379,24 +1361,20 @@ def vcf_df_to_raw_bps(
 
         preprocess_bnds = recipe.get('preprocess_bnds')
         if preprocess_bnds and len(bnd_df) > 0:
-            if verbose:
-                _log(f"Preprocessing {source} BND variants")
+            logger.info("Preprocessing %s BND variants", source)
             bnd_df = preprocess_bnds(bnd_df, caller_params=caller_params)
 
         preprocess_evts = recipe.get('preprocess_evts')
         if preprocess_evts and len(evt_df) > 0:
-            if verbose:
-                _log(f"Preprocessing {source} event variants")
+            logger.info("Preprocessing %s event variants", source)
             evt_df = preprocess_evts(evt_df, caller_params=caller_params)
 
         if len(evt_df) > 0:
-            if verbose:
-                _log(f"Converting {source} events to breakends")
+            logger.info("Converting %s events to breakends", source)
             evt_bnd_df = evts.event_to_bnd(evt_df, bnd2_pos=caller_params['bnd2_pos'])
             bnd_df = pd.concat([bnd_df, evt_bnd_df], axis=0) if len(bnd_df) > 0 else evt_bnd_df
 
-    if verbose:
-        _log(f"Converting {source} breakends to breakpoints")
+    logger.info("Converting %s breakends to breakpoints", source)
     force_diff = recipe.get('force_diff_cols')
     bp_df = bnds.bnd_to_bp(bnd_df, force_diff_cols=force_diff) if force_diff else bnds.bnd_to_bp(bnd_df)
 
@@ -1410,7 +1388,6 @@ def gnomad_process(
     df: pd.DataFrame,
     caller_params: dict,
     svtypes_retain: Union[str, List[str]] = 'simple',
-    verbose: bool = False,
 ) -> pd.DataFrame:
     """Top-level processing for a gnomAD-family ground-truth callset.
 
@@ -1427,13 +1404,10 @@ def gnomad_process(
         svtypes_retain=svtypes_retain,
         filter_pass_only=False,
         caller_params=caller_params,
-        verbose=verbose,
     )
-    if verbose:
-        print("Converting events to breakends")
+    logger.info("Converting events to breakends")
     bnd_df = gnomad_event_to_bnd(df, caller_params=caller_params)
-    if verbose:
-        print("Converting breakends to breakpoints")
+    logger.info("Converting breakends to breakpoints")
     bp_df = bnds.bnd_to_bp(bnd_df, force_diff_cols=['INFO_CIPOS_l', 'INFO_CIPOS_r'])
     return bp_df
 
@@ -1452,7 +1426,7 @@ def gnomad_process(
 # in the CALLSET_PARAM_DICT entries, not in the recipe.
 #
 # Keys per entry:
-#   process - callable(df, caller_params, svtypes_retain='simple', verbose=False)
+#   process - callable(df, caller_params, svtypes_retain='simple')
 #             takes the parsed+filtered VCF DataFrame and returns the fully
 #             processed breakpoint DataFrame (preprocess + event_to_bnd +
 #             bnd_to_bp collapsed into one step).

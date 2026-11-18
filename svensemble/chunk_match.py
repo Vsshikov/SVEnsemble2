@@ -4,6 +4,7 @@ Following a similar algorith with chunking and creating similarity
 matrices to the one used by Truvari
 """
 import itertools
+import logging
 from collections.abc import Iterable
 from collections import defaultdict, namedtuple
 from functools import lru_cache
@@ -15,6 +16,8 @@ import pandas as pd
 from . import breakpoints as bps
 from ._constants import BND1, BND2, GROUND_TRUTH_SAMPLE, SAMPLE_ID_COL, SV_ID_PREFIX
 from .id_graph import IdGraph, drop_edges, pair_codes
+
+logger = logging.getLogger(__name__)
 
 # Maps each BND relative-position string to a unique integer code.
 # Combined code = enc(bnd1) * 4 + enc(bnd2) gives a unique scalar per orientation pair,
@@ -388,7 +391,7 @@ def get_pairwise_matches(
 
     matched_pairs = []
     unmatched = []
-    print(f'Number of chunks: {len(bounds)}')
+    logger.debug("Number of chunks: %d", len(bounds))
     for start, end in bounds:
         n = end - start
         chunk_nodes = nodes[start:end]
@@ -1209,7 +1212,6 @@ def join_calls(
     no_self_match: list[str] | None = None,
     common_id_name: str = 'svensemble_id',
     add_common_id: bool = False,
-    verbose: bool = False,
 ) -> tuple[pd.DataFrame, IdGraph]:
     """Match breakpoints across sources and join them side by side.
 
@@ -1254,8 +1256,6 @@ def join_calls(
             holds the SV IDs. Defaults to 'svensemble_id'.
         add_common_id (bool): Also return the SV IDs as a column named
             common_id_name. Defaults to False.
-        verbose (bool): Print how many match edges the pruning drops.
-            Defaults to False.
 
     Returns:
         tuple[pd.DataFrame, IdGraph]: The matched breakpoints from different
@@ -1291,8 +1291,7 @@ def join_calls(
     id_graph = assign_svensemble_ids(
         match_graph, dropped, wildcard_sample=wildcard_sample, common_id_name=common_id_name,
     )
-    if verbose:
-        print(f"Pruned {len(dropped)} of {match_graph.graph.ecount()} match edges")
+    logger.info("Pruned %d of %d match edges", len(dropped), match_graph.graph.ecount())
 
     # One row per per-sample component, keyed by (SV ID, sample) until the end
     matched_df = flatten_idgraph(
@@ -1345,7 +1344,6 @@ def inner_join_bps(
     no_self_match: list[str] | None = None,
     common_id_name: str = 'svensemble_id',
     add_common_id: bool = False,
-    verbose: bool = False,
 ) -> tuple[pd.DataFrame, IdGraph]:
     """Join matched breakpoints only.
 
@@ -1376,8 +1374,6 @@ def inner_join_bps(
             join_calls. Defaults to 'svensemble_id'.
         add_common_id (bool): Also return the SV IDs as a column; see
             join_calls. Defaults to False.
-        verbose (bool): Print how many match edges the pruning drops.
-            Defaults to False.
 
     Returns:
         tuple[pd.DataFrame, IdGraph]: Matched breakpoints from different sources
@@ -1388,7 +1384,7 @@ def inner_join_bps(
         max_dist=max_dist, ids_only=ids_only, add_topology=add_topology, ignore_size=ignore_size,
         workflow_config=workflow_config, keep_unmatched=False, wildcard_sample=wildcard_sample,
         no_self_match=no_self_match, common_id_name=common_id_name,
-        add_common_id=add_common_id, verbose=verbose,
+        add_common_id=add_common_id,
     )
 
 
@@ -1405,7 +1401,6 @@ def outer_join_bps(
     no_self_match: list[str] | None = None,
     common_id_name: str = 'svensemble_id',
     add_common_id: bool = False,
-    verbose: bool = False,
 ) -> tuple[pd.DataFrame, IdGraph]:
     """
     Merge breakpoint dataframes from multiple callers, aligning on matching events.
@@ -1426,8 +1421,6 @@ def outer_join_bps(
             see join_calls. Defaults to 'svensemble_id'.
         add_common_id (bool, optional): Also return the SV IDs as a column;
             see join_calls. Defaults to False.
-        verbose (bool, optional): Print how many match edges the pruning drops.
-            Defaults to False.
 
     Returns:
         tuple[pd.DataFrame, IdGraph]: Outer-joined DataFrame containing breakpoints
@@ -1439,5 +1432,5 @@ def outer_join_bps(
         max_dist=max_dist, ids_only=ids_only, add_topology=add_topology, ignore_size=ignore_size,
         workflow_config=workflow_config, keep_unmatched=True, wildcard_sample=wildcard_sample,
         no_self_match=no_self_match, common_id_name=common_id_name,
-        add_common_id=add_common_id, verbose=verbose,
+        add_common_id=add_common_id,
     )

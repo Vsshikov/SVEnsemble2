@@ -18,10 +18,13 @@ Conventions shared by every subcommand (and the matching api kwargs):
   * outputs always go to --output_dir, under the fixed filenames in svensemble.io
     (run can instead write the calls VCF to --output_vcf);
   * list-valued flags take space-separated values; '+' only joins a group
-    that acts as one name (benchmark-callset --svtypes DEL+INS).
+    that acts as one name (benchmark-callset --svtypes DEL+INS);
+  * stdout carries only the data a command prints (model-id); progress and
+    warnings go to stderr through logging, at the level -v/--verbose sets.
 """
 
 import argparse
+import logging
 import shlex
 import signal
 import sys
@@ -31,6 +34,27 @@ from . import __version__
 from . import api
 from . import io as sv_io
 from . import matched_breakpoints as mbps
+
+
+# Logging setup
+
+logger = logging.getLogger(__name__)
+
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+_LOG_DATEFMT = "%Y-%m-%dT%H:%M:%S%z"
+_VERBOSITY_LEVELS = (logging.WARNING, logging.INFO, logging.DEBUG)
+
+def _configure_logging(verbosity: int) -> None:
+    """Send log records to stderr and set the svensemble level from the -v count.
+
+    The root logger stays at WARNING, so other libraries only report warnings;
+    the svensemble logger shows WARNING (no -v), INFO (-v) or DEBUG (-vv).
+    warnings.warn calls from libraries go through the same handler.
+    """
+    logging.basicConfig(stream=sys.stderr, format=_LOG_FORMAT, datefmt=_LOG_DATEFMT)
+    level = _VERBOSITY_LEVELS[min(verbosity, len(_VERBOSITY_LEVELS) - 1)]
+    logging.getLogger("svensemble").setLevel(level)
+    logging.captureWarnings(True)
 
 
 def main():
@@ -61,6 +85,7 @@ def main():
         parser.print_help()
         sys.exit(0)
 
+    _configure_logging(args.verbose)
     args.func(args)
 
 
@@ -69,7 +94,10 @@ def main():
 # ---------------------------------------------------------------------------
 
 def _add_verbose_arg(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose output.")
+    parser.add_argument(
+        "-v", "--verbose", action="count", default=0,
+        help="Log progress to stderr (-v); repeat for debug detail (-vv).",
+    )
 
 
 def _add_model_config_arg(parser: argparse.ArgumentParser) -> None:
@@ -114,11 +142,9 @@ def _cmd_preprocess_raw(args):
     caller = args.caller or sv_io.read_callset_name(args.vcf)
     if caller is None:
         raise SystemExit(f"Cannot identify the caller of {args.vcf} from its header; give --caller.")
-    bp_df = api.preprocess_raw(sv_io.read_vcf(args.vcf, caller), caller, verbose=args.verbose)
+    bp_df = api.preprocess_raw(sv_io.read_vcf(args.vcf, caller), caller)
     out = sv_io.write_bps(bp_df, args.output_dir / sv_io.RAW_BPS.format(caller=caller))
-
-    if args.verbose:
-        print(f"Wrote {len(bp_df)} raw breakpoints to {out}")
+    logger.info("Wrote %d raw breakpoints to %s", len(bp_df), out)
 
 
 # ---------------------------------------------------------------------------
@@ -148,9 +174,7 @@ def _cmd_preprocess(args):
     # One input file per call, so its event IDs are consistent: a joint
     # multi-sample file's per-sample rows share records by INFO_EVENT.
     bps_path, _ = sv_io.write_callset(bp_df, args.output_dir, args.caller, args.sample, group_by="INFO_EVENT")
-
-    if args.verbose:
-        print(f"Wrote {len(bp_df)} processed breakpoints to {bps_path}")
+    logger.info("Wrote %d processed breakpoints to %s", len(bp_df), bps_path)
 
 
 # ---------------------------------------------------------------------------
@@ -189,13 +213,10 @@ def _cmd_match(args):
         model_config=_load_model_config(args),
         max_dist=args.max_dist,
         insert_delta_threshold=args.insert_delta_threshold,
-        verbose=args.verbose,
     )
     out = sv_io.write_bps(matched_bp_df, args.output_dir / sv_io.MATCHED_BPS)
     sv_io.write_id_graph(id_graph, args.output_dir / sv_io.ID_GRAPH)
-
-    if args.verbose:
-        print(f"Wrote {len(matched_bp_df)} matched breakpoints to {out}")
+    logger.info("Wrote %d matched breakpoints to %s", len(matched_bp_df), out)
 
 
 # ---------------------------------------------------------------------------
@@ -253,14 +274,11 @@ def _cmd_train(args):
         args.training_set,
         model_config=_load_model_config(args),
         ground_truth_name=args.ground_truth_name,
-        verbose=args.verbose,
     )
     model_path = sv_io.write_model(model_fit, args.output_dir / sv_io.MODEL)
     fm_path = sv_io.write_feature_matrix(X, args.output_dir / sv_io.FEATURE_MATRIX)
-
-    if args.verbose:
-        print(f"Saved model to {model_path}")
-        print(f"Saved feature matrix ({X.shape}) to {fm_path}")
+    logger.info("Saved model to %s", model_path)
+    logger.info("Saved feature matrix %s to %s", X.shape, fm_path)
 
 
 # ---------------------------------------------------------------------------
@@ -301,9 +319,7 @@ def _cmd_predict(args):
     if group_by is not None:
         svensemble2_calls_df = mbps._harmonise_samples(svensemble2_calls_df, how="max_score")
     calls_csv, _ = sv_io.write_calls(svensemble2_calls_df, args.output_dir, args.sample, group_by=group_by)
-
-    if args.verbose:
-        print(f"Wrote {len(svensemble2_calls_df)} calls to {calls_csv}")
+    logger.info("Wrote %d calls to %s", len(svensemble2_calls_df), calls_csv)
 
 
 # ---------------------------------------------------------------------------
@@ -350,10 +366,9 @@ def _cmd_annotate(args):
         args.output_dir,
         callers=_callers_from_args(args.callers, args.caller_vcfs),
     )
-    if args.verbose:
-        for caller, paths in written.items():
-            for path in paths:
-                print(f"{caller}: {path}")
+    for caller, paths in written.items():
+        for path in paths:
+            logger.info("Wrote annotated %s VCF to %s", caller, path)
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +405,6 @@ def _cmd_benchmark_callset(args):
         svtypes=svtypes,
         svlen_min=args.svlen_min,
         svlen_max=args.svlen_max,
-        verbose=args.verbose,
         sample=args.sample,
     )
 
@@ -430,7 +444,6 @@ def _cmd_shap(args):
         use_gpu=args.use_gpu,
         max_samples=args.max_samples,
         top_n=args.top_n,
-        verbose=args.verbose,
     )
 
 
@@ -492,7 +505,6 @@ def _cmd_ground_truth(args):
         canonical_chroms_only=not args.no_canonical_chroms,
         overwrite=args.overwrite,
         write_manifest=not args.no_manifest,
-        verbose=args.verbose,
     )
 
 
@@ -526,8 +538,7 @@ def _cmd_validation_set(args):
         output_dir=args.output_dir,
         overwrite=args.overwrite,
     )
-    if args.verbose:
-        print(f"Wrote {args.val_set} validation breakpoints to {out}")
+    logger.info("Wrote %s validation breakpoints to %s", args.val_set, out)
 
 
 # ---------------------------------------------------------------------------
@@ -618,7 +629,6 @@ def _cmd_run(args):
             annotate_vcfs=args.annotate_vcfs,
             output_vcf=args.output_vcf,
             command=shlex.join([sys.executable, "-m", "svensemble", *sys.argv[1:]]),
-            verbose=args.verbose,
         )
     finally:
         signal.signal(signal.SIGTERM, previous)
@@ -637,6 +647,7 @@ def _register_model_id(subparsers):
     grp.add_argument("--model", type=str, default=None, help="Preset / base name.")
     _add_model_config_arg(grp)
     grp.add_argument("--all", action="store_true", default=False, help="Print 'preset<TAB>model_id' for every preset.")
+    _add_verbose_arg(p)
     p.set_defaults(func=_cmd_model_id)
 
 

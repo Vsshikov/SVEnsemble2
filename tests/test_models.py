@@ -408,7 +408,7 @@ class TestTrainModelDispatcher:
     def test_concat_model_dispatches_with_matched_bps_sources(self, monkeypatch):
         captured = {}
 
-        def fake_fn(matched_bps_sources, workflow_config, training_set_name, verbose):
+        def fake_fn(matched_bps_sources, workflow_config, training_set_name):
             captured["matched_bps_sources"] = matched_bps_sources
             return ("X", "model")
 
@@ -423,7 +423,7 @@ class TestTrainModelDispatcher:
     def test_non_concat_model_dispatches_with_joint_bp_df(self, monkeypatch):
         captured = {}
 
-        def fake_fn(joint_bp_df, workflow_config, training_set_name, verbose):
+        def fake_fn(joint_bp_df, workflow_config, training_set_name):
             captured["joint_bp_df"] = joint_bp_df
             return ("X", "model")
 

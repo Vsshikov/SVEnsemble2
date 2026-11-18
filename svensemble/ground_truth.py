@@ -17,8 +17,8 @@ recipe and per-variant differences (CIPOS dictionaries, filter defaults,
 input filenames) live only in the params entry.
 """
 
+import logging
 import shlex
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -33,6 +33,8 @@ from ._constants import FILTER_PREFIX
 from . import io as sv_io
 from . import utils as sv_utils
 from . import vcfparse as vcfp
+
+logger = logging.getLogger(__name__)
 
 
 def preprocess_ground_truth(
@@ -50,7 +52,6 @@ def preprocess_ground_truth(
     canonical_chroms_only: bool = True,
     overwrite: bool = False,
     write_manifest: bool = True,
-    verbose: bool = False,
 ) -> Path:
     """
     Preprocess a ground-truth VCF into a filtered breakpoint CSV.
@@ -99,7 +100,6 @@ def preprocess_ground_truth(
         write_manifest: If True, write `{ground_truth_name}.manifest.txt`
             (io.GROUND_TRUTH_MANIFEST) next to the output, recording the source VCF, timestamp, filter set and a
             reproduction command.
-        verbose: If True, print progress messages.
 
     Returns:
         The output bps.csv path that was written (or reused when it already
@@ -117,10 +117,10 @@ def preprocess_ground_truth(
     manifest_path = output_dir / sv_io.GROUND_TRUTH_MANIFEST.format(ground_truth_name=ground_truth_name)
 
     if output_path.exists() and not overwrite:
-        print(
-            f"Ground truth already exists at {output_path}; reusing it "
-            f"(pass overwrite / --overwrite to rebuild).",
-            file=sys.stderr,
+        logger.warning(
+            "Ground truth already exists at %s; reusing it "
+            "(pass overwrite / --overwrite to rebuild).",
+            output_path,
         )
         return output_path
 
@@ -146,12 +146,10 @@ def preprocess_ground_truth(
         )
     recipe = callset_specific.ground_truth_recipes[recipe_key]
 
-    if verbose:
-        print(f"Parsing ground-truth VCF: {vcf_path}")
+    logger.info("Parsing ground-truth VCF: %s", vcf_path)
     gt_vcf = VariantFile(str(vcf_path))
     gt_df, _ = vcfp.parse_vcf_to_df(vcf_file=gt_vcf, caller_params=gt_params)
-    if verbose:
-        print(f"Parsed {len(gt_df)} records")
+    logger.info("Parsed %d records", len(gt_df))
 
     filter_defaults = gt_params.get('filter_defaults', {})
     if filters is None:
@@ -180,20 +178,17 @@ def preprocess_ground_truth(
         max_af=max_af,
         bothsides_support_only=bothsides_support_only,
         canonical_chroms_only=canonical_chroms_only,
-        verbose=verbose,
     )
 
     gt_bp_df = recipe['process'](
         gt_df,
         caller_params=gt_params,
         svtypes_retain=svtypes,
-        verbose=verbose,
     )
 
     if svlens is not None:
         min_len, max_len = svlens
-        if verbose:
-            print(f"Filtering breakpoints by SVLEN [{min_len}, {max_len}]")
+        logger.debug("Filtering breakpoints by SVLEN [%s, %s]", min_len, max_len)
         gt_bp_df = gt_bp_df[gt_bp_df['INFO_SVLEN'].abs().between(min_len, max_len)]
 
     # The manifest is written first so the bps CSV -- the file the
@@ -216,13 +211,11 @@ def preprocess_ground_truth(
             bothsides_support_only=bothsides_support_only,
             canonical_chroms_only=canonical_chroms_only,
         )
-        if verbose:
-            print(f"Wrote manifest to {manifest_path}")
+        logger.info("Wrote manifest to %s", manifest_path)
 
     with sv_utils.atomic_path(output_path) as tmp:
         gt_bp_df.to_csv(tmp, index=False)
-    if verbose:
-        print(f"Saved {len(gt_bp_df)} breakpoints to {output_path}")
+    logger.info("Saved %d breakpoints to %s", len(gt_bp_df), output_path)
 
     return output_path
 
@@ -312,7 +305,6 @@ def _apply_filters(
     max_af: float | None,
     bothsides_support_only: bool,
     canonical_chroms_only: bool,
-    verbose: bool
 ) -> pd.DataFrame:
     """Apply successive record-level filters to a parsed ground-truth DataFrame.
 
@@ -323,20 +315,17 @@ def _apply_filters(
         filter_cols = [f'{FILTER_PREFIX}{f}' for f in filters]
         present_cols = [c for c in filter_cols if c in df.columns]
         if present_cols:
-            if verbose:
-                print(f"Filtering by FILTER values: {filters}")
+            logger.debug("Filtering by FILTER values: %s", filters)
             mask = df[present_cols].any(axis=1).astype(bool)
             df = df[mask]
-    elif verbose:
-        print("No FILTER filter applied (keeping all records)")
+    else:
+        logger.debug("No FILTER filter applied (keeping all records)")
 
-    if verbose:
-        print(f"Filtering by SVTYPE: {svtypes}")
+    logger.debug("Filtering by SVTYPE: %s", svtypes)
     df = df[df['INFO_SVTYPE'].isin(svtypes)]
 
     if evidence is not None and 'INFO_EVIDENCE' in df.columns:
-        if verbose:
-            print(f"Filtering by EVIDENCE: {evidence}")
+        logger.debug("Filtering by EVIDENCE: %s", evidence)
         evidence_set = set(evidence)
         mask = df['INFO_EVIDENCE'].apply(
             lambda x: bool(evidence_set & set(x)) if x is not None else False
@@ -344,8 +333,7 @@ def _apply_filters(
         df = df[mask]
 
     if algorithms is not None and 'INFO_ALGORITHMS' in df.columns:
-        if verbose:
-            print(f"Filtering by ALGORITHMS: {algorithms}")
+        logger.debug("Filtering by ALGORITHMS: %s", algorithms)
         algorithms_set = set(algorithms)
         mask = df['INFO_ALGORITHMS'].apply(
             lambda x: bool(algorithms_set & set(x)) if x is not None else False
@@ -353,8 +341,7 @@ def _apply_filters(
         df = df[mask]
 
     if (min_af is not None or max_af is not None) and 'INFO_AF' in df.columns:
-        if verbose:
-            print(f"Filtering by AF: [{min_af}, {max_af}]")
+        logger.debug("Filtering by AF: [%s, %s]", min_af, max_af)
         af_series = df['INFO_AF'].apply(
             lambda x: x[0] if isinstance(x, tuple) and len(x) > 0 else x
         )
@@ -365,16 +352,13 @@ def _apply_filters(
             df = df[af_series <= max_af]
 
     if bothsides_support_only and 'INFO_BOTHSIDES_SUPPORT' in df.columns:
-        if verbose:
-            print("Filtering to BOTHSIDES_SUPPORT variants only")
+        logger.debug("Filtering to BOTHSIDES_SUPPORT variants only")
         df = df[df['INFO_BOTHSIDES_SUPPORT'].astype(bool)]
 
     if canonical_chroms_only:
-        if verbose:
-            print("Filtering to canonical chromosomes")
+        logger.debug("Filtering to canonical chromosomes")
         df = df[df['CHROM'].isin(sv_utils.human_chroms)]
 
-    if verbose:
-        print(f"{len(df)} variants remaining after filtering")
+    logger.info("%d variants remaining after filtering", len(df))
 
     return df

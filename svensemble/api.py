@@ -27,8 +27,8 @@ to that exact path, its provenance in the VCF header.
 """
 
 import copy
+import logging
 import shutil
-import sys
 import tempfile
 import time
 from collections.abc import Collection, Mapping, Sequence
@@ -56,6 +56,8 @@ from .benchmark import run_single_callset_benchmark as benchmark_callset
 from .ground_truth import preprocess_ground_truth
 from .utils import atomic_path
 from .validation_sets import preprocess_validation_set
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "generate_config", "model_id", "list_preset_ids",
@@ -127,14 +129,13 @@ def model_id(model: str | None = None, model_config: dict | None = None) -> str:
 # Pipeline steps
 # ---------------------------------------------------------------------------
 
-def preprocess_raw(vcf_df: pd.DataFrame, caller: str, verbose: bool = False) -> pd.DataFrame:
+def preprocess_raw(vcf_df: pd.DataFrame, caller: str) -> pd.DataFrame:
     """Turn one caller's parsed VCF into raw breakpoints.
 
     Args:
         vcf_df: The caller's VCF as parsed by io.read_vcf; not modified.
         caller: Caller name (a key of _caller_params.CALLSET_PARAM_DICT whose
             source has a callset_specific.parse_recipes entry).
-        verbose: Print progress messages.
     """
     if caller not in CALLSET_PARAM_DICT:
         raise ValueError(f"Unknown caller {caller!r}: no CALLSET_PARAM_DICT entry.")
@@ -144,7 +145,7 @@ def preprocess_raw(vcf_df: pd.DataFrame, caller: str, verbose: bool = False) -> 
             f"Caller {caller!r} (source {params.get('source')!r}) has no parse recipe; "
             f"known sources: {sorted(callset_specific.parse_recipes)}."
         )
-    return callset_specific.vcf_df_to_raw_bps(vcf_df, params, verbose=verbose)
+    return callset_specific.vcf_df_to_raw_bps(vcf_df, params)
 
 
 def preprocess(
@@ -170,7 +171,6 @@ def match(
     model_config: dict | None = None,
     max_dist: int = 100,
     insert_delta_threshold: float = 0.7,
-    verbose: bool = False,
 ) -> tuple[pd.DataFrame, IdGraph]:
     """Outer-join the callers' breakpoints with the ground truth.
 
@@ -188,7 +188,6 @@ def match(
         model, model_config: Only the ``add_topology`` training param is used.
         max_dist: Maximum breakpoint distance for a match.
         insert_delta_threshold: Insert-size similarity threshold for a match.
-        verbose: Print the callsets being matched and the pruned edge counts.
     """
     without_sample = [caller for caller, df in caller_bps.items() if SAMPLE_ID_COL not in df.columns]
     if without_sample:
@@ -201,8 +200,7 @@ def match(
         ground_truth_name=ground_truth_name,
     )
     bp_df_dict = {**caller_bps, ground_truth_name: chunk_match.mark_ground_truth(ground_truth_bps)}
-    if verbose:
-        print(f"Matching breakpoints: {list(bp_df_dict.keys())}")
+    logger.info("Matching breakpoints: %s", list(bp_df_dict))
     return chunk_match.outer_join_bps(
         bp_df_dict=bp_df_dict,
         ref_callset=ground_truth_name,
@@ -211,7 +209,6 @@ def match(
         workflow_config=workflow_config,
         wildcard_sample=GROUND_TRUTH_SAMPLE,
         add_common_id=True,
-        verbose=verbose,
     )
 
 
@@ -222,7 +219,6 @@ def train(
     training_set: str | None = None,
     model_config: dict | None = None,
     ground_truth_name: str = "gnomad",
-    verbose: bool = False,
 ) -> tuple[pd.DataFrame, object]:
     """Train a model on matched breakpoints.
 
@@ -237,7 +233,6 @@ def train(
             name instead trains on that preset's callers, e.g. a subset.
         model_config: Optional model config override (with 'base').
         ground_truth_name: Ground truth set used as the positive labels.
-        verbose: Print training progress.
 
     Returns:
         (X, model_fit): the feature matrix, indexed by ``<callset>_INFO_EVENT``,
@@ -260,7 +255,6 @@ def train(
         joint_bp_df,
         workflow_config,
         training_set,
-        verbose=verbose,
         matched_bps_sources=matched_bps_sources,
     )
 
@@ -316,7 +310,6 @@ def shap(
     use_gpu: bool = False,
     max_samples: int | None = None,
     top_n: int = 20,
-    verbose: bool = False,
 ) -> Path:
     """SHAP analysis of a trained model; see sv_shap.run_shap.
 
@@ -335,7 +328,6 @@ def shap(
         use_gpu=use_gpu,
         max_samples=max_samples,
         top_n=top_n,
-        verbose=verbose,
     )
 
 
@@ -541,7 +533,6 @@ def run(
     annotate_vcfs: bool = False,
     output_vcf: Path | None = None,
     command: str | None = None,
-    verbose: bool = False,
 ) -> dict[str, Path]:
     """Run every step for the samples in caller_vcfs; return the paths written to output_dir.
 
@@ -554,8 +545,8 @@ def run(
       ``{preprocess_raw, preprocess/<caller>, ground_truth, match, train}``.
     * ``workdir`` None -- scratch is a new private directory under ``$TMPDIR``
       (``tempfile.mkdtemp``), deleted after a successful run unless
-      *keep_workdir*. After a failure it is kept and its path printed to
-      stderr.
+      *keep_workdir*. After a failure it is kept and its path logged as a
+      warning.
 
     Each artifact is read back from its file before the next step, so the
     results equal running the stage subcommands one by one, as Nextflow does.
@@ -601,7 +592,6 @@ def run(
             before any other work.
         command: The invoking command line, recorded in the provenance record
             (the CLI passes it; API callers usually leave it None).
-        verbose: Print progress messages.
 
     Returns:
         ``calls_vcf``, ``calls_csv`` (with output_dir), plus for each saved artifact
@@ -676,9 +666,8 @@ def run(
         },
         model={"model_id": sv_config.model_id(resolved_model), "config": resolved_model},
     )
-    if verbose:
-        print(f"[run] scratch: {scratch}{' (tmpdir)' if owned else ''}")
-        print(f"[run] output_dir: {output_dir}  output_vcf: {output_vcf}")
+    logger.info("Scratch: %s%s", scratch, " (tmpdir)" if owned else "")
+    logger.info("Output dir: %s, output VCF: %s", output_dir, output_vcf)
     vcf_header_lines = [
         f"##svensemble_version={__version__}",
         f"##svensemble_model_id={record['model']['model_id']}",
@@ -697,7 +686,7 @@ def run(
             model_config=model_config, max_dist=max_dist,
             insert_delta_threshold=insert_delta_threshold, save=save,
             annotate_vcfs=annotate_vcfs, output_vcf=output_vcf,
-            vcf_header_lines=vcf_header_lines, verbose=verbose,
+            vcf_header_lines=vcf_header_lines,
         )
         return outputs
     except BaseException as e:
@@ -710,11 +699,11 @@ def run(
         try:
             _provenance.write(record, out if delete else [scratch] + out)
         except OSError as e:
-            print(f"[run] could not write provenance record: {e}", file=sys.stderr)
+            logger.warning("Could not write provenance record: %s", e)
         if delete:
             shutil.rmtree(scratch, ignore_errors=True)
         elif owned:
-            print(f"[run] scratch kept at {scratch}", file=sys.stderr)
+            logger.warning("Scratch kept at %s", scratch)
 
 
 def _run_in(
@@ -736,7 +725,6 @@ def _run_in(
     annotate_vcfs: bool,
     output_vcf: Path | None,
     vcf_header_lines: list[str],
-    verbose: bool,
 ) -> dict[str, Path]:
     """The body of run: every step, reading each artifact back from its file.
 
@@ -751,7 +739,7 @@ def _run_in(
     for caller, vcfs in caller_vcfs.items():
         vcf_df = pd.concat([sv_io.read_vcf(vcf, caller) for vcf in vcfs], ignore_index=True)
         raw_path = sv_io.write_bps(
-            preprocess_raw(vcf_df, caller, verbose=verbose),
+            preprocess_raw(vcf_df, caller),
             scratch / "preprocess_raw" / sv_io.RAW_BPS.format(caller=caller),
         )
         # One callset VCF per input file: event IDs are only consistent
@@ -777,8 +765,7 @@ def _run_in(
             else:
                 published.update({f"{caller}.vcf.{k}": p for k, p in enumerate(vcf_paths_written)})
         caller_bps[caller] = sv_io.read_bps(bps_path)
-        if verbose:
-            print(f"[run] {caller}: {len(caller_bps[caller])} breakpoints -> {bps_path}")
+        logger.info("%s: wrote %d breakpoints to %s", caller, len(caller_bps[caller]), bps_path)
 
     if ground_truth_vcf is not None:
         gt_path = preprocess_ground_truth(
@@ -786,7 +773,6 @@ def _run_in(
             output_dir=artifact_dir("ground_truth", "ground_truth"),
             ground_truth_name=ground_truth_name,
             overwrite=force_preprocess_ground_truth,
-            verbose=verbose,
         )
         if "ground_truth" in save:
             published["ground_truth"] = gt_path
@@ -796,7 +782,7 @@ def _run_in(
     matched_df, id_graph = match(
         caller_bps, sv_io.read_bps(gt_path), ground_truth_name=ground_truth_name,
         model=model, model_config=model_config, max_dist=max_dist,
-        insert_delta_threshold=insert_delta_threshold, verbose=verbose,
+        insert_delta_threshold=insert_delta_threshold,
     )
     matched_path = sv_io.write_bps(matched_df, artifact_dir("matched_bps", "match") / sv_io.MATCHED_BPS)
     id_graph_path = sv_io.write_id_graph(id_graph, artifact_dir("id_graph", "match") / sv_io.ID_GRAPH)
@@ -805,7 +791,7 @@ def _run_in(
 
     X, model_fit = train(
         matched_bps, list(caller_vcfs), model, training_set, model_config=model_config,
-        ground_truth_name=ground_truth_name, verbose=verbose,
+        ground_truth_name=ground_truth_name,
     )
     model_path = sv_io.write_model(model_fit, artifact_dir("model", "train") / sv_io.MODEL)
     fm_path = sv_io.write_feature_matrix(X, artifact_dir("feature_matrix", "train") / sv_io.FEATURE_MATRIX)
@@ -820,8 +806,7 @@ def _run_in(
     calls_csv, calls_vcf = sv_io.write_calls(
         calls, output_dir, None, vcf_header_lines, vcf_path=output_vcf, group_by="svensemble_id",
     )
-    if verbose:
-        print(f"[run] done. calls -> {calls_vcf}")
+    logger.info("Wrote calls to %s", calls_vcf)
 
     outputs = {"calls_vcf": calls_vcf, **published}
     if calls_csv is not None:

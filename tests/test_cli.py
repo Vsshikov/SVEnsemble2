@@ -1,6 +1,7 @@
 """Tests for svensemble.cli: argument parsing, build_workflow_config, --version."""
 
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -188,6 +189,48 @@ class TestModelIdSubcommand:
         sys.argv = ["svensemble", "model-id", "--model", "unbiased_xgb"]
         main()
         assert capsys.readouterr().out == "unbiased_xgb-855c4c13\n"
+
+
+class TestLogging:
+    """Logs reach stderr at the level -v sets; stdout carries only command data.
+
+    Runs the CLI in a subprocess so the real handler and format are exercised
+    (in-process, pytest's own capture handlers sit on the root logger).
+    """
+
+    @staticmethod
+    def _run(*args):
+        return subprocess.run(
+            [sys.executable, "-m", "svensemble", *args], capture_output=True, text=True,
+        )
+
+    def test_model_id_stdout_holds_only_the_id_at_debug(self):
+        # Nextflow captures this stdout with $(...)
+        res = self._run("model-id", "--model", "unbiased_xgb", "-vv")
+        assert res.returncode == 0, res.stderr
+        assert res.stdout == "unbiased_xgb-855c4c13\n"
+
+    @pytest.mark.parametrize("flags, shown, hidden", [
+        ([], [], ["INFO", "DEBUG"]),
+        (["-v"], ["INFO svensemble.cli: Wrote 5 raw breakpoints"], ["DEBUG"]),
+        (["-vv"], ["INFO svensemble.callset_specific:", "DEBUG svensemble.vcfparse:"], []),
+    ])
+    def test_verbosity_sets_what_reaches_stderr(self, tmp_path, flags, shown, hidden):
+        from .conftest import write_delly_vcf
+        vcf = tmp_path / "delly.vcf"
+        write_delly_vcf(vcf)
+        res = self._run("preprocess-raw", "--vcf", str(vcf), "--output_dir", str(tmp_path), *flags)
+        assert res.returncode == 0, res.stderr
+        assert res.stdout == ""
+        for text in shown:
+            assert text in res.stderr
+        for level in hidden:
+            assert f" {level} " not in res.stderr
+        if shown:
+            # ISO 8601 timestamp with UTC offset, then level and logger name
+            assert re.search(
+                r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4} (INFO|DEBUG) svensemble\.", res.stderr, re.M,
+            )
 
 
 class TestShapSubcommand:
@@ -426,7 +469,7 @@ class TestTrainSubcommandPooledValidation:
 
         def fake_train_model(
             joint_bp_df, workflow_config, training_set_name,
-            verbose=False, matched_bps_sources=None,
+            matched_bps_sources=None,
         ):
             captured["joint_bp_df"] = joint_bp_df
             captured["matched_bps_sources"] = matched_bps_sources
@@ -451,7 +494,7 @@ class TestTrainSubcommandPooledValidation:
 
         def fake_train_model(
             joint_bp_df, workflow_config, training_set_name,
-            verbose=False, matched_bps_sources=None,
+            matched_bps_sources=None,
         ):
             captured["joint_bp_df"] = joint_bp_df
             captured["matched_bps_sources"] = matched_bps_sources
@@ -476,7 +519,7 @@ class TestTrainSubcommandPooledValidation:
 
         def fake_train_model(
             joint_bp_df, workflow_config, training_set_name,
-            verbose=False, matched_bps_sources=None,
+            matched_bps_sources=None,
         ):
             captured["workflow_config"] = workflow_config
             return pd.DataFrame({"f": [1]}), None
@@ -505,7 +548,7 @@ class TestTrainingSetDefault:
 
         def fake_train_model(
             joint_bp_df, workflow_config, training_set_name,
-            verbose=False, matched_bps_sources=None,
+            matched_bps_sources=None,
         ):
             captured["training_set_name"] = training_set_name
             return pd.DataFrame({"f": [1]}), None

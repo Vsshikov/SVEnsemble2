@@ -1,9 +1,23 @@
 """Shared fixtures, DataFrame builders, and schema helpers for preprocessing tests."""
 
+import logging
+
 import pandas as pd
 import pytest
 
 from svensemble import _caller_params
+
+
+@pytest.fixture(autouse=True)
+def _reset_svensemble_logging():
+    """Undo the global logging state that an in-process cli.main() call sets.
+
+    main() sets the svensemble logger level from -v and routes warnings into
+    logging; without this reset both would carry over into later tests.
+    """
+    yield
+    logging.getLogger("svensemble").setLevel(logging.NOTSET)
+    logging.captureWarnings(False)
 
 # ---------------------------------------------------------------------------
 # Schema constants -- downstream contracts that preprocessed DataFrames must meet
